@@ -1,0 +1,235 @@
+openapi: 3.1.0
+info:
+  title: Network Inventory Planning API
+  version: 1.0.0
+  contact:
+    name: warehouse-systems
+    url: https://github.com/IQVO/network-inventory-planning
+  description: |
+    Advisory network inventory balancing for the warehouse-systems fleet.
+
+    Network Inventory Planning projects sibling-context facts (site capability,
+    site-SKU demand, published capacity) into local read models and proposes
+    inter-warehouse transfers. It never mutates physical stock: approval,
+    reservation and physical execution live in their owning contexts.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: health
+    description: Process probes.
+  - name: planning
+    description: Advisory planning and simulation.
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Liveness probe.
+      description: Returns 204 when the process is up. Carries no dependency state.
+      responses:
+        '204':
+          description: The service is up.
+  /v1/transfer-proposals:generate:
+    post:
+      operationId: generateTransferProposals
+      tags: [planning]
+      summary: Generate advisory transfer proposals from an explicit snapshot.
+      description: |
+        Deterministic, explainable proposal generation over a caller-provided
+        coherent planning snapshot. Validation failures return RFC 7807
+        problem+json. Diagnostic boundary: production planning consumes local
+        read models via the simulation endpoint instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '200':
+          description: Advisory proposals, score-ordered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /v1/transfer-simulations:
+    get:
+      operationId: simulateTransferOptions
+      tags: [planning]
+      summary: Simulate advisory transfer options from local read models.
+      description: |
+        Serves an advisory-only simulation built from the service's projected
+        network facts. Fail-closed: returns 503 problem+json when the read
+        models are unconfigured, incomplete or stale, rather than proposing
+        from partial state.
+      responses:
+        '200':
+          description: Advisory simulation from current local read models.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationResponse'
+        '503':
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: RFC 7807 problem+json error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          description: Stable machine-readable problem identifier.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+    SiteID:
+      type: string
+      minLength: 1
+      description: Facility-layout Site code identifying one warehouse.
+    SKU:
+      type: string
+      minLength: 1
+    Position:
+      type: object
+      required: [Site, SKU, Available, AsOf]
+      properties:
+        Site:
+          $ref: '#/components/schemas/SiteID'
+        SKU:
+          $ref: '#/components/schemas/SKU'
+        Available:
+          type: integer
+          minimum: 0
+        CustomerReservations:
+          type: integer
+          minimum: 0
+        ConfirmedInbound:
+          type: integer
+          minimum: 0
+        CommittedOutbound:
+          type: integer
+          minimum: 0
+        AsOf:
+          type: string
+          format: date-time
+    Policy:
+      type: object
+      required: [Version, Site, SKU]
+      properties:
+        Version:
+          type: string
+        Site:
+          $ref: '#/components/schemas/SiteID'
+        SKU:
+          $ref: '#/components/schemas/SKU'
+        SafetyStock:
+          type: integer
+          minimum: 0
+        TargetStock:
+          type: integer
+          minimum: 0
+        UnitPriority:
+          type: integer
+    Lane:
+      type: object
+      required: [Origin, Destination, Enabled]
+      properties:
+        Origin:
+          $ref: '#/components/schemas/SiteID'
+        Destination:
+          $ref: '#/components/schemas/SiteID'
+        LeadTime:
+          type: integer
+          description: Lead time in nanoseconds (Go time.Duration wire shape).
+        UnitHandlingCost:
+          type: integer
+        Enabled:
+          type: boolean
+    GenerateRequest:
+      type: object
+      required: [asOf, positions, policies, lanes]
+      properties:
+        asOf:
+          type: string
+          format: date-time
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Position'
+        policies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Policy'
+        lanes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Lane'
+    Proposal:
+      type: object
+      required: [Origin, Destination, SKU, Quantity, PolicyVersion, PositionAsOf, Reasons, ScoreBreakdown]
+      properties:
+        Origin:
+          $ref: '#/components/schemas/SiteID'
+        Destination:
+          $ref: '#/components/schemas/SiteID'
+        SKU:
+          $ref: '#/components/schemas/SKU'
+        Quantity:
+          type: integer
+          minimum: 1
+        PolicyVersion:
+          type: string
+        PositionAsOf:
+          type: string
+          format: date-time
+        Reasons:
+          type: array
+          items:
+            type: string
+            enum: [DESTINATION_BELOW_TARGET, ORIGIN_ABOVE_SAFETY_STOCK, APPROVED_LANE]
+        ScoreBreakdown:
+          type: object
+          required: [PriorityBenefit, HandlingPenalty, LeadTimePenalty]
+          properties:
+            PriorityBenefit:
+              type: integer
+            HandlingPenalty:
+              type: integer
+            LeadTimePenalty:
+              type: integer
+    GenerateResponse:
+      type: object
+      required: [proposals]
+      properties:
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Proposal'
+    SimulationResponse:
+      type: object
+      required: [asOf, options]
+      properties:
+        asOf:
+          type: string
+          format: date-time
+          description: Oldest watermark among the facts the simulation used.
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/Proposal'

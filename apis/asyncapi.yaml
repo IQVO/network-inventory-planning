@@ -2,6 +2,15 @@ asyncapi: 3.0.0
 info:
   title: network-inventory-planning events
   version: 1.0.0
+  contact:
+    name: warehouse-systems
+    url: https://github.com/IQVO/network-inventory-planning
+    email: warehouse-systems@warehouse-systems.internal
+  license:
+    name: MIT
+  tags:
+    - name: consumed-facts
+      description: Sibling-context facts projected into local read models.
   description: |
     Event contract of the network-inventory-planning bounded context.
 
@@ -79,16 +88,30 @@ operations:
     channel:
       $ref: '#/channels/warehouse.facility.events'
     summary: Keep the local site_capability read model current.
+    description: |
+      Consume facility-layout's SiteCapabilityChanged, dedupe on CloudEvents
+      id inside the read-model transaction, and upsert site_capability keyed
+      by site_id with last-writer-wins on capability_revision.
   receiveSiteSkuDemandChanged:
     action: receive
     channel:
       $ref: '#/channels/warehouse.order-management.events'
     summary: Keep the local site_sku_demand read model current.
+    description: |
+      Consume order-management's SiteSkuDemandChanged, dedupe on CloudEvents
+      id inside the read-model transaction, and upsert/tombstone
+      site_sku_demand keyed by source_order_id+line_no (ACTIVE/REMOVED).
   receiveCapacityPlanPublished:
     action: receive
     channel:
       $ref: '#/channels/warehouse.warehouse-planning.events'
     summary: Keep the local published_capacity_plan read model current.
+    description: |
+      Consume warehouse-planning's CapacityPlanPublished, dedupe on
+      CloudEvents id inside the read-model transaction, and upsert
+      published_capacity_plan keyed by plan_id with last-writer-wins on the
+      CloudEvents time. Legacy payloads without site_id are excluded, never
+      inferred.
 
 components:
   messages:
