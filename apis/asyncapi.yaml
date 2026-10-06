@@ -1,0 +1,246 @@
+asyncapi: 3.0.0
+info:
+  title: network-inventory-planning events
+  version: 1.0.0
+  description: |
+    Event contract of the network-inventory-planning bounded context.
+
+    **Phase 1 (this file) declares the three CONSUMED facts only** — nothing
+    is published yet (no outbox, no produced types; the planned
+    TransferProposed/TransferPlanApproved/OriginReservationRequested types
+    enter this contract atomically with the code that publishes them):
+
+    - `com.warehouse.wms.facility-layout.site.SiteCapabilityChanged`
+      (facility-layout, `warehouse.facility.events`) → local
+      `site_capability` read model (keyed site_id, LWW on
+      capability_revision).
+    - `com.warehouse.wes.order-management.siteskudemand.SiteSkuDemandChanged`
+      (order-management, `warehouse.order-management.events`) → local
+      `site_sku_demand` read model (keyed source_order_id+line_no, state
+      ACTIVE/REMOVED).
+    - `com.warehouse.wes.warehouse-planning.capacityplan.CapacityPlanPublished`
+      (warehouse-planning, `warehouse.warehouse-planning.events`) → local
+      `published_capacity_plan` read model (keyed plan_id, LWW on the
+      CloudEvents time). The payload is warehouse-planning's existing v1
+      payload plus the additive `site_id`; a legacy event WITHOUT `site_id`
+      is EXCLUDED (the site is never inferred from warehouse_id).
+
+    Consumers decode CloudEvents 1.0 structured mode only, dispatch on the
+    FULL `type`, ignore unknown types, dedupe on `id` in-transaction
+    (processed_events), and commit offsets only after the read-model
+    transaction commits. Consumer group ids are environment-configured
+    (SITE_CAPABILITY_CONSUMER_GROUP, SITE_SKU_DEMAND_CONSUMER_GROUP,
+    CAPACITY_PLAN_CONSUMER_GROUP); unset means the consumer does not exist.
+
+    The consumed payload schemas below are the producers' own contract
+    shapes mirrored read-only (each producer's apis/asyncapi.yaml on
+    origin/develop is authoritative).
+
+servers:
+  production:
+    host: kafka.warehouse-systems.internal:9092
+    protocol: kafka
+    description: Fleet-shared Kafka broker.
+
+defaultContentType: application/cloudevents+json
+
+channels:
+  warehouse.facility.events:
+    address: warehouse.facility.events
+    title: facility-layout integration topic
+    description: |
+      facility-layout's integration stream. network-inventory-planning
+      consumes only SiteCapabilityChanged and ignores every other type.
+    messages:
+      siteCapabilityChanged:
+        $ref: '#/components/messages/siteCapabilityChanged'
+  warehouse.order-management.events:
+    address: warehouse.order-management.events
+    title: order-management integration topic
+    description: |
+      order-management's integration stream. network-inventory-planning
+      consumes only SiteSkuDemandChanged and ignores every other type.
+    messages:
+      siteSkuDemandChanged:
+        $ref: '#/components/messages/siteSkuDemandChanged'
+  warehouse.warehouse-planning.events:
+    address: warehouse.warehouse-planning.events
+    title: warehouse-planning integration topic
+    description: |
+      warehouse-planning's integration stream. network-inventory-planning
+      consumes only CapacityPlanPublished and ignores every other type.
+    messages:
+      capacityPlanPublished:
+        $ref: '#/components/messages/capacityPlanPublished'
+
+operations:
+  receiveSiteCapabilityChanged:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.facility.events'
+    summary: Keep the local site_capability read model current.
+  receiveSiteSkuDemandChanged:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.order-management.events'
+    summary: Keep the local site_sku_demand read model current.
+  receiveCapacityPlanPublished:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.warehouse-planning.events'
+    summary: Keep the local published_capacity_plan read model current.
+
+components:
+  messages:
+    siteCapabilityChanged:
+      name: SiteCapabilityChanged
+      title: Site capability changed
+      summary: A site's transfer capability state changed (consumed).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/SiteCapabilityChangedEvent'
+    siteSkuDemandChanged:
+      name: SiteSkuDemandChanged
+      title: Site/SKU demand changed
+      summary: One source order line's site demand changed (consumed).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/SiteSkuDemandChangedEvent'
+    capacityPlanPublished:
+      name: CapacityPlanPublished
+      title: Capacity plan published
+      summary: A capacity plan was published (consumed).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CapacityPlanPublishedEvent'
+  schemas:
+    cloudEvent:
+      type: object
+      required: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
+      properties:
+        specversion:
+          const: "1.0"
+        id:
+          type: string
+          description: UUID; the consumer's dedupe key.
+        source:
+          type: string
+        type:
+          type: string
+        subject:
+          type: string
+        time:
+          type: string
+          format: date-time
+        datacontenttype:
+          const: application/json
+        dataschema:
+          type: string
+        data:
+          type: object
+    SiteCapabilityChangedEvent:
+      description: CloudEvents 1.0 envelope of facility-layout's SiteCapabilityChanged.
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wms.facility-layout.site.SiteCapabilityChanged
+            dataschema:
+              const: urn:warehouse:facility-layout:events:SiteCapabilityChanged:v1
+            data:
+              type: object
+              required: [site_code, transfer_origin_enabled, transfer_destination_enabled, capability_revision]
+              properties:
+                site_code:
+                  type: string
+                  description: The site identity; also the Kafka key and subject.
+                transfer_origin_enabled:
+                  type: boolean
+                transfer_destination_enabled:
+                  type: boolean
+                capability_revision:
+                  type: integer
+                  format: int64
+                  description: Monotonically increasing; LWW tiebreaker.
+    SiteSkuDemandChangedEvent:
+      description: CloudEvents 1.0 envelope of order-management's SiteSkuDemandChanged.
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.order-management.siteskudemand.SiteSkuDemandChanged
+            dataschema:
+              const: urn:warehouse:order-management:events:SiteSkuDemandChanged:v1
+            data:
+              type: object
+              required: [source_order_id, line_no, site_id, sku, demanded_units, due_at, state, assignment_version]
+              properties:
+                source_order_id:
+                  type: string
+                line_no:
+                  type: integer
+                site_id:
+                  type: string
+                sku:
+                  type: string
+                demanded_units:
+                  type: integer
+                due_at:
+                  type: string
+                  format: date-time
+                state:
+                  type: string
+                  enum: [ACTIVE, REMOVED]
+                assignment_version:
+                  type: string
+                  description: order-management's site-assignment policy version ("static-site-v1").
+    CapacityPlanPublishedEvent:
+      description: CloudEvents 1.0 envelope of warehouse-planning's CapacityPlanPublished (v1 payload + additive site_id).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.warehouse-planning.capacityplan.CapacityPlanPublished
+            dataschema:
+              const: urn:warehouse:warehouse-planning:events:CapacityPlanPublished:v1
+            data:
+              type: object
+              required: [plan_id, site_id, location, path_id, window_start, window_end, assigned_demand, path_capacity, capacity_over_window, shortage, bottleneck_step, published_at]
+              properties:
+                plan_id:
+                  type: string
+                site_id:
+                  type: string
+                  description: Additive Phase-1 field. A legacy event without it is EXCLUDED by this consumer, never defaulted or inferred.
+                location:
+                  type: string
+                path_id:
+                  type: string
+                window_start:
+                  type: string
+                  format: date-time
+                  description: Planning window start (RFC 3339, UTC). The window is [window_start, window_end).
+                window_end:
+                  type: string
+                  format: date-time
+                  description: Planning window end, EXCLUSIVE.
+                assigned_demand:
+                  type: number
+                  format: double
+                path_capacity:
+                  type: number
+                  format: double
+                capacity_over_window:
+                  type: number
+                  format: double
+                shortage:
+                  type: number
+                  format: double
+                bottleneck_step:
+                  type: string
+                published_at:
+                  type: string
+                  format: date-time
