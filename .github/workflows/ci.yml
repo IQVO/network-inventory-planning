@@ -316,6 +316,8 @@ jobs:
   docs-api-drift:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Skips until the repo carries a docs/ Docusaurus project.
+    if: hashFiles('docs/package.json') != ''
     defaults:
       run:
         working-directory: docs
@@ -341,7 +343,8 @@ jobs:
   helm-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name == 'pull_request'
+    # Skips until the repo carries a Helm chart.
+    if: github.event_name == 'pull_request' && hashFiles('charts/**') != ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -384,6 +387,8 @@ jobs:
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Skips until the repo carries an MFE remote under web/.
+    if: hashFiles('web/package.json') != ''
     defaults:
       run:
         working-directory: "network-inventory-planning/web"
@@ -410,7 +415,8 @@ jobs:
   trivy-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event_name == 'pull_request'
+    # Skips until the repo carries a Dockerfile to scan.
+    if: github.event_name == 'pull_request' && hashFiles('Dockerfile') != ''
     permissions:
       contents: read
       security-events: write
