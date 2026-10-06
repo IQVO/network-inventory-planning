@@ -17,6 +17,8 @@ type fakeReplyApplier struct {
 	mu          sync.Mutex
 	allocations []usecases.ApplyAllocationInput
 	rejections  []usecases.ApplyRejectionInput
+	staged      []usecases.ApplyReceiptStagedInput
+	stowed      []usecases.ApplyStowInput
 	failAlloc   int
 }
 
@@ -35,6 +37,20 @@ func (f *fakeReplyApplier) ApplyRejection(_ context.Context, in usecases.ApplyRe
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rejections = append(f.rejections, in)
+	return nil
+}
+
+func (f *fakeReplyApplier) ApplyReceiptStaged(_ context.Context, in usecases.ApplyReceiptStagedInput) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.staged = append(f.staged, in)
+	return nil
+}
+
+func (f *fakeReplyApplier) ApplyStowed(_ context.Context, in usecases.ApplyStowInput) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stowed = append(f.stowed, in)
 	return nil
 }
 
@@ -205,4 +221,106 @@ func (d *deterministicFailApplier) ApplyAllocation(_ context.Context, in usecase
 func (d *deterministicFailApplier) ApplyRejection(_ context.Context, in usecases.ApplyRejectionInput) error {
 	d.calls++
 	return transfer.ErrTransferNotFound
+}
+
+func (d *deterministicFailApplier) ApplyReceiptStaged(_ context.Context, in usecases.ApplyReceiptStagedInput) error {
+	d.calls++
+	return transfer.ErrTransferNotFound
+}
+
+func (d *deterministicFailApplier) ApplyStowed(_ context.Context, in usecases.ApplyStowInput) error {
+	d.calls++
+	return transfer.ErrTransferNotFound
+}
+
+func TestTransferReplyConsumerAppliesReceiptStagedAndStowed(t *testing.T) {
+	applier := &fakeReplyApplier{}
+	c := newReplyConsumer(applier, newFakeClaims())
+
+	stagedValue := encodeEvent(t, typeTransferReceiptStaged, "trf-x:1", replyOccurred, transferReceiptStagedData{
+		TransferID:        "trf-x",
+		TransferLineID:    "trf-x:1",
+		DestinationSiteID: "WH2",
+		SKU:               "SKU-1",
+		ExpectedQuantity:  5,
+		ReceivedQuantity:  5,
+		Variance:          0,
+	})
+	if err := c.HandleMessage(context.Background(), stagedValue); err != nil {
+		t.Fatalf("receipt staged: %v", err)
+	}
+	if len(applier.staged) != 1 {
+		t.Fatalf("staged = %d", len(applier.staged))
+	}
+	if applier.staged[0].TransferID != transfer.TransferID("trf-x") || applier.staged[0].LineID != "trf-x:1" {
+		t.Fatalf("applied staged = %+v", applier.staged[0])
+	}
+
+	stowedAt := replyOccurred.Add(time.Second) // distinct CE id from the staged fact (encodeEvent keys on subject+time)
+	stowedValue := encodeEvent(t, typeTransferStockStowed, "trf-x:1", stowedAt, transferStockStowedData{
+		TransferID:        "trf-x",
+		TransferLineID:    "trf-x:1",
+		DestinationSiteID: "WH2",
+		SKU:               "SKU-1",
+		ReceivedQuantity:  5,
+		StowedQuantity:    5,
+		Allocations: []struct {
+			StockUnitID string `json:"stock_unit_id"`
+			BinID       string `json:"bin_id"`
+			Quantity    int    `json:"quantity"`
+		}{{StockUnitID: "su-1", BinID: "BIN-DEST", Quantity: 5}},
+	})
+	if err := c.HandleMessage(context.Background(), stowedValue); err != nil {
+		t.Fatalf("stowed: %v", err)
+	}
+	if len(applier.stowed) != 1 {
+		t.Fatalf("stowed = %d", len(applier.stowed))
+	}
+	got := applier.stowed[0]
+	if got.TransferID != transfer.TransferID("trf-x") || got.Stowed.StowedQuantity != 5 {
+		t.Fatalf("applied stowed = %+v", got)
+	}
+	if len(got.Stowed.Allocations) != 1 || got.Stowed.Allocations[0].BinID != "BIN-DEST" {
+		t.Fatalf("stow allocations = %+v", got.Stowed.Allocations)
+	}
+
+	// Redeliveries are no-ops (dedupe claim on the CE id).
+	if err := c.HandleMessage(context.Background(), stagedValue); err != nil {
+		t.Fatalf("staged redelivery: %v", err)
+	}
+	if err := c.HandleMessage(context.Background(), stowedValue); err != nil {
+		t.Fatalf("stowed redelivery: %v", err)
+	}
+	if len(applier.staged) != 1 || len(applier.stowed) != 1 {
+		t.Fatalf("after redeliveries: staged = %d stowed = %d", len(applier.staged), len(applier.stowed))
+	}
+}
+
+func TestTransferReplyConsumerSkipsFactsForUnknownTransfers(t *testing.T) {
+	// A destination fact naming a transfer this deployment never approved
+	// is WARN-logged and committed past, never retried.
+	applier := &deterministicFailApplier{}
+	claims := newFakeClaims()
+	c := newReplyConsumer(applier, claims)
+
+	unknownStaged := encodeEvent(t, typeTransferReceiptStaged, "trf-ghost:1", replyOccurred, transferReceiptStagedData{
+		TransferID: "trf-ghost", TransferLineID: "trf-ghost:1",
+	})
+	unknownStowed := encodeEvent(t, typeTransferStockStowed, "trf-ghost:1", replyOccurred.Add(time.Second), transferStockStowedData{
+		TransferID: "trf-ghost", TransferLineID: "trf-ghost:1",
+	})
+	if err := c.HandleMessage(context.Background(), unknownStaged); err != nil {
+		t.Fatalf("unknown staged must be skipped, got %v", err)
+	}
+	if err := c.HandleMessage(context.Background(), unknownStowed); err != nil {
+		t.Fatalf("unknown stowed must be skipped, got %v", err)
+	}
+	if applier.calls != 2 {
+		t.Fatalf("calls = %d, want 2", applier.calls)
+	}
+	// Malformed payloads skip too.
+	bad := encodeEvent(t, typeTransferStockStowed, "trf-x:1", replyOccurred, map[string]string{"nonsense": "x"})
+	if err := c.HandleMessage(context.Background(), bad); err != nil {
+		t.Fatalf("malformed stowed payload must be skipped: %v", err)
+	}
 }

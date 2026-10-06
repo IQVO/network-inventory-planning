@@ -125,10 +125,13 @@ on.
   two published types and the two consumed replies; inventory-storage's
   consumer already expects the exact command shape (five data fields,
   transfer_line_id key).
-- The saga deliberately stops at ALLOCATED. Release-to-WES (generic
-  transfer work demand), pick/dispatch/arrival facts and destination
-  receipt/stow correlation remain future phases; a CANCELLED-after-
-  allocation path needs an explicit reservation revocation command.
+- The saga deliberately stops at ALLOCATED **at Phase 2**.
+  Release-to-WES (work demand), pick/dispatch/arrival facts and
+  destination receipt/stow correlation are Phase 3 — ADR-0005 implements
+  them (the fact-driven tail PICKED → IN_TRANSIT → ARRIVED → RECEIVED
+  plus the WorkDemandReleased pick/dispatch legs). A CANCELLED-after-
+  allocation path still needs an explicit reservation revocation
+  command.
 - Approval capacity is bounded by the relay's drain rate, not the
   request path; an operator can observe stuck deliveries directly in
   `outbox_events` (attempts/last_error).
