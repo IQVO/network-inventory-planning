@@ -15,9 +15,11 @@ import (
 
 	httpadapter "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http"
 	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
+	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
 	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Environment of the Phase-1 read-model side. Each consumer group has NO
@@ -30,6 +32,8 @@ const (
 	envCapabilityGroup = "SITE_CAPABILITY_CONSUMER_GROUP"
 	envDemandGroup     = "SITE_SKU_DEMAND_CONSUMER_GROUP"
 	envCapacityGroup   = "CAPACITY_PLAN_CONSUMER_GROUP"
+	envTransferGroup   = "TRANSFER_REPLY_CONSUMER_GROUP"
+	envOutboxRelay     = "OUTBOX_RELAY_ENABLED"
 	envMaxStaleness    = "PLANNING_MAX_STALENESS"
 )
 
@@ -139,41 +143,102 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	}
 	closers = append(closers, func() error { pool.Close(); return nil })
 
+	maxStaleness, err := maxStalenessFromEnv()
+	if err != nil {
+		return handler, nil, closeAll, err
+	}
+
+	wired, err := wireSagas(logger, pool, maxStaleness)
+	if err != nil {
+		return handler, nil, closeAll, err
+	}
+	handler.Simulate = wired.simulate
+	handler.Approve = wired.approve
+	runners = append(runners, wired.runners...)
+	closers = append(closers, wired.closers...)
+
+	return handler, runners, closeAll, nil
+}
+
+// maxStalenessFromEnv resolves PLANNING_MAX_STALENESS (default 10m).
+func maxStalenessFromEnv() (time.Duration, error) {
+	if raw := os.Getenv(envMaxStaleness); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			return 0, fmt.Errorf("%s must be a positive duration, got %q", envMaxStaleness, raw)
+		}
+		return parsed, nil
+	}
+	return defaultMaxStaleness, nil
+}
+
+// sagaWiring is what wireSagas assembles: the two read/approve use cases
+// plus the runner/closer funcs of the consumers and the outbox relay.
+type sagaWiring struct {
+	simulate *usecases.SimulateTransferOptions
+	approve  *usecases.ApproveTransfer
+	runners  []func() error
+	closers  []func() error
+}
+
+// wireSagas wires the Phase-1 simulation, the Phase-2 approval saga, the
+// transactional outbox relay and every inbound consumer over the pool.
+func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Duration) (sagaWiring, error) {
+	var out sagaWiring
+
 	uow := postgres.NewUnitOfWork(pool)
 	processedEvents := postgres.NewProcessedEventRepo(pool)
-	capabilities := postgres.NewSiteCapabilityRepo(pool)
-	demands := postgres.NewSiteSkuDemandRepo(pool)
-	plans := postgres.NewPublishedCapacityPlanRepo(pool)
 	snapshots := postgres.NewSnapshotRepo(pool)
+	transfers := postgres.NewTransferRepo(pool)
 
-	maxStaleness := defaultMaxStaleness
-	if raw := os.Getenv(envMaxStaleness); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil || parsed <= 0 {
-			return handler, nil, closeAll, fmt.Errorf("%s must be a positive duration, got %q", envMaxStaleness, raw)
-		}
-		maxStaleness = parsed
-	}
-	handler.Simulate = &usecases.SimulateTransferOptions{
+	out.simulate = &usecases.SimulateTransferOptions{
 		Snapshot:     snapshots,
 		MaxStaleness: maxStaleness,
 		Now:          time.Now,
 	}
 
+	// Transactional outbox: the approval writes TransferPlanApproved +
+	// TransferAllocationRequested rows in its own transaction; the relay
+	// drains them onto warehouse.network-inventory-planning.events.
+	outboxPublisher, relayRunner := wireOutbox(logger, pool)
+	if relayRunner != nil {
+		out.runners = append(out.runners, relayRunner)
+	}
+
+	// The approval endpoint requires the outbox: without it the saga would
+	// persist state and never emit the allocation command. Unconfigured
+	// means the endpoint answers 503 (fail-closed), exactly like Simulate.
+	if outboxPublisher != nil {
+		out.approve = &usecases.ApproveTransfer{
+			Transfers:    transfers,
+			Events:       outboxPublisher,
+			Snapshot:     snapshots,
+			UoW:          uow,
+			MaxStaleness: maxStaleness,
+			Now:          time.Now,
+		}
+	} else {
+		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers:approve answers 503 (the saga cannot emit its allocation command without the outbox)")
+	}
+
+	replyAllocate := &usecases.ApplyTransferAllocation{Transfers: transfers, UoW: uow}
+	replyReject := &usecases.ApplyTransferRejection{Transfers: transfers, UoW: uow}
+	replyApplier := inboundkafka.ReplyUseCases{Allocate: *replyAllocate, Reject: *replyReject}
+
 	consumerRunners, consumerClosers, err := startConsumers(logger, consumerDeps{
 		uow:             uow,
 		processedEvents: processedEvents,
-		capabilities:    capabilities,
-		demands:         demands,
-		plans:           plans,
+		capabilities:    postgres.NewSiteCapabilityRepo(pool),
+		demands:         postgres.NewSiteSkuDemandRepo(pool),
+		plans:           postgres.NewPublishedCapacityPlanRepo(pool),
+		replyApplier:    replyApplier,
 	})
 	if err != nil {
-		return handler, nil, closeAll, err
+		return out, err
 	}
-	runners = append(runners, consumerRunners...)
-	closers = append(closers, consumerClosers...)
-
-	return handler, runners, closeAll, nil
+	out.runners = append(out.runners, consumerRunners...)
+	out.closers = append(out.closers, consumerClosers...)
+	return out, nil
 }
 
 // consumerDeps carries the wired ports startConsumers needs.
@@ -183,6 +248,46 @@ type consumerDeps struct {
 	capabilities    ports.SiteCapabilityRepository
 	demands         ports.SiteSkuDemandRepository
 	plans           ports.PublishedCapacityPlanRepository
+	replyApplier    inboundkafka.TransferReplyApplier
+}
+
+// wireOutbox builds the transactional-outbox publisher and, when
+// OUTBOX_RELAY_ENABLED is set with brokers configured, the background
+// relay runner draining outbox_events onto Kafka. Without brokers the
+// publisher is nil (the approval endpoint then stays 503) and any rows
+// written would wait for a later relay — the saga's durability never
+// depends on the broker being up at approval time.
+func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPublisher, func() error) {
+	brokers := brokersFromEnv()
+	if brokers == nil {
+		logger.Warn("KAFKA_BROKERS not configured; outbox disabled (POST /v1/transfers:approve answers 503)",
+			"enable_with", strings.Join([]string{envKafkaBrokers, envOutboxRelay}, ","))
+		return nil, nil
+	}
+	encoder := outboundkafka.NewTransferEncoder()
+	publisher := postgres.NewOutboxWriter(pool, encoder)
+	if os.Getenv(envOutboxRelay) == "" {
+		return publisher, nil
+	}
+	sink := outboundkafka.NewRelaySink(brokers)
+	relay := postgres.NewOutboxRelay(pool, sink)
+	relayCtx, relayStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	runner := func() error {
+		defer relayStop()
+		defer func() { _ = sink.Close() }()
+		logger.Info("outbox relay running", "topic", outboundkafka.TransferTopic, "brokers", brokers)
+		return relay.Run(relayCtx)
+	}
+	return publisher, runner
+}
+
+// brokersFromEnv returns the configured brokers or nil when unset.
+func brokersFromEnv() []string {
+	raw := os.Getenv(envKafkaBrokers)
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, ",")
 }
 
 // consumer is the run/close shape every inbound consumer satisfies.
@@ -223,6 +328,9 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 	})
 	spawn("capacity-plan", os.Getenv(envCapacityGroup), func() consumer {
 		return inboundkafka.NewCapacityPlanConsumer(brokers, os.Getenv(envCapacityGroup), d.plans, d.processedEvents, d.uow, logger)
+	})
+	spawn("transfer-reply", os.Getenv(envTransferGroup), func() consumer {
+		return inboundkafka.NewTransferReplyConsumer(brokers, os.Getenv(envTransferGroup), d.replyApplier, d.processedEvents, d.uow, logger)
 	})
 	return runners, closers, nil
 }

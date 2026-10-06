@@ -20,6 +20,8 @@ tags:
     description: Process probes.
   - name: planning
     description: Advisory planning and simulation.
+  - name: transfers
+    description: Inter-warehouse transfer saga (approval and lifecycle).
 paths:
   /healthz:
     get:
@@ -74,6 +76,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulationResponse'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/transfers:approve:
+    post:
+      operationId: approveTransfer
+      tags: [transfers]
+      summary: Approve a transfer proposal and start the allocation saga.
+      description: |
+        Takes a proposal snapshot (origin, destination, SKU, quantity, policy
+        version) and validates it against the CURRENT fail-closed read
+        models. On success the InterWarehouseTransfer saga persists through
+        PROPOSED → APPROVED → ALLOCATING and, in the same transaction,
+        enqueue TransferPlanApproved and TransferAllocationRequested into the
+        transactional outbox; a relay publishes them to Kafka and
+        inventory-storage's reply later drives the transfer to ALLOCATED or
+        UNFULFILLABLE. Idempotent per the required Idempotency-Key header:
+        replaying the same key with the same payload returns the ORIGINAL
+        transfer (replayed: true); the same key with a different payload is a
+        409. Fail-closed validation failures (missing/stale/disabled facts)
+        return 422; unusable read models return 503.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Transfer-level idempotency key; a fresh key per logical approval.
+            Replaying a key replays the FIRST transfer it created.
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveTransferRequest'
+      responses:
+        '200':
+          description: |
+            The persisted saga state (200, not 201: a replay of the same
+            idempotency key returns the original transfer).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproveTransferResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
 components:
@@ -233,3 +286,70 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Proposal'
+    ApproveTransferRequest:
+      type: object
+      required: [originSiteId, destinationSiteId, sku, quantity, policyVersion, proposalAsOf]
+      properties:
+        originSiteId:
+          $ref: '#/components/schemas/SiteID'
+        destinationSiteId:
+          $ref: '#/components/schemas/SiteID'
+        sku:
+          $ref: '#/components/schemas/SKU'
+        quantity:
+          type: integer
+          minimum: 1
+        policyVersion:
+          type: string
+          minLength: 1
+          description: The policy version the advisory proposal was scored under.
+        operatorReason:
+          type: string
+          description: The operator's captured approval reason (audit trail).
+        proposalAsOf:
+          type: string
+          format: date-time
+          description: The advisory proposal snapshot's as-of watermark.
+    ApproveTransferResponse:
+      type: object
+      required: [transferId, state, originSiteId, destinationSiteId, sku, quantity, policyVersion, replayed, expiresAt, transferLineId]
+      properties:
+        transferId:
+          type: string
+          description: The saga aggregate id.
+        state:
+          type: string
+          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, UNFULFILLABLE, CANCELLED]
+          description: |
+            The persisted saga state at response time — ALLOCATING
+            immediately after a fresh approval (awaiting inventory-storage's
+            reply).
+        originSiteId:
+          $ref: '#/components/schemas/SiteID'
+        destinationSiteId:
+          $ref: '#/components/schemas/SiteID'
+        sku:
+          $ref: '#/components/schemas/SKU'
+        quantity:
+          type: integer
+        policyVersion:
+          type: string
+        reservationId:
+          type: string
+          description: inventory-storage's reservation id, present once ALLOCATED.
+        rejectionReason:
+          type: string
+          enum: [ORIGIN_SITE_UNKNOWN, INSUFFICIENT_USABLE, IDEMPOTENCY_CONFLICT]
+          description: The closed rejection reason, present once UNFULFILLABLE.
+        replayed:
+          type: boolean
+          description: True when the idempotency key already existed (the original transfer is returned).
+        expiresAt:
+          type: string
+          format: date-time
+          description: The approval's expiry deadline (24h in v1).
+        transferLineId:
+          type: string
+          description: |
+            The v1 single transfer line id, "<transferId>:1" — the
+            inventory-storage allocation ledger key and the reply subject.
