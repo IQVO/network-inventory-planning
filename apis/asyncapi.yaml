@@ -11,13 +11,15 @@ info:
   tags:
     - name: consumed-facts
       description: Sibling-context facts projected into local read models.
+    - name: consumed-replies
+      description: inventory-storage's transfer-allocation replies driving the saga.
+    - name: published
+      description: This context's published transfer saga events and commands.
   description: |
     Event contract of the network-inventory-planning bounded context.
 
-    **Phase 1 (this file) declares the three CONSUMED facts only** — nothing
-    is published yet (no outbox, no produced types; the planned
-    TransferProposed/TransferPlanApproved/OriginReservationRequested types
-    enter this contract atomically with the code that publishes them):
+    **Phase 1** declares the three CONSUMED facts (projected into local
+    read models):
 
     - `com.warehouse.wms.facility-layout.site.SiteCapabilityChanged`
       (facility-layout, `warehouse.facility.events`) → local
@@ -34,12 +36,36 @@ info:
       payload plus the additive `site_id`; a legacy event WITHOUT `site_id`
       is EXCLUDED (the site is never inferred from warehouse_id).
 
+    **Phase 2 (ADR 0003, the transfer saga)** adds the PUBLISHED stream on
+    `warehouse.network-inventory-planning.events` — emitted through the
+    transactional outbox in the same transaction as the saga state change —
+    and the two CONSUMED inventory-storage replies on
+    `warehouse.inventory.events`:
+
+    - `com.warehouse.wes.network-inventory-planning.transfer.TransferPlanApproved`
+      (published, subject/key transfer_id): an operator approved an
+      advisory proposal into a transfer plan.
+    - `com.warehouse.wes.network-inventory-planning.transfer.TransferAllocationRequested`
+      (published COMMAND, subject/key `transfer_line_id` = `<transfer_id>:1`
+      for the v1 single-line saga): inventory-storage allocates origin
+      stock against `transfer_line_id` and replies on
+      `warehouse.inventory.events`.
+    - `com.warehouse.wms.inventory-storage.reservation.TransferStockAllocated`
+      (consumed reply, subject/key reservation_id): the saga moves
+      ALLOCATING → ALLOCATED, persisting reservation_id, allocations[] and
+      expires_at.
+    - `com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationRejected`
+      (consumed reply, subject/key transfer_line_id): the saga moves
+      ALLOCATING → UNFULFILLABLE with the closed reason
+      ORIGIN_SITE_UNKNOWN|INSUFFICIENT_USABLE|IDEMPOTENCY_CONFLICT.
+
     Consumers decode CloudEvents 1.0 structured mode only, dispatch on the
     FULL `type`, ignore unknown types, dedupe on `id` in-transaction
     (processed_events), and commit offsets only after the read-model
     transaction commits. Consumer group ids are environment-configured
     (SITE_CAPABILITY_CONSUMER_GROUP, SITE_SKU_DEMAND_CONSUMER_GROUP,
-    CAPACITY_PLAN_CONSUMER_GROUP); unset means the consumer does not exist.
+    CAPACITY_PLAN_CONSUMER_GROUP, TRANSFER_REPLY_CONSUMER_GROUP); unset
+    means the consumer does not exist.
 
     The consumed payload schemas below are the producers' own contract
     shapes mirrored read-only (each producer's apis/asyncapi.yaml on
@@ -81,6 +107,31 @@ channels:
     messages:
       capacityPlanPublished:
         $ref: '#/components/messages/capacityPlanPublished'
+  warehouse.network-inventory-planning.events:
+    address: warehouse.network-inventory-planning.events
+    title: network-inventory-planning integration topic
+    description: |
+      This context's OWN integration stream (Phase 2). Everything on it is
+      emitted through the transactional outbox: the saga state change and
+      the outbox row commit in one transaction, and a background relay
+      publishes afterwards — a request handler never sends directly.
+    messages:
+      transferPlanApproved:
+        $ref: '#/components/messages/transferPlanApproved'
+      transferAllocationRequested:
+        $ref: '#/components/messages/transferAllocationRequested'
+  warehouse.inventory.events:
+    address: warehouse.inventory.events
+    title: inventory-storage integration topic
+    description: |
+      inventory-storage's integration stream. network-inventory-planning
+      consumes only the two transfer-allocation replies and ignores every
+      other type.
+    messages:
+      transferStockAllocated:
+        $ref: '#/components/messages/transferStockAllocated'
+      transferStockAllocationRejected:
+        $ref: '#/components/messages/transferStockAllocationRejected'
 
 operations:
   receiveSiteCapabilityChanged:
@@ -112,6 +163,50 @@ operations:
       published_capacity_plan keyed by plan_id with last-writer-wins on the
       CloudEvents time. Legacy payloads without site_id are excluded, never
       inferred.
+  sendTransferPlanApproved:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.events'
+    summary: Announce an operator-approved transfer plan.
+    description: |
+      Published through the transactional outbox in the same transaction
+      that persists the saga's APPROVED transition (POST
+      /v1/transfers:approve). Subject and Kafka key are the transfer id.
+  sendTransferAllocationRequested:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.events'
+    summary: Command inventory-storage to allocate origin stock.
+    description: |
+      The saga's COMMAND event, published right after TransferPlanApproved
+      through the same outbox transaction (the APPROVED → ALLOCATING
+      transition). Subject and Kafka key are the transfer_line_id
+      ("<transfer_id>:1" in v1's single-line saga) — inventory-storage's
+      transfer_allocations ledger key, so its reply and any replay
+      correlate on exactly it.
+  receiveTransferStockAllocated:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.inventory.events'
+    summary: Drive the saga ALLOCATING → ALLOCATED.
+    description: |
+      inventory-storage's success reply. The consumer dedupes on the
+      CloudEvents id, validates the reply against the transfer (line,
+      origin, SKU, quantity sum, reservation completeness) and, in ONE
+      transaction with the processed-event claim, persists state ALLOCATED
+      with reservation_id, allocations[] and expires_at. Consumer group
+      TRANSFER_REPLY_CONSUMER_GROUP (env-configured).
+  receiveTransferStockAllocationRejected:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.inventory.events'
+    summary: Drive the saga ALLOCATING → UNFULFILLABLE.
+    description: |
+      inventory-storage's rejection reply with one of the closed reasons
+      ORIGIN_SITE_UNKNOWN|INSUFFICIENT_USABLE|IDEMPOTENCY_CONFLICT. The
+      consumer applies it in ONE transaction with the processed-event
+      claim; an unknown reason is a deterministic skip. Consumer group
+      TRANSFER_REPLY_CONSUMER_GROUP (env-configured).
 
 components:
   messages:
@@ -136,6 +231,34 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/CapacityPlanPublishedEvent'
+    transferPlanApproved:
+      name: TransferPlanApproved
+      title: Transfer plan approved
+      summary: An operator approved an advisory proposal into a transfer plan (published).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferPlanApprovedEvent'
+    transferAllocationRequested:
+      name: TransferAllocationRequested
+      title: Transfer allocation requested
+      summary: Command inventory-storage to allocate origin stock for a transfer line (published).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferAllocationRequestedEvent'
+    transferStockAllocated:
+      name: TransferStockAllocated
+      title: Transfer stock allocated
+      summary: inventory-storage allocated origin stock for a transfer line (consumed reply).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferStockAllocatedEvent'
+    transferStockAllocationRejected:
+      name: TransferStockAllocationRejected
+      title: Transfer stock allocation rejected
+      summary: inventory-storage refused a transfer-line allocation (consumed reply).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferStockAllocationRejectedEvent'
   schemas:
     cloudEvent:
       type: object
@@ -267,3 +390,145 @@ components:
                 published_at:
                   type: string
                   format: date-time
+    TransferPlanApprovedEvent:
+      description: CloudEvents 1.0 envelope of this context's TransferPlanApproved (published via the transactional outbox).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.network-inventory-planning.transfer.TransferPlanApproved
+            dataschema:
+              const: urn:warehouse:network-inventory-planning:events:TransferPlanApproved:v1
+            data:
+              type: object
+              required: [transfer_id, origin_site_id, destination_site_id, sku, quantity, policy_version, proposal_as_of]
+              properties:
+                transfer_id:
+                  type: string
+                  description: The saga aggregate id; also the Kafka key and subject.
+                origin_site_id:
+                  type: string
+                destination_site_id:
+                  type: string
+                sku:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                policy_version:
+                  type: string
+                operator_reason:
+                  type: string
+                  description: The operator's captured approval reason (may be empty).
+                proposal_as_of:
+                  type: string
+                  format: date-time
+                  description: The advisory proposal snapshot's as-of watermark (RFC 3339, UTC).
+    TransferAllocationRequestedEvent:
+      description: |
+        CloudEvents 1.0 envelope of this context's TransferAllocationRequested
+        COMMAND (published via the transactional outbox). The data payload is
+        EXACTLY inventory-storage's consumed contract — five fields, no more.
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.network-inventory-planning.transfer.TransferAllocationRequested
+            dataschema:
+              const: urn:warehouse:network-inventory-planning:events:TransferAllocationRequested:v1
+            data:
+              type: object
+              required: [transfer_id, transfer_line_id, origin_site_id, sku, quantity]
+              properties:
+                transfer_id:
+                  type: string
+                transfer_line_id:
+                  type: string
+                  description: |
+                    "<transfer_id>:1" in v1's single-line saga; also the Kafka
+                    key and subject, and inventory-storage's allocation-ledger
+                    and reply-correlation key.
+                origin_site_id:
+                  type: string
+                sku:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+    TransferStockAllocatedEvent:
+      description: CloudEvents 1.0 envelope of inventory-storage's TransferStockAllocated reply (consumed).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wms.inventory-storage.reservation.TransferStockAllocated
+            dataschema:
+              const: urn:warehouse:inventory-storage:events:TransferStockAllocated:v1
+            data:
+              type: object
+              required: [transfer_id, transfer_line_id, origin_site_id, reservation_id, sku, quantity, allocations, expires_at]
+              properties:
+                transfer_id:
+                  type: string
+                transfer_line_id:
+                  type: string
+                origin_site_id:
+                  type: string
+                reservation_id:
+                  type: string
+                  description: Also the Kafka key and subject of the reply.
+                sku:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                allocations:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [stock_unit_id, bin_id, quantity]
+                    properties:
+                      stock_unit_id:
+                        type: string
+                      bin_id:
+                        type: string
+                      quantity:
+                        type: integer
+                        minimum: 1
+                expires_at:
+                  type: string
+                  format: date-time
+                  description: The origin reservation's expiry.
+    TransferStockAllocationRejectedEvent:
+      description: CloudEvents 1.0 envelope of inventory-storage's TransferStockAllocationRejected reply (consumed).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationRejected
+            dataschema:
+              const: urn:warehouse:inventory-storage:events:TransferStockAllocationRejected:v1
+            data:
+              type: object
+              required: [transfer_id, transfer_line_id, origin_site_id, sku, requested_quantity, reason]
+              properties:
+                transfer_id:
+                  type: string
+                transfer_line_id:
+                  type: string
+                  description: Also the Kafka key and subject of the reply.
+                origin_site_id:
+                  type: string
+                sku:
+                  type: string
+                requested_quantity:
+                  type: integer
+                  minimum: 1
+                reason:
+                  type: string
+                  enum: [ORIGIN_SITE_UNKNOWN, INSUFFICIENT_USABLE, IDEMPOTENCY_CONFLICT]

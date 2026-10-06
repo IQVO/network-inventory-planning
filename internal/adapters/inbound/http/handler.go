@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -18,6 +19,10 @@ type Handler struct {
 	// service run without DATABASE_URL/consumers has no read models, and
 	// the endpoint then answers 503 rather than fabricating a snapshot.
 	Simulate *usecases.SimulateTransferOptions
+	// Approve is the Phase-2 saga approval path (nil-able with the same
+	// meaning as Simulate: unconfigured means 503, never a fabricated
+	// approval).
+	Approve *usecases.ApproveTransfer
 }
 
 // Routes creates the HTTP surface for this service.
@@ -26,6 +31,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", h.health)
 	mux.HandleFunc("POST /v1/transfer-proposals:generate", h.generate)
 	mux.HandleFunc("GET /v1/transfer-simulations", h.simulate)
+	mux.HandleFunc("POST /v1/transfers:approve", h.approve)
 	return mux
 }
 
@@ -117,4 +123,112 @@ func writeProblem(w http.ResponseWriter, status int, kind, title, detail string)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(problem{Type: "https://warehouse.example/problems/" + kind, Title: title, Status: status, Detail: detail})
+}
+
+// approveRequest is the wire shape of POST /v1/transfers:approve: a
+// proposal snapshot plus operator context. The Idempotency-Key HEADER is
+// mandatory (fleet idempotency rule) and is the transfer-level idempotency
+// key.
+type approveRequest struct {
+	OriginSiteID      string    `json:"originSiteId"`
+	DestinationSiteID string    `json:"destinationSiteId"`
+	SKU               string    `json:"sku"`
+	Quantity          int       `json:"quantity"`
+	PolicyVersion     string    `json:"policyVersion"`
+	OperatorReason    string    `json:"operatorReason"`
+	ProposalAsOf      time.Time `json:"proposalAsOf"`
+}
+
+// approveTransferDTO is the response view of the persisted saga state.
+type approveTransferDTO struct {
+	TransferID        string    `json:"transferId"`
+	State             string    `json:"state"`
+	OriginSiteID      string    `json:"originSiteId"`
+	DestinationSiteID string    `json:"destinationSiteId"`
+	SKU               string    `json:"sku"`
+	Quantity          int       `json:"quantity"`
+	PolicyVersion     string    `json:"policyVersion"`
+	ReservationID     string    `json:"reservationId,omitempty"`
+	RejectionReason   string    `json:"rejectionReason,omitempty"`
+	Replayed          bool      `json:"replayed"`
+	ExpiresAt         time.Time `json:"expiresAt"`
+	TransferLineID    string    `json:"transferLineId"`
+}
+
+// approve serves POST /v1/transfers:approve: the Phase-2 saga approval.
+// Fail-closed read models refuse with 422/503; a replayed Idempotency-Key
+// with the same payload answers 200 with replayed: true; a DIFFERENT
+// payload under a reused key is a 409 problem.
+func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
+	if h.Approve == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "saga-unavailable",
+			"Transfer saga is not configured", "this instance runs without the read models and persistence the approval requires")
+		return
+	}
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	if idempotencyKey == "" {
+		writeProblem(w, http.StatusBadRequest, "idempotency-key-required",
+			"Idempotency-Key header is required", "the approval endpoint is idempotency-keyed; send a fresh key per logical approval")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+	var request approveRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
+		return
+	}
+
+	result, err := h.Approve.Execute(r.Context(), usecases.ApproveTransferInput{
+		IdempotencyKey:    idempotencyKey,
+		OriginSiteID:      request.OriginSiteID,
+		DestinationSiteID: request.DestinationSiteID,
+		SKU:               request.SKU,
+		Quantity:          request.Quantity,
+		PolicyVersion:     request.PolicyVersion,
+		OperatorReason:    request.OperatorReason,
+		ProposalAsOf:      request.ProposalAsOf,
+	})
+	if err != nil {
+		writeApproveProblem(w, err)
+		return
+	}
+	dto := approveTransferDTO{
+		TransferID:        string(result.TransferID),
+		State:             string(result.Transfer.State()),
+		OriginSiteID:      result.Transfer.OriginSiteID(),
+		DestinationSiteID: result.Transfer.DestinationSiteID(),
+		SKU:               result.Transfer.SKU(),
+		Quantity:          result.Transfer.Quantity(),
+		PolicyVersion:     result.Transfer.PolicyVersion(),
+		ReservationID:     result.Transfer.ReservationID(),
+		RejectionReason:   string(result.Transfer.RejectionReason()),
+		Replayed:          result.Replayed,
+		ExpiresAt:         result.Transfer.ExpiresAt(),
+		TransferLineID:    result.TransferID.LineID(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(dto)
+}
+
+// writeApproveProblem maps use-case errors onto RFC 7807 statuses.
+func writeApproveProblem(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, usecases.ErrIdempotencyConflict):
+		writeProblem(w, http.StatusConflict, "idempotency-conflict",
+			"Idempotency key reused with a different request", err.Error())
+	case errors.Is(err, usecases.ErrInvalidApproval):
+		writeProblem(w, http.StatusUnprocessableEntity, "invalid-approval",
+			"Invalid approval request", err.Error())
+	case errors.Is(err, transfer.ErrFactsIncomplete):
+		writeProblem(w, http.StatusUnprocessableEntity, "facts-incomplete",
+			"Planning facts are incomplete or stale for approval", err.Error())
+	case errors.Is(err, transfer.ErrProposalExpired):
+		writeProblem(w, http.StatusUnprocessableEntity, "proposal-expired",
+			"The proposal snapshot has expired", err.Error())
+	default:
+		writeProblem(w, http.StatusServiceUnavailable, "approval-unavailable",
+			"Approval could not be completed", err.Error())
+	}
 }
