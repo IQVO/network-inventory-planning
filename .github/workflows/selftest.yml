@@ -1,0 +1,45 @@
+name: Template self-test
+
+# The template's own gate. ci.yml.template is the file a NEW service copies (it contains
+# {{PLACEHOLDERS}} and cannot run here), so this workflow is what keeps the template itself green:
+# the hook logic, the harness scripts, the managed Go fitness tests and the migration tool.
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Hook tests (block/feedback rules, all three runtimes share this logic)
+        run: python3 scripts/harness/test_hook.py
+      - name: Config sensors (repo_lint) tests
+        run: python3 scripts/harness/test_repo_lint.py
+      - name: Python scripts compile
+        run: python3 -m py_compile scripts/harness/*.py scripts/*.py tools/*.py
+      - name: Managed Go fitness tests build and pass
+        run: |
+          go vet ./internal/architecture/
+          go test ./internal/architecture/
+      - name: Migration tool is idempotent on a fresh Go repo
+        run: |
+          set -euo pipefail
+          t="$(mktemp -d)"
+          git -C "$t" init -q
+          printf 'module example.com/svc\n\ngo 1.27\n' > "$t/go.mod"
+          mkdir -p "$t/internal/domain" "$t/.github/workflows"
+          printf '# svc\n' > "$t/CLAUDE.md"
+          printf 'name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n' > "$t/.github/workflows/ci.yml"
+          python3 tools/migrate_v3.py --repo "$t" --template "$PWD"
+          python3 tools/migrate_v3.py --repo "$t" --template "$PWD" --dry-run | tee "$t/second.log"
+          test -f "$t/scripts/harness/hook.py" && test -f "$t/.claude/settings.json"

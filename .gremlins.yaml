@@ -1,0 +1,31 @@
+# .gremlins.yaml — mutation-testing configuration template (warehouse-harness-template v2).
+#
+# gremlins (github.com/go-gremlins/gremlins, pinned to v0.6.0 in CI) reads
+# this file automatically from the Go module root, so the `mutation-fast`
+# CI job, the scheduled exhaustive `mutation` CI job, the `drift` job's
+# coverage-quality check, and the local `make mutation` / `make
+# mutation-full` targets all run with identical settings.
+#
+# Mutation testing is the sensor that tells us whether the tests actually
+# ASSERT rather than merely execute. The thresholds below turn it into a
+# blocking quality gate instead of a report.
+silent: false
+
+unleash:
+  # A single worker with a generous timeout coefficient avoids spurious
+  # TIMED OUT results on modules where mutants finish in tens of
+  # milliseconds but parallel workers contend over the build cache.
+  workers: 1
+  timeout-coefficient: 30
+
+  threshold:
+    # gremlins fails when the measured value is <= the threshold
+    # (internal/report/report.go in gremlins itself), so a threshold must
+    # sit strictly BELOW the number this repo can meet today. Measure
+    # first (`make mutation-full`), THEN set these -- don't guess/copy a
+    # sibling repo's numbers, every domain layer's mutant survivability
+    # differs. See HARNESS.md's mutation-testing section for the
+    # tagless-switch-under-reports pitfall before assuming a low number
+    # means missing tests.
+    efficacy: "{{MEASURED_EFFICACY_MINUS_1}}"
+    mutant-coverage: "{{MEASURED_MUTANT_COVERAGE_MINUS_1}}"
