@@ -1,0 +1,8 @@
+extends: ["spectral:asyncapi"]
+rules:
+  asyncapi-info-description: error
+  asyncapi-operation-operationId: error
+  asyncapi-operation-description: error
+  asyncapi-servers: error
+  asyncapi-tags: error
+  asyncapi-message-examples: error
