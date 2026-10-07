@@ -218,6 +218,9 @@ func writeApproveProblem(w http.ResponseWriter, err error) {
 	case errors.Is(err, usecases.ErrIdempotencyConflict):
 		writeProblem(w, http.StatusConflict, "idempotency-conflict",
 			"Idempotency key reused with a different request", err.Error())
+	case errors.Is(err, usecases.ErrWorkReleaseNotConfigured):
+		writeProblem(w, http.StatusServiceUnavailable, "config-incomplete",
+			"Work release is not configured", "set TRANSFER_PICK_PATH_ID and TRANSFER_PICK_CPT_OFFSET so an approved transfer's pick demand can be released (ADR 0005); approval is refused while unset")
 	case errors.Is(err, usecases.ErrInvalidApproval):
 		writeProblem(w, http.StatusUnprocessableEntity, "invalid-approval",
 			"Invalid approval request", err.Error())

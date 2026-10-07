@@ -319,11 +319,13 @@ components:
           description: The saga aggregate id.
         state:
           type: string
-          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, UNFULFILLABLE, CANCELLED]
+          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
           description: |
             The persisted saga state at response time — ALLOCATING
             immediately after a fresh approval (awaiting inventory-storage's
-            reply).
+            reply). PICKED/IN_TRANSIT/ARRIVED/RECEIVED are driven later by
+            fulfillment-execution's transfer facts and inventory-storage's
+            destination facts (ADR 0005); RECEIVED is terminal.
         originSiteId:
           $ref: '#/components/schemas/SiteID'
         destinationSiteId:

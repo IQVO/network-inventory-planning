@@ -115,7 +115,13 @@ func httpApproveHandler(transfers *httpFakeTransfers, events *httpFakeEvents, fa
 			Snapshot:     httpFakeSnapshot{facts: facts},
 			UoW:          httpFakeUoW{},
 			MaxStaleness: 10 * time.Minute,
-			Now:          func() time.Time { return httpApproveNow },
+			Release: usecases.WorkReleaseConfig{
+				PickPathID:        "transfer-pick-path",
+				PickCPTOffset:     2 * time.Hour,
+				DispatchPathID:    "transfer-dispatch-path",
+				DispatchCPTOffset: 3 * time.Hour,
+			},
+			Now: func() time.Time { return httpApproveNow },
 		},
 	}
 }
