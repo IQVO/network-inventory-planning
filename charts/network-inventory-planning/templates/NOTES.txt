@@ -1,0 +1,32 @@
+{{ .Chart.Name }} has been deployed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Service:   {{ include "network-inventory-planning.fullname" . }} ({{ .Values.service.type }}, port {{ .Values.service.port }})
+
+To reach it locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "network-inventory-planning.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/healthz
+
+{{- if not (or .Values.database.url .Values.database.existingSecret) }}
+
+NOTE: no database.url / database.existingSecret was set — the pod runs as the
+zero-config diagnostic service (no read models, simulation answers 503).
+{{- end }}
+
+{{- if not .Values.kafka.enabled }}
+NOTE: kafka.enabled is false — no read-model ingestion consumers, no outbox
+relay (POST /v1/transfers:approve answers 503; the saga cannot emit its
+allocation command without Kafka).
+{{- else }}
+Consumers run ONLY for the group ids you set (each empty group id is its own
+off switch): site-capability, site-sku-demand, capacity-plan,
+transfer-reply, transfer-fact.
+{{- end }}
+
+{{- if not .Values.config.transferPickPathId }}
+NOTE: TRANSFER_PICK_PATH_ID is unset — the pick leg's release path is
+unconfigured, so POST /v1/transfers:approve answers 503 config-incomplete
+(fail-closed, ADR 0005).
+{{- end }}
