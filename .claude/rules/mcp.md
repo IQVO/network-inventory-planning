@@ -9,7 +9,7 @@ paths:
 One MCP server for this bounded context, an additive inbound adapter (the
 fleet's "MCP servers are additive inbound adapters" decision; short rule in
 `.claude/rules/fleet/no-auth-and-mcp.md`; this repo's record is
-`docs/docs/adr/0007-transfer-read-side-and-read-only-mcp.md`) over the SAME use
+`docs/docs/adr/0008-transfer-read-side-and-read-only-mcp.md`) over the SAME use
 cases the REST adapter calls.
 
 - Code: `internal/adapters/inbound/mcp/` (tools, error mapping) and the
