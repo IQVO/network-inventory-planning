@@ -160,10 +160,18 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	}
 	handler.Simulate = wired.simulate
 	handler.Approve = wired.approve
+	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)
 	runners = append(runners, wired.runners...)
 	closers = append(closers, wired.closers...)
 
 	return handler, runners, closeAll, nil
+}
+
+// wireTransferReadSide builds the read-only transfer use cases over the
+// Postgres query port: GET /v1/transfers and GET /v1/transfers/{id}.
+func wireTransferReadSide(pool *pgxpool.Pool) (*usecases.GetTransfer, *usecases.ListTransfers) {
+	query := postgres.NewTransferQueryRepo(pool)
+	return &usecases.GetTransfer{Query: query}, &usecases.ListTransfers{Query: query}
 }
 
 // migrationsURL returns the DSN the golang-migrate step uses:

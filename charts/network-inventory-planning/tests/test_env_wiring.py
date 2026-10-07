@@ -64,23 +64,94 @@ def render(extra_args: list[str]) -> list[dict]:
     return [d for d in yaml.safe_load_all(out) if d]
 
 
-def deployment_env(docs: list[dict]) -> tuple[dict[str, str], set[str]]:
-    """Return ({name: plain value}, {names wired via valueFrom})."""
+def component_env(docs: list[dict], component: str) -> tuple[dict[str, str], set[str]]:
+    """Return ({name: plain value}, {names wired via valueFrom}) of the first
+    container of the Deployment carrying app.kubernetes.io/component=<component>."""
     for d in docs:
-        if d.get("kind") == "Deployment":
-            containers = d["spec"]["template"]["spec"]["containers"]
-            plain = {
-                e["name"]: e.get("value", "")
-                for e in containers[0]["env"]
-                if "value" in e
-            }
-            from_ref = {
-                e["name"]
-                for e in containers[0]["env"]
-                if "valueFrom" in e
-            }
-            return plain, from_ref
+        if d.get("kind") != "Deployment":
+            continue
+        if d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component") != component:
+            continue
+        containers = d["spec"]["template"]["spec"]["containers"]
+        plain = {
+            e["name"]: e.get("value", "")
+            for e in containers[0]["env"]
+            if "value" in e
+        }
+        from_ref = {
+            e["name"]
+            for e in containers[0]["env"]
+            if "valueFrom" in e
+        }
+        return plain, from_ref
     return {}, set()
+
+
+def deployment_env(docs: list[dict]) -> tuple[dict[str, str], set[str]]:
+    """The api Deployment's env (the MCP Deployment, when enabled, is separate)."""
+    return component_env(docs, "api")
+
+
+# Env cmd/mcp reads (cmd/mcp/main.go) and that the chart must wire.
+MCP_EXPECTED_ENV = {
+    "MCP_ADDR",
+    "MIGRATIONS_PATH",
+    "LOG_LEVEL",
+    "PLANNING_MAX_STALENESS",
+    "DATABASE_URL",
+    "MIGRATIONS_DATABASE_URL",
+}
+
+# Env the MCP binary must NEVER be given: it dials no Kafka, runs no relay and
+# no consumer, and has no auth.
+MCP_FORBIDDEN_ENV = {
+    "KAFKA_BROKERS",
+    "OUTBOX_RELAY_ENABLED",
+    "SITE_CAPABILITY_CONSUMER_GROUP",
+    "SITE_SKU_DEMAND_CONSUMER_GROUP",
+    "CAPACITY_PLAN_CONSUMER_GROUP",
+    "TRANSFER_REPLY_CONSUMER_GROUP",
+    "TRANSFER_FACT_CONSUMER_GROUP",
+    "HTTP_ADDR",
+    "MCP_API_KEY",
+    "API_KEY",
+}
+
+
+def check_mcp(failures: list[str]) -> None:
+    docs = render(ENABLE_EVERYTHING + ["--set", "mcp.enabled=true"])
+    plain, from_ref = component_env(docs, "mcp")
+    if not plain and not from_ref:
+        failures.append("mcp.enabled=true rendered no MCP Deployment")
+        return
+    missing = MCP_EXPECTED_ENV - set(plain) - from_ref
+    if missing:
+        failures.append(f"MCP env vars missing with everything enabled: {sorted(missing)}")
+    for dsn in ("DATABASE_URL", "MIGRATIONS_DATABASE_URL"):
+        if dsn in plain or dsn not in from_ref:
+            failures.append(f"MCP {dsn} must be wired via secretKeyRef, not a plain value")
+    if plain.get("MCP_ADDR") != ":8090":
+        failures.append(f"MCP_ADDR = {plain.get('MCP_ADDR')!r}, want ':8090'")
+    forbidden = sorted((set(plain) | from_ref) & MCP_FORBIDDEN_ENV)
+    if forbidden:
+        failures.append(f"MCP Deployment must not carry {forbidden} (no Kafka, relay, consumers or auth)")
+    # The api Deployment is untouched by enabling the MCP.
+    api_plain, api_from_ref = deployment_env(docs)
+    if "MCP_ADDR" in api_plain or "MCP_ADDR" in api_from_ref:
+        failures.append("the api Deployment must not carry MCP_ADDR")
+
+    # MCP is opt-in: the default render has no MCP Deployment/Service.
+    default_kinds = {
+        (d["kind"], d["metadata"]["name"]) for d in render(["--set", "database.existingSecret=x"])
+    }
+    if any(name.endswith("-mcp") for _, name in default_kinds):
+        failures.append("MCP resources rendered with default values; mcp.enabled must default to false")
+
+    # Without a database source the MCP still renders (tools answer
+    # read-side-unavailable) but never wires DATABASE_URL.
+    bare_plain, bare_from_ref = component_env(render(["--set", "mcp.enabled=true"]), "mcp")
+    if "DATABASE_URL" in bare_plain or "DATABASE_URL" in bare_from_ref:
+        failures.append("MCP rendered DATABASE_URL without a database source")
 
 
 def main() -> int:
@@ -126,13 +197,16 @@ def main() -> int:
     if default_kinds & {"HTTPRoute", "Ingress"}:
         failures.append("routing resources rendered with default values; they must be opt-in")
 
+    check_mcp(failures)
+
     if failures:
         for f in failures:
             print(f"FAIL: {f}")
         return 1
 
-    print(f"PASS: all {len(EXPECTED_ENV)} env vars wire correctly; "
-          "defaults leak no kafka/database/release config")
+    print(f"PASS: all {len(EXPECTED_ENV)} api env vars wire correctly; "
+          "defaults leak no kafka/database/release config; "
+          f"mcp wires {len(MCP_EXPECTED_ENV)} env vars, none of them kafka/relay/auth, and is off by default")
     return 0
 
 
