@@ -167,6 +167,44 @@ mcp:
       cpu: 100m
       memory: 128Mi
 
+# --- console remote (ADR 0010) -----------------------------------------------
+# An OPTIONAL nginx pod that serves the nip_mfe Module Federation remote (web/)
+# as static bytes. DISABLED by default and entirely absent from the rendered
+# manifest. ClusterIP only and with NO Ingress/HTTPRoute here: the Nginx web
+# gateway in warehouse-infra is the single host-exposed frontend endpoint and
+# routes /mfes/network-inventory-planning/ to this Service; Kong serves APIs
+# only. The image is built from web/Dockerfile and is side-loaded in kind
+# (never pulled), so keep pullPolicy IfNotPresent.
+frontend:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: warehouse/network-inventory-planning-frontend
+    pullPolicy: IfNotPresent
+    # Empty = the chart's appVersion. warehouse-infra overrides it with a
+    # content-derived local-<hash> tag.
+    tag: ""
+  service:
+    port: 80
+    targetPort: 8080
+  # nginx-unprivileged runs as uid/gid 101.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
 livenessProbe:
   httpGet:
     path: /healthz

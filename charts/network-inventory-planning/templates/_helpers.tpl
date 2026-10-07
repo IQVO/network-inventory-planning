@@ -76,3 +76,11 @@ Fully qualified name of the MCP server deployment/service.
 {{- define "network-inventory-planning.mcpFullname" -}}
 {{- include "network-inventory-planning.fullname" . }}-mcp
 {{- end }}
+
+{{/*
+Fully qualified name of the console-remote frontend deployment/service
+(the nginx pod that serves nip_mfe, ADR 0010).
+*/}}
+{{- define "network-inventory-planning.frontendFullname" -}}
+{{- include "network-inventory-planning.fullname" . }}-frontend
+{{- end }}

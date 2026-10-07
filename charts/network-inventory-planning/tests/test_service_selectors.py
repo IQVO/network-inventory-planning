@@ -10,7 +10,10 @@ and its pod labels, and every Service selects on it, so each Service selects
 EXACTLY ONE Deployment. This test fails if that ever stops being true.
 
 It mirrors warehouse-planning's charts/.../tests/test_service_selectors.py,
-trimmed to the components this chart has (api, mcp).
+trimmed to the components this chart has (api, mcp, and the optional
+frontend: the nginx pod that serves the nip_mfe console remote, ADR 0010 --
+its own workload, component=frontend, a ClusterIP Service, never routed by
+this chart).
 
 Run: python3 charts/network-inventory-planning/tests/test_service_selectors.py
 Needs: helm, PyYAML.
@@ -29,6 +32,7 @@ FULLNAME = "nip-network-inventory-planning"
 BASE = ["--set", "database.existingSecret=nip-database"]
 ENABLE_EVERYTHING = BASE + [
     "--set", "mcp.enabled=true",
+    "--set", "frontend.enabled=true",
     "--set", "autoscaling.enabled=true",
     "--set", "gatewayApi.enabled=true",
     "--set", "gatewayApi.parentRefs[0].name=gw",
@@ -81,6 +85,41 @@ def main() -> int:
         failures.append("the MCP Service selector must pin component=mcp")
     if mcp_name not in deployments:
         failures.append("the MCP Deployment was not rendered with mcp.enabled=true")
+
+    # The optional frontend: its own Deployment + ClusterIP Service pinned to
+    # component=frontend, serving the static nip_mfe remote on 8080.
+    frontend_name = f"{FULLNAME}-frontend"
+    if frontend_name not in services:
+        failures.append("the frontend Service was not rendered with frontend.enabled=true")
+    else:
+        fe_svc = services[frontend_name]
+        if selector_of(fe_svc).get("app.kubernetes.io/component") != "frontend":
+            failures.append("the frontend Service selector must pin component=frontend")
+        if fe_svc["spec"].get("type") != "ClusterIP":
+            failures.append("the frontend Service must be ClusterIP")
+    fe = deployments.get(frontend_name)
+    if fe is None:
+        failures.append("the frontend Deployment was not rendered with frontend.enabled=true")
+    else:
+        if (fe["spec"]["selector"].get("matchLabels") or {}).get("app.kubernetes.io/component") != "frontend" \
+                or pod_labels_of(fe).get("app.kubernetes.io/component") != "frontend":
+            failures.append("the frontend Deployment must carry component=frontend in selector.matchLabels and its pod labels")
+        fe_pod = fe["spec"]["template"]["spec"]
+        if fe_pod["containers"][0].get("command"):
+            failures.append("the frontend container must run the image's own nginx entrypoint, not an api/mcp command")
+        if not fe_pod["securityContext"].get("runAsNonRoot"):
+            failures.append("the frontend pod must run as non-root (nginx-unprivileged)")
+    # The api and MCP Services never select the frontend pod (and vice versa).
+    for svc_name, comp in ((FULLNAME, "api"), (mcp_name, "mcp")):
+        if svc_name in services and fe is not None and matches(selector_of(services[svc_name]), pod_labels_of(fe)):
+            failures.append(f"Service {svc_name} (component={comp}) must not select the frontend pod")
+
+    # Frontend routing belongs to warehouse-infra's Nginx web gateway: this
+    # chart renders no Ingress/HTTPRoute for it, and the api routes point at
+    # the api Service only (checked below).
+    for d in docs:
+        if d.get("kind") in {"Ingress", "HTTPRoute"} and "frontend" in d["metadata"]["name"]:
+            failures.append(f"{d['kind']} {d['metadata']['name']}: frontend routing must not live in this chart")
 
     # The api Deployment pins component=api in BOTH selector.matchLabels and pod labels.
     api = deployments.get(FULLNAME)
@@ -143,16 +182,16 @@ def main() -> int:
                 f"Service {svc_name} selects {len(hit)} Deployments {sorted(hit)}; expected exactly 1"
             )
 
-    # Default values must not deploy the MCP component at all, and the
-    # lone api Service still selects exactly the api Deployment.
+    # Default values must not deploy the MCP or frontend components at all,
+    # and the lone api Service still selects exactly the api Deployment.
     default_docs = render(BASE)
     stray = [
         d["metadata"]["name"]
         for d in default_docs
-        if d.get("metadata", {}).get("name", "").endswith("-mcp")
+        if d.get("metadata", {}).get("name", "").endswith(("-mcp", "-frontend"))
     ]
     if stray:
-        failures.append(f"the MCP component rendered with default values: {stray}")
+        failures.append(f"optional components rendered with default values: {stray}")
     default_deployments = {d["metadata"]["name"]: d for d in default_docs if d.get("kind") == "Deployment"}
     for d in default_docs:
         if d.get("kind") == "Service":
@@ -166,7 +205,7 @@ def main() -> int:
         return 1
 
     print(f"PASS: {len(services)} Services each select exactly one Deployment; "
-          "api pins component=api, mcp pins component=mcp and is off by default")
+          "api pins component=api, mcp and frontend pin their own component, are ClusterIP and are off by default")
     return 0
 
 

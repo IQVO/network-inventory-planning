@@ -69,6 +69,10 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `mcp.migrationsPath` | `migrations` | `MIGRATIONS_PATH` inside the image |
 | `mcp.logLevel` | `info` | `LOG_LEVEL` |
 | `mcp.resources` / `mcp.replicaCount` / `mcp.extraEnv` | 100m/128Mi req, 500m/256Mi lim / `1` / `[]` | MCP container sizing and extra env |
+| `frontend.enabled` | `false` | Renders the console-remote nginx pod (`nip_mfe`, ADR 0010): its own Deployment + ClusterIP Service, `component=frontend`. No Ingress/HTTPRoute |
+| `frontend.image.repository` / `frontend.image.tag` | `warehouse/network-inventory-planning-frontend` / chart appVersion | Image built from `web/Dockerfile` (side-loaded in kind, never pulled) |
+| `frontend.service.port` / `frontend.service.targetPort` | `80` / `8080` | Frontend Service (nginx-unprivileged listens on 8080) |
+| `frontend.replicaCount` / `frontend.resources` | `1` / 100m/128Mi req, 500m/256Mi lim | Frontend sizing |
 | Liveness / readiness / startup probes | `/healthz` | startup: 2s×30; readiness flips with the drain |
 
 ### MCP server (opt-in, read-only)
@@ -82,6 +86,15 @@ dials Kafka. Tools (all read-only): `get_transfer`, `list_transfers`,
 `find_stuck_transfers`, `simulate_transfer_options`. There is no auth: the
 ClusterIP boundary is the access control (fleet decision, 2026-09-11). See
 `docs/docs/adr/0007-transfer-read-side-and-read-only-mcp.md`.
+
+### Console remote (opt-in, static)
+
+`frontend.enabled=true` adds an nginx pod serving the `nip_mfe` Module
+Federation remote from `web/` (ADR 0010), `component=frontend`, with a
+ClusterIP Service. The chart never routes it: warehouse-infra's Nginx web
+gateway serves `/mfes/network-inventory-planning/` from this Service, and Kong
+serves the API only. The remote calls this service's own REST API through
+`${apiOrigin}/api/network-inventory-planning`.
 
 ### Consumer groups are per-consumer off switches
 
