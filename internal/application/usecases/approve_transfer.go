@@ -148,7 +148,11 @@ func (u ApproveTransfer) Execute(ctx context.Context, in ApproveTransferInput) (
 			}
 			return nil
 		}
-		if err := u.Events.Publish(ctx, approved, command); err != nil {
+		// TransferStateAdvanced for the creation transitions (drafted,
+		// proposed, approved, allocation-requested), same transaction
+		// (ADR 0007). A version of 0 covers the full trail. Published in
+		// ONE call with the two integration events.
+		if err := u.Events.Publish(ctx, approvalEvents(trf, approved, command)...); err != nil {
 			return err
 		}
 		result = ApproveTransferResult{Transfer: trf, TransferID: trf.ID(), AllocationCommand: command}

@@ -244,3 +244,43 @@ func loadAudit(ctx context.Context, q querier, id transfer.TransferID) ([]transf
 	}
 	return audit, nil
 }
+
+// ListNonTerminal implements ports.StuckTransferReader (ADR 0007): the
+// narrow projection the saga-health check loop reads — transfer id,
+// state, updated_at — for every transfer still in a state the saga can
+// leave, oldest-updated FIRST (the most-stuck first; the check's bound
+// then drops the freshest, not the stuck-est). Never a rehydrated
+// aggregate: the loop is observe-only and must not pay the audit-trail
+// cost of Load.
+func (r *TransferRepo) ListNonTerminal(ctx context.Context, limit int) ([]transfer.StuckView, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	q := queryFor(ctx, r.pool)
+	rows, err := q.Query(ctx, `
+		SELECT transfer_id, state, updated_at
+		FROM inter_warehouse_transfer
+		WHERE state IN ('DRAFT','PROPOSED','APPROVED','ALLOCATING','ALLOCATED',
+		                'PICKED','IN_TRANSIT','ARRIVED')
+		ORDER BY updated_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list non-terminal transfers: %w", err)
+	}
+	defer rows.Close()
+	views := []transfer.StuckView{}
+	for rows.Next() {
+		var v transfer.StuckView
+		var state string
+		if err := rows.Scan(&v.ID, &state, &v.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("list non-terminal transfers: %w", err)
+		}
+		v.State = transfer.TransferState(state)
+		views = append(views, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list non-terminal transfers: %w", err)
+	}
+	return views, nil
+}

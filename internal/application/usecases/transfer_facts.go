@@ -123,10 +123,16 @@ func (u ApplyTransferAllocation) Execute(ctx context.Context, in ApplyAllocation
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkAllocated(in.Allocation, in.OccurredAt); err != nil {
 			return err
 		}
 		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		// TransferStateAdvanced for the ALLOCATING→ALLOCATED transition,
+		// same transaction (ADR 0007).
+		if err := publishStateAdvanced(ctx, u.Events, trf, loadedVersion); err != nil {
 			return err
 		}
 		releaseAt := in.OccurredAt
@@ -163,10 +169,16 @@ func (u ApplyTransferPick) Execute(ctx context.Context, in ApplyPickInput) error
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkPicked(in.Picked, in.OccurredAt); err != nil {
 			return err
 		}
 		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		// TransferStateAdvanced for the ALLOCATED→PICKED transition,
+		// same transaction (ADR 0007).
+		if err := publishStateAdvanced(ctx, u.Events, trf, loadedVersion); err != nil {
 			return err
 		}
 		if err := u.Release.ValidateDispatch(); err != nil {
@@ -187,6 +199,9 @@ func (u ApplyTransferPick) Execute(ctx context.Context, in ApplyPickInput) error
 type ApplyTransferDispatched struct {
 	Transfers ports.TransferRepository
 	UoW       ports.UnitOfWork
+	// events publishes the TransferStateAdvanced analytics occurrences
+	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
+	events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -196,10 +211,14 @@ func (u ApplyTransferDispatched) Execute(ctx context.Context, in FactInput) erro
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkDispatched(in.OccurredAt); err != nil {
 			return err
 		}
-		return u.Transfers.UpdateState(ctx, trf)
+		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
 	})
 	return ierr
 }
@@ -219,6 +238,9 @@ type FactInput struct {
 type ApplyTransferArrival struct {
 	Transfers ports.TransferRepository
 	UoW       ports.UnitOfWork
+	// events publishes the TransferStateAdvanced analytics occurrences
+	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
+	events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -228,10 +250,14 @@ func (u ApplyTransferArrival) Execute(ctx context.Context, in FactInput) error {
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkArrived("TransferArrived", in.OccurredAt); err != nil {
 			return err
 		}
-		return u.Transfers.UpdateState(ctx, trf)
+		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
 	})
 	return ierr
 }
@@ -250,6 +276,9 @@ type ApplyReceiptStagedInput struct {
 type ApplyTransferReceiptStaged struct {
 	Transfers ports.TransferRepository
 	UoW       ports.UnitOfWork
+	// events publishes the TransferStateAdvanced analytics occurrences
+	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
+	events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -259,10 +288,14 @@ func (u ApplyTransferReceiptStaged) Execute(ctx context.Context, in ApplyReceipt
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkArrived("TransferReceiptStaged", in.OccurredAt); err != nil {
 			return err
 		}
-		return u.Transfers.UpdateState(ctx, trf)
+		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
 	})
 	return ierr
 }
@@ -280,6 +313,9 @@ type ApplyStowInput struct {
 type ApplyTransferStow struct {
 	Transfers ports.TransferRepository
 	UoW       ports.UnitOfWork
+	// events publishes the TransferStateAdvanced analytics occurrences
+	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
+	events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -289,10 +325,14 @@ func (u ApplyTransferStow) Execute(ctx context.Context, in ApplyStowInput) error
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkStowed(in.Stowed, in.OccurredAt); err != nil {
 			return err
 		}
-		return u.Transfers.UpdateState(ctx, trf)
+		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
 	})
 	return ierr
 }

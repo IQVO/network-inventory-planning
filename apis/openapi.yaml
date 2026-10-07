@@ -22,6 +22,8 @@ tags:
     description: Advisory planning and simulation.
   - name: transfers
     description: Inter-warehouse transfer saga (approval and lifecycle).
+  - name: rebalance
+    description: Scheduled (observe-only) rebalance run history (ADR 0007).
 paths:
   /healthz:
     get:
@@ -126,6 +128,39 @@ paths:
         '409':
           $ref: '#/components/responses/Problem'
         '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/rebalance-runs:
+    get:
+      operationId: listRebalanceRuns
+      tags: [rebalance]
+      summary: List scheduled rebalance runs, newest first.
+      description: |
+        The observe-only scheduled-rebalance run history (ADR 0007): one
+        row per NIP_REBALANCE_SCHEDULE tick, recording the snapshot
+        watermark the pass planned from, the proposal/rejected counts,
+        and the outcome — a fail-closed snapshot refusal is a FAILED run
+        carrying its reason, never a hidden error. Runs never approve
+        anything and never emit an allocation command.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to [1, 200]; default 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: The run history, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebalanceRunsResponse'
+        '400':
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
@@ -355,3 +390,35 @@ components:
           description: |
             The v1 single transfer line id, "<transferId>:1" — the
             inventory-storage allocation ledger key and the reply subject.
+    RebalanceRun:
+      type: object
+      required: [id, startedAt, proposalCount, rejectedCount, outcome]
+      properties:
+        id:
+          type: integer
+          format: int64
+        startedAt:
+          type: string
+          format: date-time
+        snapshotAsOf:
+          type: string
+          format: date-time
+          description: The planning-facts watermark the pass planned from; absent on a FAILED run that never reached a watermark.
+        proposalCount:
+          type: integer
+        rejectedCount:
+          type: integer
+        outcome:
+          type: string
+          enum: [COMPLETED, FAILED]
+        failClosedReason:
+          type: string
+          description: The fail-closed snapshot refusal; present only when outcome is FAILED.
+    RebalanceRunsResponse:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebalanceRun'

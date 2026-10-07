@@ -172,8 +172,11 @@ func TestApproveTransferPersistsSagaAndEmitsBothEvents(t *testing.T) {
 	if result.TransferID.LineID() != string(result.TransferID)+":1" {
 		t.Fatalf("line id = %q", result.TransferID.LineID())
 	}
-	if len(pub.events) != 2 {
-		t.Fatalf("published events = %d, want 2", len(pub.events))
+	// 2 integration events (PlanApproved + AllocationRequested) + the 4
+	// TransferStateAdvanced analytics occurrences of the creation
+	// transitions (ADR 0007).
+	if len(pub.events) != 6 {
+		t.Fatalf("published events = %d, want 6 (2 integration + 4 analytics)", len(pub.events))
 	}
 	approved, ok := pub.events[0].(transfer.PlanApproved)
 	if !ok || approved.TransferID != result.TransferID || approved.OperatorReason != "operator approved rebalance" {
@@ -217,8 +220,8 @@ func TestApproveTransferIsIdempotent(t *testing.T) {
 	if len(repo.rows) != 1 {
 		t.Fatalf("persisted transfers = %d, want 1 (idempotent)", len(repo.rows))
 	}
-	if len(pub.events) != 2 {
-		t.Fatalf("published events = %d, want 2 (no re-fan-out on replay)", len(pub.events))
+	if len(pub.events) != 6 {
+		t.Fatalf("published events = %d, want 6 (no re-fan-out on replay)", len(pub.events))
 	}
 }
 
