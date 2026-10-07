@@ -1,0 +1,41 @@
+# Version control / CI
+.git
+.github
+.gitignore
+
+# Docker itself
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Docs, task notes, harness material: not runtime artifacts
+*.md
+docs/
+.agents
+.claude
+.codex
+.opencode
+executive/
+scripts/
+tools/
+templates/
+
+# Tool configs irrelevant to `go build`
+.golangci.yml
+.gremlins.yaml
+.spectral*.yaml
+lefthook.yml
+
+# Local dev / test output
+bin/
+coverage.out
+coverage.html
+*.test
+*.out
+.env
+.env.*
+
+# Editors / OS cruft
+.vscode/
+.idea/
+.DS_Store

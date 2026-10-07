@@ -1,0 +1,174 @@
+# Default values for network-inventory-planning.
+
+replicaCount: 1
+
+# The image is NEVER pulled from a registry in the local kind cluster: it is
+# built from the local checkout and side-loaded with `kind load docker-image`
+# (warehouse-infra overrides repository and tag with a content-derived
+# local-<hash> tag). `pullPolicy: IfNotPresent` is required there, or the
+# kubelet tries to pull from Docker Hub and ImagePullBackOffs.
+image:
+  repository: warehouse/network-inventory-planning
+  pullPolicy: IfNotPresent
+  tag: "local"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: network-inventory-planning.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Additive, disabled-by-default alternative to the ingress: block above, same
+# shape as every other chart in this fleet. Routes only to this chart's REST API
+# Service. warehouse-infra turns it on and supplies the Kong Gateway parentRef
+# and path.
+gatewayApi:
+  enabled: false
+  parentRefs:
+    - name: ""
+      namespace: ""
+      sectionName: "http"
+  hosts:
+    - path: /
+      pathType: PathPrefix
+  stripPath: true
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Environment read by cmd/network-inventory-planning/main.go. Every key maps 1:1
+# to one env var.
+config:
+  httpAddr: ":8080"                  # HTTP_ADDR
+  # Relative to the image WORKDIR (/app): the Dockerfile copies
+  # internal/adapters/outbound/postgres/migrations to /app/migrations.
+  migrationsPath: "migrations"       # MIGRATIONS_PATH
+  # PLANNING_MAX_STALENESS: Go duration. Empty = not rendered; binary default 10m.
+  maxStaleness: ""
+
+# Transfer work-release configuration (ADR 0005). The binary has NO default for
+# the pick path: while pickPathId is empty POST /v1/transfers:approve answers 503
+# config-incomplete (fail-closed). The path id must exist in WES's
+# PathCatalogue or WES rejects the released demand.
+transfer:
+  pickPathId: ""            # TRANSFER_PICK_PATH_ID
+  pickCptOffset: ""         # TRANSFER_PICK_CPT_OFFSET (Go duration; binary default 2h)
+  # TRANSFER_DISPATCH_PATH_ID: no binary default either. While empty, a
+  # TransferPicked fact cannot release the dispatch demand (fail-closed).
+  dispatchPathId: ""
+  dispatchCptOffset: ""     # TRANSFER_DISPATCH_CPT_OFFSET (binary default 3h)
+
+# Transactional outbox relay. The approval saga writes outbox rows in its own
+# transaction; the relay drains them onto warehouse.network-inventory-planning.events.
+# OUTBOX_RELAY_ENABLED is read as "any non-empty value": the chart renders it
+# only when relayEnabled is true. Requires kafka.enabled (render-time check).
+# N>1 replicas are safe (FOR UPDATE SKIP LOCKED).
+outbox:
+  relayEnabled: false
+
+# Inbound consumers. Each group id is its OWN off switch: the binary has no
+# default (a default would let a locally run process join the live cluster's
+# group), so an empty id renders nothing and that consumer does not exist. Use
+# STABLE ids so a rescheduled pod resumes from its committed offsets. All of
+# them additionally need kafka.enabled (KAFKA_BROKERS).
+consumers:
+  siteCapabilityGroup: ""    # SITE_CAPABILITY_CONSUMER_GROUP  (warehouse.facility.events)
+  siteSkuDemandGroup: ""     # SITE_SKU_DEMAND_CONSUMER_GROUP  (warehouse.order-management.events)
+  capacityPlanGroup: ""      # CAPACITY_PLAN_CONSUMER_GROUP    (warehouse.warehouse-planning.events)
+  transferReplyGroup: ""     # TRANSFER_REPLY_CONSUMER_GROUP   (warehouse.inventory.events)
+  transferFactGroup: ""      # TRANSFER_FACT_CONSUMER_GROUP    (warehouse.fulfillment.events)
+
+# The chart refuses to render unless database.url or database.existingSecret is set.
+database:
+  url: ""
+  existingSecret: ""
+  existingSecretKey: "DATABASE_URL"
+  # Key, in the same existingSecret, of a DIRECT (non-pooled, session-mode)
+  # Postgres connection string used ONLY for the golang-migrate startup step --
+  # never for the runtime pgxpool. golang-migrate takes a session-scoped
+  # pg_advisory_lock that PgBouncer's transaction pooling cannot honour.
+  # `optional: true` on the secretKeyRef so a secret without this key still
+  # starts the pod: the binary falls back to DATABASE_URL.
+  migrationsExistingSecretKey: "MIGRATIONS_DATABASE_URL"
+
+# KAFKA_BROKERS is only set in the container env when kafka.enabled is true.
+# Without it every consumer and the outbox are DISABLED (logged, not fatal) and
+# POST /v1/transfers:approve answers 503.
+kafka:
+  enabled: false
+  brokers: "kafka:9092"
+
+# Extra env vars appended to the container as a raw list.
+extraEnv: []
+
+# The Postgres dial (migrations + ping) at boot can take a while on a cold
+# cluster; periodSeconds * failureThreshold gives a ~60s window before the
+# kubelet gives up. Once startupProbe succeeds, liveness takes over. The binary
+# serves only GET /healthz, so readiness uses it too.
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 2
+  failureThreshold: 30
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+terminationGracePeriodSeconds: 40
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Deliberately NOT here (later phases of the rollout plan): MCP server,
+# frontend remote, analytics read side, autoscaling.

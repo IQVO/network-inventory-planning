@@ -1,0 +1,25 @@
+{{ .Chart.Name }} has been deployed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Service:   {{ include "network-inventory-planning.fullname" . }} ({{ .Values.service.type }}, port {{ .Values.service.port }})
+
+{{- if .Values.gatewayApi.enabled }}
+Gateway API HTTPRoute enabled — routed via the parentRefs/hosts configured in gatewayApi.*.
+{{- else }}
+To reach it locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "network-inventory-planning.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/healthz
+{{- end }}
+
+{{- if not .Values.kafka.enabled }}
+
+NOTE: kafka.enabled is false — KAFKA_BROKERS is not set, so every Kafka consumer
+and the outbox are DISABLED and POST /v1/transfers:approve answers 503.
+{{- end }}
+{{- if not .Values.transfer.pickPathId }}
+
+NOTE: transfer.pickPathId is empty — POST /v1/transfers:approve answers 503
+config-incomplete until TRANSFER_PICK_PATH_ID is set (ADR 0005).
+{{- end }}

@@ -1,0 +1,30 @@
+# Used by `ct lint`: every optional component enabled at once.
+database:
+  existingSecret: "network-inventory-planning-db"
+config:
+  maxStaleness: "10m"
+transfer:
+  pickPathId: "PICK"
+  pickCptOffset: "2h"
+  dispatchPathId: "PICK"
+  dispatchCptOffset: "3h"
+outbox:
+  relayEnabled: true
+consumers:
+  siteCapabilityGroup: "nip-site-capability"
+  siteSkuDemandGroup: "nip-site-sku-demand"
+  capacityPlanGroup: "nip-capacity-plan"
+  transferReplyGroup: "nip-transfer-reply"
+  transferFactGroup: "nip-transfer-fact"
+kafka:
+  enabled: true
+  brokers: "kafka.warehouse-systems.svc.cluster.local:9092"
+gatewayApi:
+  enabled: true
+  parentRefs:
+    - name: warehouse-gateway
+      namespace: kong
+      sectionName: http
+  hosts:
+    - path: /api/network-inventory-planning
+      pathType: PathPrefix

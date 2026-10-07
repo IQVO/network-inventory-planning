@@ -1,0 +1,4 @@
+# Used by `ct lint` (chart-testing): the chart refuses to render without a
+# database source. Dummy DSN, no password.
+database:
+  url: "postgres://u@example.invalid:5432/db"

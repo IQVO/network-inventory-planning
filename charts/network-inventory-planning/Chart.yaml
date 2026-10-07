@@ -1,0 +1,12 @@
+apiVersion: v2
+name: network-inventory-planning
+description: Network Inventory Planning — network-wide inventory position, explainable rebalance proposals and the inter-warehouse transfer saga; consumes facility/order/planning/inventory/fulfillment events, publishes transfer commands and work demands
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/IQVO/network-inventory-planning
+keywords:
+  - ddd
+  - hexagonal-architecture
+  - warehouse-management-system
+  - golang

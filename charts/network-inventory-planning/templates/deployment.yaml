@@ -1,0 +1,148 @@
+{{- include "network-inventory-planning.requireDatabase" . -}}
+{{- include "network-inventory-planning.requireKafka" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "network-inventory-planning.fullname" . }}
+  labels:
+    {{- include "network-inventory-planning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "network-inventory-planning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "network-inventory-planning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "network-inventory-planning.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: HTTP_ADDR
+              value: {{ .Values.config.httpAddr | quote }}
+            - name: MIGRATIONS_PATH
+              value: {{ .Values.config.migrationsPath | quote }}
+            {{- with .Values.config.maxStaleness }}
+            - name: PLANNING_MAX_STALENESS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.transfer.pickPathId }}
+            - name: TRANSFER_PICK_PATH_ID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.transfer.pickCptOffset }}
+            - name: TRANSFER_PICK_CPT_OFFSET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.transfer.dispatchPathId }}
+            - name: TRANSFER_DISPATCH_PATH_ID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.transfer.dispatchCptOffset }}
+            - name: TRANSFER_DISPATCH_CPT_OFFSET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.outbox.relayEnabled }}
+            - name: OUTBOX_RELAY_ENABLED
+              value: "true"
+            {{- end }}
+            # Consumer-group ids come from values, never literals; an empty id
+            # renders nothing, which is how the binary keeps that consumer off.
+            {{- with .Values.consumers.siteCapabilityGroup }}
+            - name: SITE_CAPABILITY_CONSUMER_GROUP
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.consumers.siteSkuDemandGroup }}
+            - name: SITE_SKU_DEMAND_CONSUMER_GROUP
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.consumers.capacityPlanGroup }}
+            - name: CAPACITY_PLAN_CONSUMER_GROUP
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.consumers.transferReplyGroup }}
+            - name: TRANSFER_REPLY_CONSUMER_GROUP
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.consumers.transferFactGroup }}
+            - name: TRANSFER_FACT_CONSUMER_GROUP
+              value: {{ . | quote }}
+            {{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.databaseSecretName" . }}
+                  key: {{ .Values.database.existingSecretKey }}
+            {{- if .Values.database.migrationsExistingSecretKey }}
+            # Direct (non-pooled) connection used only for the golang-migrate
+            # step; see values.yaml. `optional: true` so a secret without this
+            # key still starts the pod (the binary falls back to DATABASE_URL).
+            - name: MIGRATIONS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.databaseSecretName" . }}
+                  key: {{ .Values.database.migrationsExistingSecretKey }}
+                  optional: true
+            {{- end }}
+            {{- if .Values.kafka.enabled }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.kafka.brokers | quote }}
+            {{- end }}
+            {{- range .Values.extraEnv }}
+            - {{ toYaml . | nindent 14 | trim }}
+            {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
