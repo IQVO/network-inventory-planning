@@ -180,7 +180,7 @@ func (r *TransferRepo) UpdateState(ctx context.Context, t *transfer.InterWarehou
 
 	tag, err := q.Exec(ctx, `
 		UPDATE inter_warehouse_transfer SET
-			state = $2, reservation_id = $3, allocations = $4, allocation_expires_at = $5,
+			state = $2, reservation_id = NULLIF($3::text, ''), allocations = $4, allocation_expires_at = $5,
 			rejection_reason = $6, updated_at = $7, version = version + 1,
 			picked_quantity = $9, stow_allocations = $10
 		WHERE transfer_id = $1 AND version = $8
