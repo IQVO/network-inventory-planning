@@ -224,12 +224,23 @@ type RelaySink struct {
 }
 
 // NewRelaySink constructs the RelaySink writing to brokers.
+//
+// AllowAutoTopicCreation is required, not a convenience: the relay is the
+// FIRST writer of this context's own topics (the integration `.events` topic
+// and the `.analytics` stream, ADR 0007), and every sibling relay in the fleet
+// sets it for the same reason. Without it a topic that does not exist yet
+// fails every send with "Unknown Topic Or Partition", and because the relay
+// drains rows in id order, that single row then blocks every row behind it,
+// including the integration events the saga depends on (found by the e2e
+// transfer scenario: 151 failed attempts, no WorkDemandReleased ever sent).
 func NewRelaySink(brokers []string) *RelaySink {
-	return &RelaySink{writer: kafkago.NewWriter(kafkago.WriterConfig{
-		Brokers:   brokers,
-		Balancer:  &kafkago.Hash{},
-		BatchSize: 1, // one message per Send: relay ordering, not throughput
-	})}
+	return &RelaySink{writer: &kafkago.Writer{
+		Addr:                   kafkago.TCP(brokers...),
+		Balancer:               &kafkago.Hash{},
+		BatchSize:              1, // one message per Send: relay ordering, not throughput
+		RequiredAcks:           kafkago.RequireAll,
+		AllowAutoTopicCreation: true,
+	}}
 }
 
 // Send publishes one encoded message.

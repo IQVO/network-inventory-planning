@@ -398,3 +398,28 @@ func roundTripHeaders(t *testing.T, headers []kafkago.Header) []kafkago.Header {
 	}
 	return final
 }
+
+// TestNewRelaySinkCreatesMissingTopicsAndAcksAll pins the writer settings the
+// outbox relay depends on. The relay is the first writer of this context's own
+// topics, so a writer that cannot auto-create them answers "Unknown Topic Or
+// Partition" forever, and the relay (which drains in id order) then wedges
+// every row behind the first one -- including the integration events the
+// transfer saga needs. It never dials: constructing the sink is lazy.
+func TestNewRelaySinkCreatesMissingTopicsAndAcksAll(t *testing.T) {
+	sink := NewRelaySink([]string{"localhost:1"})
+	defer func() { _ = sink.Close() }()
+
+	w := sink.writer
+	if !w.AllowAutoTopicCreation {
+		t.Error("the relay writer must allow auto topic creation: it is the first writer of its own topics")
+	}
+	if w.RequiredAcks != kafkago.RequireAll {
+		t.Errorf("RequiredAcks = %v, want RequireAll (a row is only marked published once every replica has it)", w.RequiredAcks)
+	}
+	if w.BatchSize != 1 {
+		t.Errorf("BatchSize = %d, want 1 (one message per Send keeps relay ordering)", w.BatchSize)
+	}
+	if w.Topic != "" {
+		t.Errorf("the writer must have NO fixed topic (outbox rows span topics), got %q", w.Topic)
+	}
+}
