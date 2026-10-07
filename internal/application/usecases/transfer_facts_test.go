@@ -297,3 +297,160 @@ func TestReceiptStagedAndStowedFactsDriveReceivingTail(t *testing.T) {
 		t.Fatalf("mismatched stow err = %v, want deterministic", err)
 	}
 }
+
+// --- TransferStateAdvanced on transitions (ADR 0007) --------------------------
+
+// allocatedTransfer seeds one transfer already driven to ALLOCATING, then
+// applies an allocation reply: the use case must publish BOTH the pick
+// WorkDemandReleased AND the TransferStateAdvanced occurrence for the
+// ALLOCATING→ALLOCATED transition, in the same pass-through transaction.
+func TestApplyTransferAllocationPublishesStateAdvanced(t *testing.T) {
+	repo := newFakeTransferRepo()
+	pub := &fakeEventPublisher{}
+	uc := ApplyTransferAllocation{Transfers: repo, Events: pub, UoW: passThroughUoW{}, Release: testReleaseConfig(), Now: func() time.Time { return approveNow }}
+
+	approved := seedAllocatingTransfer(t, repo)
+	replyAt := approveNow.Add(10 * time.Minute)
+	if err := uc.Execute(context.Background(), ApplyAllocationInput{
+		TransferID: approved,
+		Allocation: transfer.StockAllocation{
+			TransferLineID: string(approved) + ":1",
+			OriginSiteID:   "WH1",
+			SKU:            "SKU-1",
+			ReservationID:  "res-1",
+			Quantity:       5,
+			Allocations:    []transfer.Allocation{{StockUnitID: "su-1", BinID: "bin-1", Quantity: 5}},
+			ExpiresAt:      replyAt.Add(time.Hour),
+		},
+		OccurredAt: replyAt,
+	}); err != nil {
+		t.Fatalf("apply allocation: %v", err)
+	}
+
+	var (
+		gotDemand   bool
+		gotAdvanced transfer.StateAdvanced
+	)
+	for _, e := range pub.events {
+		switch evt := e.(type) {
+		case transfer.DemandReleased:
+			gotDemand = true
+		case transfer.StateAdvanced:
+			gotAdvanced = evt
+		}
+	}
+	if !gotDemand {
+		t.Fatal("the pick WorkDemandReleased must still be published")
+	}
+	if gotAdvanced.TransferID != approved {
+		t.Fatalf("StateAdvanced = %+v, want transfer %s", gotAdvanced, approved)
+	}
+	if gotAdvanced.From != transfer.StateAllocating || gotAdvanced.To != transfer.StateAllocated {
+		t.Fatalf("StateAdvanced = %+v, want ALLOCATING→ALLOCATED", gotAdvanced)
+	}
+	if gotAdvanced.AgeSeconds != 600 {
+		t.Fatalf("age = %d seconds, want 600 (10 minutes after creation)", gotAdvanced.AgeSeconds)
+	}
+}
+
+// TestApplyTransferPickPublishesStateAdvanced proves the same occurrence
+// fires for the ALLOCATED→PICKED fact transition.
+func TestApplyTransferPickPublishesStateAdvanced(t *testing.T) {
+	repo := newFakeTransferRepo()
+	pub := &fakeEventPublisher{}
+	uc := ApplyTransferPick{Transfers: repo, Events: pub, UoW: passThroughUoW{}, Release: testReleaseConfig()}
+
+	approved := seedAllocatedTransfer(t, repo)
+	if err := uc.Execute(context.Background(), ApplyPickInput{
+		TransferID: approved,
+		Picked:     transfer.Picked{PickedQuantity: 4},
+		OccurredAt: approveNow.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("apply pick: %v", err)
+	}
+
+	var advanced []transfer.StateAdvanced
+	for _, e := range pub.events {
+		if evt, ok := e.(transfer.StateAdvanced); ok {
+			advanced = append(advanced, evt)
+		}
+	}
+	if len(advanced) == 0 || advanced[len(advanced)-1].To != transfer.StatePicked {
+		t.Fatalf("advanced = %+v, want the newest entry ALLOCATED→PICKED", advanced)
+	}
+}
+
+// TestFactTransitionsPublishStateAdvanced drives a fact-only transition
+// (no demand side effect) and proves the occurrence still fires.
+func TestFactTransitionsPublishStateAdvanced(t *testing.T) {
+	repo := newFakeTransferRepo()
+	pub := &fakeEventPublisher{}
+	dispatched := ApplyTransferDispatched{Transfers: repo, UoW: passThroughUoW{}, events: pub}
+
+	id := seedPickedTransfer(t, repo)
+	if err := dispatched.Execute(context.Background(), FactInput{TransferID: id, OccurredAt: approveNow.Add(2 * time.Hour)}); err != nil {
+		t.Fatalf("apply dispatched: %v", err)
+	}
+	var last transfer.StateAdvanced
+	saw := false
+	for _, e := range pub.events {
+		if evt, ok := e.(transfer.StateAdvanced); ok {
+			last = evt
+			saw = true
+		}
+	}
+	if !saw || last.To != transfer.StateInTransit {
+		t.Fatalf("events = %+v, want the newest StateAdvanced → IN_TRANSIT", pub.events)
+	}
+}
+
+// seedAllocatingTransfer approves a transfer through the use case and
+// leaves it in ALLOCATING.
+func seedAllocatingTransfer(t *testing.T, repo *fakeTransferRepo) transfer.TransferID {
+	t.Helper()
+	uc := approveUseCase(repo, &fakeEventPublisher{}, approveFacts(), nil)
+	result, err := uc.Execute(context.Background(), factTestApprovalInput())
+	if err != nil {
+		t.Fatalf("seed approve: %v", err)
+	}
+	return result.TransferID
+}
+
+// seedAllocatedTransfer drives a transfer to ALLOCATED.
+func seedAllocatedTransfer(t *testing.T, repo *fakeTransferRepo) transfer.TransferID {
+	t.Helper()
+	id := seedAllocatingTransfer(t, repo)
+	pub := &fakeEventPublisher{}
+	uc := ApplyTransferAllocation{Transfers: repo, Events: pub, UoW: passThroughUoW{}, Release: testReleaseConfig(), Now: func() time.Time { return approveNow }}
+	if err := uc.Execute(context.Background(), ApplyAllocationInput{
+		TransferID: id,
+		Allocation: transfer.StockAllocation{
+			TransferLineID: string(id) + ":1",
+			OriginSiteID:   "WH1",
+			SKU:            "SKU-1",
+			ReservationID:  "res-1",
+			Quantity:       5,
+			Allocations:    []transfer.Allocation{{StockUnitID: "su-1", BinID: "bin-1", Quantity: 5}},
+			ExpiresAt:      approveNow.Add(time.Hour),
+		},
+		OccurredAt: approveNow,
+	}); err != nil {
+		t.Fatalf("seed allocate: %v", err)
+	}
+	return id
+}
+
+// seedPickedTransfer drives a transfer to PICKED.
+func seedPickedTransfer(t *testing.T, repo *fakeTransferRepo) transfer.TransferID {
+	t.Helper()
+	id := seedAllocatedTransfer(t, repo)
+	uc := ApplyTransferPick{Transfers: repo, Events: &fakeEventPublisher{}, UoW: passThroughUoW{}, Release: testReleaseConfig()}
+	if err := uc.Execute(context.Background(), ApplyPickInput{
+		TransferID: id,
+		Picked:     transfer.Picked{PickedQuantity: 5},
+		OccurredAt: approveNow,
+	}); err != nil {
+		t.Fatalf("seed pick: %v", err)
+	}
+	return id
+}

@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,9 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/claudioed/network-inventory-planning/internal/adapters/kafka/cloudevents"
 	"github.com/claudioed/network-inventory-planning/internal/domain/planning"
@@ -418,5 +422,111 @@ func TestRunLoopCommitsOnlyAfterSuccess(t *testing.T) {
 	}
 	if _, ok := repo.rows["WH1"]; !ok {
 		t.Fatal("the retried message must eventually be applied")
+	}
+}
+
+// --- OTel trace extraction (ADR 0007) ---------------------------------------
+//
+// The propagation contract on the consume side: whatever traceparent a
+// producer injected into the message headers, the handler's ctx carries
+// the SAME span context. Presence/parentage only — the ids themselves are
+// the producer's business.
+
+func TestConsumeLoopExtractsTraceparentIntoHandlerCtx(t *testing.T) {
+	previous := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previous) })
+
+	traceID, err := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	if err != nil {
+		t.Fatalf("TraceIDFromHex: %v", err)
+	}
+	spanID, err := trace.SpanIDFromHex("00f067aa0ba902b7")
+	if err != nil {
+		t.Fatalf("SpanIDFromHex: %v", err)
+	}
+	want := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+
+	var (
+		gotMu   sync.Mutex
+		got     trace.SpanContext
+		handled bool
+	)
+	reader := &fakeReader{}
+	// fakeReader yields its seeded messages then blocks on ctx; seed one
+	// message carrying the producer's traceparent and cancel after it.
+	reader.messages = []kafkago.Message{{
+		Topic:     FacilityTopic,
+		Partition: 0,
+		Offset:    0,
+		Headers: []kafkago.Header{
+			{Key: "content-type", Value: []byte("application/cloudevents+json; charset=UTF-8")},
+			{Key: "traceparent", Value: []byte("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")},
+		},
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	loop := consumeLoop{
+		reader: reader,
+		handle: func(ctx context.Context, msg kafkago.Message) error {
+			gotMu.Lock()
+			got = trace.SpanContextFromContext(ctx)
+			handled = true
+			gotMu.Unlock()
+			cancel()
+			return nil
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		name:   "trace extraction probe",
+	}
+	if err := loop.run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run: %v", err)
+	}
+	gotMu.Lock()
+	defer gotMu.Unlock()
+	if !handled {
+		t.Fatal("handler never ran")
+	}
+	if !got.Equal(want) {
+		t.Fatalf("handler span context = %+v, want the producer's %+v (extraction dropped the trace)", got, want)
+	}
+}
+
+// TestConsumeLoopHandlesUntracedMessage covers the un-instrumented
+// producer: no traceparent on the message, the handler still runs (with
+// no span context — never an error).
+func TestConsumeLoopHandlesUntracedMessage(t *testing.T) {
+	previous := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previous) })
+
+	reader := &fakeReader{}
+	reader.messages = []kafkago.Message{{Topic: FacilityTopic, Partition: 0, Offset: 0}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	handled := false
+	loop := consumeLoop{
+		reader: reader,
+		handle: func(ctx context.Context, msg kafkago.Message) error {
+			handled = true
+			if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+				t.Errorf("span context = %+v, want none (message carried no traceparent)", sc)
+			}
+			cancel()
+			return nil
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		name:   "untraced probe",
+	}
+	if err := loop.run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run: %v", err)
+	}
+	if !handled {
+		t.Fatal("handler never ran")
 	}
 }

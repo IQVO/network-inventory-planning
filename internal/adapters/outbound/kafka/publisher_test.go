@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
@@ -243,3 +249,152 @@ func assertWorkDemandData(t *testing.T, data map[string]any) {
 type fakeDomainEvent struct{}
 
 func (fakeDomainEvent) EventName() string { return "SomethingElse" }
+
+// --- OTel trace propagation (ADR 0007) ---------------------------------------
+//
+// The golden rule for these tests: assert header PRESENCE, never the
+// trace-id/span-id VALUES. The ids differ per run and per sampler; what
+// the contract guarantees is that a span-carrying ctx yields a
+// traceparent header a consumer can Extract, and that a span-less ctx
+// yields none (never an invalid all-zero one).
+
+// installPropagator points the global propagator at the W3C TraceContext
+// propagator for the duration of one test, restoring whatever was there.
+func installPropagator(t *testing.T) {
+	t.Helper()
+	previous := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previous) })
+}
+
+// spanContextOn returns a ctx carrying a fixed, valid, sampled span
+// context (Remote, like a propagated inbound one), without needing a
+// TracerProvider: propagation only needs the SpanContext on ctx.
+func spanContextOn(ctx context.Context) context.Context {
+	traceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	spanID, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	return trace.ContextWithSpanContext(ctx, sc)
+}
+
+// hasHeader reports whether headers carries key (value ignored).
+func hasHeader(headers []kafkago.Header, key string) bool {
+	for _, h := range headers {
+		if h.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTransferEncoderInjectsTraceparentWhenSpanActive(t *testing.T) {
+	installPropagator(t)
+	e := NewTransferEncoder()
+	msgs, err := e.Encode(spanContextOn(context.Background()), transfer.PlanApproved{
+		TransferID:        transfer.TransferID("trf-1"),
+		OriginSiteID:      "WH1",
+		DestinationSiteID: "WH2",
+		SKU:               "SKU-1",
+		Quantity:          10,
+		PolicyVersion:     "policy-v3",
+		OccurredAt:        encNow,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
+	}
+	if !hasHeader(msgs[0].Headers, "traceparent") {
+		t.Fatalf("headers = %+v, want a traceparent header (value is run-specific: presence only)", msgs[0].Headers)
+	}
+	if !hasHeader(msgs[0].Headers, "content-type") {
+		t.Fatalf("headers = %+v, want the content-type header alongside the trace header", msgs[0].Headers)
+	}
+}
+
+func TestTransferEncoderOmitsTraceparentWithoutASpan(t *testing.T) {
+	installPropagator(t)
+	e := NewTransferEncoder()
+	msgs, err := e.Encode(context.Background(), transfer.PlanApproved{
+		TransferID:        transfer.TransferID("trf-1"),
+		OriginSiteID:      "WH1",
+		DestinationSiteID: "WH2",
+		SKU:               "SKU-1",
+		Quantity:          10,
+		PolicyVersion:     "policy-v3",
+		OccurredAt:        encNow,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
+	}
+	if hasHeader(msgs[0].Headers, "traceparent") {
+		t.Fatalf("headers = %+v, want NO traceparent without a live span (an all-zero one would poison a consumer)", msgs[0].Headers)
+	}
+}
+
+// TestRelaySinkSendsHeadersUntouched proves the relay forwards the
+// persisted headers verbatim: whatever trace context the Encode-time span
+// injected survives the outbox round-trip (JSON in, JSON out) and lands on
+// the broker. This is the presence-contract half of ADR 0007 slice A.
+func TestRelaySinkSendsHeadersUntouched(t *testing.T) {
+	installPropagator(t)
+	var (
+		mu   sync.Mutex
+		sent []kafkago.Message
+	)
+	sink := RelaySink{send: func(ctx context.Context, msg kafkago.Message) error {
+		mu.Lock()
+		defer mu.Unlock()
+		sent = append(sent, msg)
+		return nil
+	}}
+
+	headers := tracedHeaders(spanContextOn(context.Background()))
+	enc := Encoded{Topic: TransferTopic, EventType: "t", Key: []byte("k"), Value: []byte("v"), Headers: headers}
+	if err := sink.Send(context.Background(), enc); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// The outbox persists headers as JSON and rebuilds them on claim —
+	// simulate that round-trip and prove the traceparent survives.
+	roundTripped := roundTripHeaders(t, sent[0].Headers)
+	if !hasHeader(roundTripped, "traceparent") {
+		t.Fatalf("headers after an outbox JSON round-trip = %+v, want the traceparent present", roundTripped)
+	}
+}
+
+// roundTripHeaders marshals headers to JSON and back, exactly the shape
+// postgres.encodeOutboxHeaders/decodeOutboxHeaders impose.
+func roundTripHeaders(t *testing.T, headers []kafkago.Header) []kafkago.Header {
+	t.Helper()
+	type stored struct {
+		Key   string `json:"key"`
+		Value []byte `json:"value"`
+	}
+	out := make([]stored, 0, len(headers))
+	for _, h := range headers {
+		out = append(out, stored{Key: h.Key, Value: h.Value})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back []stored
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	final := make([]kafkago.Header, 0, len(back))
+	for _, h := range back {
+		final = append(final, kafkago.Header{Key: h.Key, Value: h.Value})
+	}
+	return final
+}

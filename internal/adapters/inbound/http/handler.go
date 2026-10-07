@@ -3,7 +3,9 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
@@ -23,6 +25,10 @@ type Handler struct {
 	// meaning as Simulate: unconfigured means 503, never a fabricated
 	// approval).
 	Approve *usecases.ApproveTransfer
+	// ListRebalanceRuns serves GET /v1/rebalance-runs (nil-able: an
+	// instance without persistence answers 503, never an empty 200 that
+	// would look like a real run history).
+	ListRebalanceRuns *usecases.ListRebalanceRuns
 	// GetTransfer and ListTransfers are the read side of the saga store
 	// (GET /v1/transfers/{id}, GET /v1/transfers). Nil-able like the
 	// others: unconfigured means 503, never a fabricated empty answer.
@@ -37,6 +43,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/transfer-proposals:generate", h.generate)
 	mux.HandleFunc("GET /v1/transfer-simulations", h.simulate)
 	mux.HandleFunc("POST /v1/transfers:approve", h.approve)
+	mux.HandleFunc("GET /v1/rebalance-runs", h.rebalanceRuns)
 	mux.HandleFunc("GET /v1/transfers", h.listTransfers)
 	mux.HandleFunc("GET /v1/transfers/{id}", h.getTransfer)
 	return mux
@@ -241,4 +248,63 @@ func writeApproveProblem(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusServiceUnavailable, "approval-unavailable",
 			"Approval could not be completed", err.Error())
 	}
+}
+
+// rebalanceRuns serves GET /v1/rebalance-runs: the scheduled-rebalance
+// run history, newest first (ADR 0007). ?limit=N bounds the page
+// (default 50, max 200).
+func (h Handler) rebalanceRuns(w http.ResponseWriter, r *http.Request) {
+	if h.ListRebalanceRuns == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "rebalance-runs-unavailable",
+			"Rebalance run history is not configured", "this instance runs without the persistence the run history requires")
+		return
+	}
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeProblem(w, http.StatusBadRequest, "invalid-limit",
+				"limit must be an integer between 1 and 200", fmt.Sprintf("got %q", raw))
+			return
+		}
+		limit = parsed
+	}
+	runs, err := h.ListRebalanceRuns.Execute(r.Context(), limit)
+	if err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "rebalance-runs-unavailable",
+			"Rebalance run history could not be read", err.Error())
+		return
+	}
+	dtos := make([]rebalanceRunDTO, 0, len(runs))
+	for _, run := range runs {
+		dto := rebalanceRunDTO{
+			ID:        run.ID,
+			StartedAt: run.StartedAt,
+			Proposals: run.ProposalCount,
+			Rejected:  run.RejectedCount,
+			Outcome:   string(run.Outcome),
+		}
+		if !run.SnapshotAsOf.IsZero() {
+			dto.SnapshotAsOf = &run.SnapshotAsOf
+		}
+		if run.FailClosedReason != nil {
+			dto.FailClosedReason = run.FailClosedReason
+		}
+		dtos = append(dtos, dto)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Runs []rebalanceRunDTO `json:"runs"`
+	}{Runs: dtos})
+}
+
+// rebalanceRunDTO is the wire shape of one run row.
+type rebalanceRunDTO struct {
+	ID               int64      `json:"id"`
+	StartedAt        time.Time  `json:"startedAt"`
+	SnapshotAsOf     *time.Time `json:"snapshotAsOf,omitempty"`
+	Proposals        int        `json:"proposalCount"`
+	Rejected         int        `json:"rejectedCount"`
+	Outcome          string     `json:"outcome"`
+	FailClosedReason *string    `json:"failClosedReason,omitempty"`
 }
