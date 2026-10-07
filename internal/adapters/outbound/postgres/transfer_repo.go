@@ -80,6 +80,37 @@ func (r *TransferRepo) idempotencyKeyLookup(ctx context.Context, key string) str
 // Load rehydrates the aggregate (row + audit trail) by transfer id.
 func (r *TransferRepo) Load(ctx context.Context, id transfer.TransferID) (*transfer.InterWarehouseTransfer, error) {
 	q := queryFor(ctx, r.pool)
+	snap, err := scanTransfer(q.QueryRow(ctx, `SELECT `+transferColumns+` FROM inter_warehouse_transfer WHERE transfer_id = $1`, string(id)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, transfer.ErrTransferNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load transfer %s: %w", id, err)
+	}
+	audit, err := loadAudit(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	snap.Audit = audit
+	return transfer.Rehydrate(snap), nil
+}
+
+// transferColumns is the column list scanTransfer reads, in order.
+const transferColumns = `transfer_id, idempotency_key, origin_site_id, destination_site_id, sku, quantity,
+		       policy_version, operator_reason, proposal_as_of, expires_at, state,
+		       reservation_id, allocations, allocation_expires_at, rejection_reason,
+		       picked_quantity, stow_allocations,
+		       created_at, updated_at, version`
+
+// rowScanner is the Scan half of pgx.Row / pgx.Rows.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanTransfer decodes one inter_warehouse_transfer row (columns in
+// transferColumns order) into a Snapshot WITHOUT its audit trail. pgx
+// errors (including pgx.ErrNoRows) are returned unwrapped.
+func scanTransfer(row rowScanner) (transfer.Snapshot, error) {
 	var (
 		snap              transfer.Snapshot
 		allocationsRaw    []byte
@@ -90,26 +121,14 @@ func (r *TransferRepo) Load(ctx context.Context, id transfer.TransferID) (*trans
 		allocationExpires *time.Time
 		pickedQty         *int
 	)
-	err := q.QueryRow(ctx, `
-		SELECT transfer_id, idempotency_key, origin_site_id, destination_site_id, sku, quantity,
-		       policy_version, operator_reason, proposal_as_of, expires_at, state,
-		       reservation_id, allocations, allocation_expires_at, rejection_reason,
-		       picked_quantity, stow_allocations,
-		       created_at, updated_at, version
-		FROM inter_warehouse_transfer
-		WHERE transfer_id = $1
-	`, string(id)).Scan(
+	if err := row.Scan(
 		&snap.ID, &snap.IdempotencyKey, &snap.OriginSiteID, &snap.DestinationSiteID, &snap.SKU, &snap.Quantity,
 		&snap.PolicyVersion, &snap.OperatorReason, &snap.ProposalAsOf, &snap.ExpiresAt, &state,
 		&reservation, &allocationsRaw, &allocationExpires, &rejection,
 		&pickedQty, &stowRaw,
 		&snap.CreatedAt, &snap.UpdatedAt, &snap.Version,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, transfer.ErrTransferNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load transfer %s: %w", id, err)
+	); err != nil {
+		return transfer.Snapshot{}, err
 	}
 	snap.State = transfer.TransferState(state)
 	if reservation != nil {
@@ -126,20 +145,15 @@ func (r *TransferRepo) Load(ctx context.Context, id transfer.TransferID) (*trans
 	}
 	if len(allocationsRaw) > 0 {
 		if err := json.Unmarshal(allocationsRaw, &snap.Allocations); err != nil {
-			return nil, fmt.Errorf("load transfer %s: decode allocations: %w", id, err)
+			return transfer.Snapshot{}, fmt.Errorf("decode allocations: %w", err)
 		}
 	}
 	if len(stowRaw) > 0 {
 		if err := json.Unmarshal(stowRaw, &snap.StowAllocations); err != nil {
-			return nil, fmt.Errorf("load transfer %s: decode stow allocations: %w", id, err)
+			return transfer.Snapshot{}, fmt.Errorf("decode stow allocations: %w", err)
 		}
 	}
-	audit, err := loadAudit(ctx, q, id)
-	if err != nil {
-		return nil, err
-	}
-	snap.Audit = audit
-	return transfer.Rehydrate(snap), nil
+	return snap, nil
 }
 
 // UpdateState persists state, reservation fields and the audit entries

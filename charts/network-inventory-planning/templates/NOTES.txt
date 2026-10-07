@@ -30,3 +30,10 @@ NOTE: TRANSFER_PICK_PATH_ID is unset — the pick leg's release path is
 unconfigured, so POST /v1/transfers:approve answers 503 config-incomplete
 (fail-closed, ADR 0005).
 {{- end }}
+
+{{- if .Values.mcp.enabled }}
+
+MCP server (read-only, Streamable HTTP): {{ include "network-inventory-planning.mcpFullname" . }} ({{ .Values.mcp.service.type }}, port {{ .Values.mcp.service.port }})
+  endpoint: http://{{ include "network-inventory-planning.mcpFullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.mcp.service.port }}/mcp
+  tools: get_transfer, list_transfers, find_stuck_transfers, simulate_transfer_options
+{{- end }}

@@ -136,6 +136,37 @@ kafka:
 
 extraEnv: []
 
+# --- MCP server ---
+# The Model Context Protocol server (cmd/mcp, Streamable HTTP only). DISABLED
+# by default. Enabling it renders its own Deployment + Service (component=mcp)
+# over the same OLTP database, served at "/" and "/mcp" with GET /healthz
+# probes, command /app/mcp. Env names in templates/mcp-deployment.yaml match
+# cmd/mcp/main.go. It starts no outbox relay, no Kafka consumer and dials no
+# Kafka. Every tool is READ-ONLY (get_transfer, list_transfers,
+# find_stuck_transfers, simulate_transfer_options): approving a transfer stays
+# an operator action on the REST API. No auth / API key: MCP servers are
+# unauthenticated fleet-wide (the ClusterIP boundary is the access control).
+mcp:
+  enabled: false
+  replicaCount: 1
+  httpAddr: ":8090"
+  # Directory of the SQL migrations inside the image (the Dockerfile copies
+  # them to /app/migrations); cmd/mcp applies them idempotently on start.
+  migrationsPath: "migrations"
+  logLevel: "info"
+  service:
+    type: ClusterIP
+    port: 8090
+    targetPort: 8090
+  extraEnv: []
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
 livenessProbe:
   httpGet:
     path: /healthz

@@ -23,6 +23,11 @@ type Handler struct {
 	// meaning as Simulate: unconfigured means 503, never a fabricated
 	// approval).
 	Approve *usecases.ApproveTransfer
+	// GetTransfer and ListTransfers are the read side of the saga store
+	// (GET /v1/transfers/{id}, GET /v1/transfers). Nil-able like the
+	// others: unconfigured means 503, never a fabricated empty answer.
+	GetTransfer   *usecases.GetTransfer
+	ListTransfers *usecases.ListTransfers
 }
 
 // Routes creates the HTTP surface for this service.
@@ -32,6 +37,8 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/transfer-proposals:generate", h.generate)
 	mux.HandleFunc("GET /v1/transfer-simulations", h.simulate)
 	mux.HandleFunc("POST /v1/transfers:approve", h.approve)
+	mux.HandleFunc("GET /v1/transfers", h.listTransfers)
+	mux.HandleFunc("GET /v1/transfers/{id}", h.getTransfer)
 	return mux
 }
 
