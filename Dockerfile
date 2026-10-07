@@ -16,7 +16,8 @@ COPY . .
 # builds in CI without baking the cache into the image layers.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/network-inventory-planning ./cmd/network-inventory-planning
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/network-inventory-planning ./cmd/network-inventory-planning && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mcp ./cmd/mcp
 
 # --- runtime stage ---
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
@@ -28,11 +29,14 @@ RUN apk upgrade --no-cache && \
     addgroup -g 1000 -S app && adduser -u 1000 -S app -G app
 WORKDIR /app
 COPY --from=build --chown=app:app /out/network-inventory-planning ./network-inventory-planning
+# The read-only MCP server (Streamable HTTP on :8090). The api image
+# entrypoint is unchanged; the chart's mcp Deployment runs `/app/mcp`.
+COPY --from=build --chown=app:app /out/mcp ./mcp
 # The golang-migrate startup step reads these (MIGRATIONS_PATH); the default
 # in cmd/network-inventory-planning/main.go points at the source tree, which
 # does not exist inside the image, so point it at /app/migrations instead.
 COPY --from=build --chown=app:app /src/internal/adapters/outbound/postgres/migrations ./migrations
 ENV MIGRATIONS_PATH=migrations
 USER 1000
-EXPOSE 8080
+EXPOSE 8080 8090
 ENTRYPOINT ["./network-inventory-planning"]

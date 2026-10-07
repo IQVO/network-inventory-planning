@@ -69,3 +69,10 @@ Name of the Secret holding DATABASE_URL, when the chart creates its own.
 {{- include "network-inventory-planning.fullname" . }}-database
 {{- end }}
 {{- end }}
+
+{{/*
+Fully qualified name of the MCP server deployment/service.
+*/}}
+{{- define "network-inventory-planning.mcpFullname" -}}
+{{- include "network-inventory-planning.fullname" . }}-mcp
+{{- end }}

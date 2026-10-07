@@ -9,7 +9,7 @@ approval saga (ADR 0002/0005) and the network fact read models.
 - Kubernetes with an HTTP ingress/routing story (the Service is ClusterIP;
   reach it via port-forward or your cluster's gateway)
 - PostgreSQL (migrations `0001`–`0003` apply automatically on pod start via
-  `MIGRATIONS_PATH` baked into the image)
+  `MIGRATIONS_PATH` baked into the image; the `mcp` component, when enabled, runs the same idempotent step)
 - Kafka (optional — see below)
 
 ## Install
@@ -63,7 +63,25 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `kafka.transferReplyConsumerGroup` | `""` | `TRANSFER_REPLY_CONSUMER_GROUP` — empty = consumer off |
 | `kafka.transferFactConsumerGroup` | `""` | `TRANSFER_FACT_CONSUMER_GROUP` — empty = consumer off |
 | `extraEnv` | `[]` | Extra container env (rendered verbatim) |
+| `mcp.enabled` | `false` | Renders the read-only MCP server (`cmd/mcp`): its own Deployment + Service, `component=mcp`, command `/app/mcp` |
+| `mcp.httpAddr` | `:8090` | `MCP_ADDR` (Streamable HTTP at `/` and `/mcp`, `GET /healthz`) |
+| `mcp.service.type` / `mcp.service.port` | `ClusterIP` / `8090` | MCP Service (targetPort 8090) |
+| `mcp.migrationsPath` | `migrations` | `MIGRATIONS_PATH` inside the image |
+| `mcp.logLevel` | `info` | `LOG_LEVEL` |
+| `mcp.resources` / `mcp.replicaCount` / `mcp.extraEnv` | 100m/128Mi req, 500m/256Mi lim / `1` / `[]` | MCP container sizing and extra env |
 | Liveness / readiness / startup probes | `/healthz` | startup: 2s×30; readiness flips with the drain |
+
+### MCP server (opt-in, read-only)
+
+`mcp.enabled=true` adds a second Deployment + Service next to the api, both
+selecting on `app.kubernetes.io/component` (`api` / `mcp`) so each Service
+selects exactly one Deployment. The MCP binary reuses the api's database
+Secret (`DATABASE_URL`, optional direct `MIGRATIONS_DATABASE_URL`) and
+`config.maxStaleness`; it starts no outbox relay, no Kafka consumer and never
+dials Kafka. Tools (all read-only): `get_transfer`, `list_transfers`,
+`find_stuck_transfers`, `simulate_transfer_options`. There is no auth: the
+ClusterIP boundary is the access control (fleet decision, 2026-09-11). See
+`docs/docs/adr/0007-transfer-read-side-and-read-only-mcp.md`.
 
 ### Consumer groups are per-consumer off switches
 
@@ -79,4 +97,5 @@ owns them.
 ct lint --charts charts/network-inventory-planning --validate-maintainers=false --check-version-increment=false
 helm template charts/network-inventory-planning >/dev/null
 python3 charts/network-inventory-planning/tests/test_env_wiring.py
+python3 charts/network-inventory-planning/tests/test_service_selectors.py
 ```
