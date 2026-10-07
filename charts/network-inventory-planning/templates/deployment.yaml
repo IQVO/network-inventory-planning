@@ -82,6 +82,19 @@ spec:
                 secretKeyRef:
                   name: {{ include "network-inventory-planning.databaseSecretName" . }}
                   key: {{ .Values.database.existingSecretKey }}
+            {{- if .Values.database.migrationsExistingSecretKey }}
+            # Direct (non-pooled) connection used ONLY for the golang-migrate
+            # startup step: its session-scoped pg_advisory_lock cannot survive
+            # PgBouncer's transaction pooling. `optional: true` so a secret
+            # without this key still starts the pod (the binary falls back to
+            # DATABASE_URL).
+            - name: MIGRATIONS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.databaseSecretName" . }}
+                  key: {{ .Values.database.migrationsExistingSecretKey }}
+                  optional: true
+            {{- end }}
             {{- end }}
             {{- if .Values.kafka.enabled }}
             - name: KAFKA_BROKERS

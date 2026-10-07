@@ -64,6 +64,31 @@ autoscaling:
 
 # deployment.environment.name on every span, metric and log this service
 # exports. Set per-cluster (local / staging / production).
+# Additive, disabled-by-default routing, same shape as every other chart in this
+# fleet. warehouse-infra turns on exactly one of them (Gateway API when
+# var.deploy_gateway_api, else the Kong ingress) and supplies the path.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: network-inventory-planning.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+gatewayApi:
+  enabled: false
+  parentRefs:
+    - name: ""
+      namespace: ""
+      sectionName: "http"
+  hosts:
+    - path: /
+      pathType: PathPrefix
+  stripPath: true
+
 environment: "local"
 
 config:
@@ -89,6 +114,10 @@ database:
   url: ""
   existingSecret: ""
   existingSecretKey: "DATABASE_URL"
+  # Key, in the same existingSecret, of a DIRECT (non-pooled, session-mode)
+  # Postgres DSN used only by the golang-migrate startup step (the runtime
+  # pgxpool always uses existingSecretKey). Rendered with optional: true.
+  migrationsExistingSecretKey: "MIGRATIONS_DATABASE_URL"
 
 # Kafka wiring. The five consumer-group env vars are each their own off
 # switch: an EMPTY value means that consumer does not run (the binary has
