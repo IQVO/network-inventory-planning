@@ -22,6 +22,8 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // Reader is the subset of *kafkago.Reader a consumer needs, so unit tests
@@ -112,6 +114,13 @@ type consumeLoop struct {
 // run fetches one message at a time and does not fetch the next until the
 // current one was handled successfully AND its offset committed. It
 // returns only when ctx is cancelled or FetchMessage itself fails.
+//
+// Before handling, the W3C traceparent/tracestate headers on the message
+// are EXTRACTED into the handler ctx (ADR 0007): every inbound consumer's
+// handler — and anything it calls, including outbox writes that later
+// relay to Kafka — runs as a child of the producer's publish span, so a
+// trace crosses the broker in both directions. A message with no trace
+// headers (an un-instrumented producer) is handled with the ctx as-is.
 func (l *consumeLoop) run(ctx context.Context) error {
 	policy := l.retry.withDefaults()
 	sleep := l.sleep
@@ -123,7 +132,8 @@ func (l *consumeLoop) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := l.retryUntilOK(ctx, policy, sleep, "handling", msg, func() error { return l.handle(ctx, msg) }); err != nil {
+		msgCtx := otel.GetTextMapPropagator().Extract(ctx, readOnlyHeaderCarrier{headers: msg.Headers})
+		if err := l.retryUntilOK(ctx, policy, sleep, "handling", msg, func() error { return l.handle(msgCtx, msg) }); err != nil {
 			return err
 		}
 		// Commit ONLY now: the work is already durable, and if the
@@ -166,4 +176,38 @@ func defaultLogger(logger *slog.Logger) *slog.Logger {
 		return slog.Default()
 	}
 	return logger
+}
+
+// readOnlyHeaderCarrier adapts a kafka-go message's header slice to
+// propagation.TextMapCarrier for READING the W3C traceparent/tracestate
+// on the consumer side (ADR 0007), so the handler runs as a child of the
+// producer's publish span. It is read-only: Set is a no-op because the
+// consumer never re-injects. (The outbound side's writable carrier lives
+// with the publisher, internal/adapters/outbound/kafka/tracing.go.)
+type readOnlyHeaderCarrier struct {
+	headers []kafkago.Header
+}
+
+var _ propagation.TextMapCarrier = readOnlyHeaderCarrier{}
+
+// Get returns the value of the first header with the given key, or "".
+func (c readOnlyHeaderCarrier) Get(key string) string {
+	for _, h := range c.headers {
+		if h.Key == key {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+
+// Set is a no-op: a consumer extracts, it never re-injects.
+func (c readOnlyHeaderCarrier) Set(string, string) {}
+
+// Keys lists every header key present.
+func (c readOnlyHeaderCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.headers))
+	for _, h := range c.headers {
+		keys = append(keys, h.Key)
+	}
+	return keys
 }

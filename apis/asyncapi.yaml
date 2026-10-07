@@ -15,6 +15,8 @@ info:
       description: inventory-storage's transfer-allocation replies driving the saga.
     - name: published
       description: This context's published transfer saga events and commands.
+    - name: published-analytics
+      description: This context's saga-health analytics occurrences (ADR 0007, observe-only).
   description: |
     Event contract of the network-inventory-planning bounded context.
 
@@ -58,6 +60,16 @@ info:
       (consumed reply, subject/key transfer_line_id): the saga moves
       ALLOCATING → UNFULFILLABLE with the closed reason
       ORIGIN_SITE_UNKNOWN|INSUFFICIENT_USABLE|IDEMPOTENCY_CONFLICT.
+
+    **Phase 4 (ADR 0007, observability + scheduled runs)** adds this
+    context's analytics stream on
+    `warehouse.network-inventory-planning.analytics`: the saga-health
+    occurrences `TransferStateAdvanced` (every state transition, same
+    outbox transaction), `TransferStuckDetected` (a bounded observe-only
+    ticker; NIP_HEALTH_CHECK_INTERVAL / NIP_STUCK_THRESHOLDS) and
+    `RebalanceRunCompleted` (each scheduled rebalance pass; observe-only
+    — no approval, no allocation command). W3C trace context
+    (`traceparent`) propagates on every produced and consumed message.
 
     **Phase 3 (ADR 0005, work-demand release + fact-driven transitions)**
     adds the released work demands on the PUBLISHED stream, the three
@@ -152,6 +164,22 @@ channels:
         $ref: '#/components/messages/transferAllocationRequested'
       workDemandReleased:
         $ref: '#/components/messages/workDemandReleased'
+  warehouse.network-inventory-planning.analytics:
+    address: warehouse.network-inventory-planning.analytics
+    title: network-inventory-planning analytics topic
+    description: |
+      This context's dedicated analytics stream (ADR 0007): saga-health
+      occurrences only, never OLTP commands. Published through the same
+      transactional outbox as the integration events, on separate rows
+      with their own topic, so the integration contract and the health
+      signal evolve independently.
+    messages:
+      transferStateAdvanced:
+        $ref: '#/components/messages/transferStateAdvanced'
+      transferStuckDetected:
+        $ref: '#/components/messages/transferStuckDetected'
+      rebalanceRunCompleted:
+        $ref: '#/components/messages/rebalanceRunCompleted'
   warehouse.inventory.events:
     address: warehouse.inventory.events
     title: inventory-storage integration topic
@@ -272,6 +300,40 @@ operations:
       dispatches only what was picked). Subject and Kafka key are the
       demand_id. WES validates path_id against its PathCatalogue and
       enqueues one work unit under the deterministic demand_id.
+  sendTransferStateAdvanced:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.analytics'
+    summary: Announce one saga state transition for health analytics.
+    description: |
+      Published through the transactional outbox in the SAME transaction
+      as the transition it describes (ADR 0007): data {transfer_id, from,
+      to, age_seconds}, subject/key transfer_id. An occurrence exists for
+      every step of every transfer.
+  sendTransferStuckDetected:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.analytics'
+    summary: Announce a non-terminal transfer aged past its per-state threshold.
+    description: |
+      Emitted by a bounded in-process ticker (NIP_HEALTH_CHECK_INTERVAL,
+      default 5m, 0=off) using per-state thresholds from
+      NIP_STUCK_THRESHOLDS (defaults ALLOCATING=1h, PICKED=24h,
+      IN_TRANSIT=72h, flat 24h otherwise). OBSERVE-ONLY: the check reads
+      and publishes, it never mutates saga state. Data {transfer_id,
+      state, age_seconds, threshold_seconds}, subject/key transfer_id.
+  sendRebalanceRunCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.analytics'
+    summary: Announce one scheduled rebalance pass (observe-only).
+    description: |
+      One occurrence per NIP_REBALANCE_SCHEDULE tick (no default: unset
+      means the loop is off). The pass runs the same fail-closed snapshot
+      build + planner as the simulation and records a rebalance_runs row
+      (served by GET /v1/rebalance-runs); it NEVER approves anything and
+      NEVER emits an allocation command. Data {run_id, proposal_count,
+      rejected_count, stale_facts}, subject/key run_id.
   receiveTransferPicked:
     action: receive
     channel:
@@ -420,6 +482,27 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/TransferStockStowedEvent'
+    transferStateAdvanced:
+      name: TransferStateAdvanced
+      title: Transfer state advanced
+      summary: One saga state transition, as a health-analytics occurrence (published).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferStateAdvancedEvent'
+    transferStuckDetected:
+      name: TransferStuckDetected
+      title: Transfer stuck detected
+      summary: A non-terminal transfer aged past its per-state threshold (published, observe-only).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferStuckDetectedEvent'
+    rebalanceRunCompleted:
+      name: RebalanceRunCompleted
+      title: Rebalance run completed
+      summary: One scheduled (observe-only) rebalance pass (published).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/RebalanceRunCompletedEvent'
   schemas:
     cloudEvent:
       type: object
@@ -886,3 +969,84 @@ components:
                       quantity:
                         type: integer
                         minimum: 1
+    TransferStateAdvancedEvent:
+      description: CloudEvents 1.0 envelope of this context's TransferStateAdvanced analytics occurrence (ADR 0007, published via the transactional outbox in the same transaction as the transition).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced
+            dataschema:
+              const: urn:warehouse:network-inventory-planning:analytics:TransferStateAdvanced:v1
+            data:
+              type: object
+              required: [transfer_id, from, to, age_seconds]
+              properties:
+                transfer_id:
+                  type: string
+                  description: The saga aggregate id; also the Kafka key and subject.
+                from:
+                  type: string
+                  description: The state before the transition (empty string for the creation entry).
+                to:
+                  type: string
+                  enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
+                age_seconds:
+                  type: integer
+                  format: int64
+                  description: Seconds since the aggregate's creation at the moment of the transition.
+    TransferStuckDetectedEvent:
+      description: CloudEvents 1.0 envelope of this context's TransferStuckDetected analytics occurrence (ADR 0007, published by the bounded observe-only health ticker).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.network-inventory-planning.saga.TransferStuckDetected
+            dataschema:
+              const: urn:warehouse:network-inventory-planning:analytics:TransferStuckDetected:v1
+            data:
+              type: object
+              required: [transfer_id, state, age_seconds, threshold_seconds]
+              properties:
+                transfer_id:
+                  type: string
+                  description: The saga aggregate id; also the Kafka key and subject.
+                state:
+                  type: string
+                  description: The non-terminal state the transfer is stuck in.
+                age_seconds:
+                  type: integer
+                  format: int64
+                  description: Seconds since the transfer's last transition (updated_at).
+                threshold_seconds:
+                  type: integer
+                  format: int64
+                  description: The per-state threshold that was exceeded (NIP_STUCK_THRESHOLDS or the default).
+    RebalanceRunCompletedEvent:
+      description: CloudEvents 1.0 envelope of this context's RebalanceRunCompleted analytics occurrence (ADR 0007, one per scheduled observe-only rebalance pass).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wes.network-inventory-planning.saga.RebalanceRunCompleted
+            dataschema:
+              const: urn:warehouse:network-inventory-planning:analytics:RebalanceRunCompleted:v1
+            data:
+              type: object
+              required: [run_id, proposal_count, rejected_count, stale_facts]
+              properties:
+                run_id:
+                  type: string
+                  description: The run's identity; also the Kafka key and subject.
+                proposal_count:
+                  type: integer
+                  description: Proposals the planner produced this pass.
+                rejected_count:
+                  type: integer
+                  description: Proposals the run's own safety checks refused (never an operator rejection; the run approves nothing).
+                stale_facts:
+                  type: integer
+                  description: Facts excluded by freshness in this pass (0 while the snapshot is fully fresh).

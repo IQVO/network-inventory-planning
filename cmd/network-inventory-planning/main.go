@@ -19,7 +19,10 @@ import (
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
 	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
+	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // Environment of the Phase-1 read-model side. Each consumer group has NO
@@ -41,6 +44,10 @@ const (
 	envPickCPTOffset   = "TRANSFER_PICK_CPT_OFFSET"
 	envDispatchPathID  = "TRANSFER_DISPATCH_PATH_ID"
 	envDispatchCPTOffs = "TRANSFER_DISPATCH_CPT_OFFSET"
+	// Phase-4 observability + scheduled runs (ADR 0007).
+	envHealthInterval  = "NIP_HEALTH_CHECK_INTERVAL"
+	envStuckThresholds = "NIP_STUCK_THRESHOLDS"
+	envRebalSchedule   = "NIP_REBALANCE_SCHEDULE"
 )
 
 const defaultMigrationsPath = "internal/adapters/outbound/postgres/migrations"
@@ -48,6 +55,10 @@ const defaultMigrationsPath = "internal/adapters/outbound/postgres/migrations"
 // defaultMaxStaleness is the fail-closed freshness budget of the planning
 // snapshot when PLANNING_MAX_STALENESS is unset.
 const defaultMaxStaleness = 10 * time.Minute
+
+// defaultHealthInterval is the saga-health check tick when
+// NIP_HEALTH_CHECK_INTERVAL is unset (ADR 0007). "0" disables the check.
+const defaultHealthInterval = 5 * time.Minute
 
 func main() {
 	if err := run(); err != nil {
@@ -59,6 +70,18 @@ func run() error {
 	logger := slog.Default()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// W3C Trace Context is the fleet's Kafka propagation format (ADR
+	// 0006): the global propagator is what every consumer's Extract and
+	// every encoder's Inject go through. OTel's default is a NO-OP
+	// propagator, so without this line the header carriers exist but
+	// move nothing. A full tracer provider (OTLP export) is a later
+	// slice; propagation works with the no-op tracer — Inject only needs
+	// a span on ctx, which inbound extraction provides.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	address := os.Getenv("HTTP_ADDR")
 	if address == "" {
@@ -160,6 +183,7 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	}
 	handler.Simulate = wired.simulate
 	handler.Approve = wired.approve
+	handler.ListRebalanceRuns = wired.runs
 	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)
 	runners = append(runners, wired.runners...)
 	closers = append(closers, wired.closers...)
@@ -248,6 +272,7 @@ func workReleaseConfigFromEnv(logger *slog.Logger) usecases.WorkReleaseConfig {
 type sagaWiring struct {
 	simulate *usecases.SimulateTransferOptions
 	approve  *usecases.ApproveTransfer
+	runs     *usecases.ListRebalanceRuns
 	runners  []func() error
 	closers  []func() error
 }
@@ -270,7 +295,10 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 
 	// Transactional outbox: the approval writes TransferPlanApproved +
 	// TransferAllocationRequested rows in its own transaction; the relay
-	// drains them onto warehouse.network-inventory-planning.events.
+	// drains them onto warehouse.network-inventory-planning.events (and,
+	// since ADR 0007, the analytics occurrences onto
+	// warehouse.network-inventory-planning.analytics — the same relay,
+	// the rows carry their own topic).
 	outboxPublisher, relayRunner := wireOutbox(logger, pool)
 	if relayRunner != nil {
 		out.runners = append(out.runners, relayRunner)
@@ -338,7 +366,137 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	}
 	out.runners = append(out.runners, consumerRunners...)
 	out.closers = append(out.closers, consumerClosers...)
+
+	// Phase-4 observability + scheduled runs (ADR 0007). Both tickers are
+	// OFF unless their env var is set (the health check defaults to 5m;
+	// the rebalance schedule has NO default — a planner pass on a shared
+	// fleet must be a deliberate deployment choice).
+	rebalanceRuns := postgres.NewRebalanceRunRepo(pool)
+	out.runs = &usecases.ListRebalanceRuns{Runs: rebalanceRuns}
+	wireHealthTicker(logger, pool, outboxPublisher, &out)
+	wireRebalanceTicker(logger, pool, snapshots, rebalanceRuns, outboxPublisher, maxStaleness, &out)
 	return out, nil
+}
+
+// optionalIntervalFromEnv parses an interval env var. Unset means def;
+// "0" means DISABLED (ok=false); anything unparsable or negative is a
+// boot failure (a typo'd ticker interval would silently change cadence).
+// A def of 0 with the variable unset ALSO disables (the rebalance
+// schedule's default-off contract).
+func optionalIntervalFromEnv(name string, def time.Duration) (d time.Duration, ok bool, err error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		if def <= 0 {
+			return 0, false, nil
+		}
+		return def, true, nil
+	}
+	parsed, perr := time.ParseDuration(raw)
+	if perr != nil || parsed < 0 {
+		return 0, false, fmt.Errorf("%s must be a non-negative duration, got %q", name, raw)
+	}
+	if parsed == 0 {
+		return 0, false, nil
+	}
+	return parsed, true, nil
+}
+
+// wireHealthTicker starts the bounded saga-health check loop (ADR 0007):
+// every NIP_HEALTH_CHECK_INTERVAL (default 5m, 0=off) it reads the
+// non-terminal transfers and publishes TransferStuckDetected occurrences
+// for those past their per-state threshold (NIP_STUCK_THRESHOLDS). The
+// loop ONLY reads and publishes — it never mutates saga state.
+func wireHealthTicker(logger *slog.Logger, pool *pgxpool.Pool, events ports.TransferEventPublisher, out *sagaWiring) {
+	interval, ok, err := optionalIntervalFromEnv(envHealthInterval, defaultHealthInterval)
+	if err != nil {
+		logger.Error("invalid health check interval; check disabled", "error", err)
+		return
+	}
+	if !ok {
+		logger.Info("saga health check disabled", "env", envHealthInterval)
+		return
+	}
+	if events == nil {
+		logger.Warn("saga health check disabled: no outbox publisher configured (occurrences could never be drained)",
+			"enable_with", strings.Join([]string{envKafkaBrokers, envOutboxRelay}, ","))
+		return
+	}
+	thresholds, err := transfer.ParseStuckThresholds(os.Getenv(envStuckThresholds))
+	if err != nil {
+		logger.Error("invalid stuck thresholds; check disabled", "error", err, "env", envStuckThresholds)
+		return
+	}
+	check := usecases.CheckStuckTransfers{
+		Reader: postgres.NewTransferRepo(pool),
+		Events: events,
+		Check:  transfer.StuckCheck{Thresholds: thresholds},
+		Limit:  500,
+		Now:    time.Now,
+	}
+	runner := usecases.PeriodicRunner{
+		Name:     "saga health check",
+		Interval: interval,
+		Tick: func(ctx context.Context) error {
+			_, err := check.Execute(ctx)
+			return err
+		},
+		Logger: logger,
+	}
+	hcCtx, hcStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	out.runners = append(out.runners, func() error { defer hcStop(); return runner.Run(hcCtx) })
+	logger.Info("saga health check running",
+		"interval", interval.String(), "thresholds_env", envStuckThresholds)
+}
+
+// wireRebalanceTicker starts the scheduled rebalance loop (ADR 0007):
+// every NIP_REBALANCE_SCHEDULE (NO default — unset means off) it runs the
+// SAME fail-closed snapshot build + planner as the simulation, persists a
+// rebalance_runs row and publishes a RebalanceRunCompleted occurrence.
+// Observe-only: no approval, no allocation command — ever.
+func wireRebalanceTicker(
+	logger *slog.Logger,
+	pool *pgxpool.Pool,
+	snapshots ports.PlanningSnapshotRepository,
+	runs ports.RebalanceRunRepository,
+	events ports.TransferEventPublisher,
+	maxStaleness time.Duration,
+	out *sagaWiring,
+) {
+	interval, ok, err := optionalIntervalFromEnv(envRebalSchedule, 0)
+	if err != nil {
+		logger.Error("invalid rebalance schedule; scheduled runs disabled", "error", err)
+		return
+	}
+	if !ok {
+		logger.Info("scheduled rebalance disabled (no default; deliberate deployment choice)",
+			"enable_with", envRebalSchedule)
+		return
+	}
+	if events == nil {
+		logger.Warn("scheduled rebalance disabled: no outbox publisher configured",
+			"enable_with", strings.Join([]string{envKafkaBrokers, envOutboxRelay, envRebalSchedule}, ","))
+		return
+	}
+	run := usecases.RunScheduledRebalance{
+		Snapshot:     snapshots,
+		Planner:      transfer.Planner{},
+		Runs:         runs,
+		Events:       events,
+		MaxStaleness: maxStaleness,
+		Now:          time.Now,
+	}
+	runner := usecases.PeriodicRunner{
+		Name:     "scheduled rebalance",
+		Interval: interval,
+		Tick: func(ctx context.Context) error {
+			_, err := run.Execute(ctx)
+			return err
+		},
+		Logger: logger,
+	}
+	rbCtx, rbStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	out.runners = append(out.runners, func() error { defer rbStop(); return runner.Run(rbCtx) })
+	logger.Info("scheduled rebalance running", "interval", interval.String())
 }
 
 // consumerDeps carries the wired ports startConsumers needs.
@@ -365,8 +523,13 @@ func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPub
 			"enable_with", strings.Join([]string{envKafkaBrokers, envOutboxRelay}, ","))
 		return nil, nil
 	}
+	// Both encoders fan out over the same outbox rows: the integration
+	// encoder keeps warehouse.network-inventory-planning.events, the
+	// analytics encoder adds warehouse.network-inventory-planning.analytics
+	// (ADR 0007). The relay drains rows by each row's own topic.
 	encoder := outboundkafka.NewTransferEncoder()
-	publisher := postgres.NewOutboxWriter(pool, encoder)
+	analyticsEncoder := outboundkafka.NewAnalyticsEncoder()
+	publisher := postgres.NewOutboxWriter(pool, encoder, analyticsEncoder)
 	if os.Getenv(envOutboxRelay) == "" {
 		return publisher, nil
 	}

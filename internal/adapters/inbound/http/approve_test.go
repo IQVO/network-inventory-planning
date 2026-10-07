@@ -171,8 +171,8 @@ func TestApproveEndpointPersistsSaga(t *testing.T) {
 	if dto.Replayed {
 		t.Fatal("first approval must not report replayed")
 	}
-	if len(events.events) != 2 {
-		t.Fatalf("events = %d, want 2", len(events.events))
+	if len(events.events) != 6 {
+		t.Fatalf("events = %d, want 6 (2 integration + 4 analytics occurrences)", len(events.events))
 	}
 
 	// Same key + payload again: 200 replayed, no second fan-out.
@@ -185,8 +185,8 @@ func TestApproveEndpointPersistsSaga(t *testing.T) {
 	if !dto2.Replayed || dto2.TransferID != dto.TransferID {
 		t.Fatalf("replay = %+v", dto2)
 	}
-	if len(events.events) != 2 {
-		t.Fatalf("events after replay = %d, want 2", len(events.events))
+	if len(events.events) != 6 {
+		t.Fatalf("events after replay = %d, want 6", len(events.events))
 	}
 }
 

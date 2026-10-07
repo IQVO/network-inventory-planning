@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
 
 	"github.com/claudioed/network-inventory-planning/internal/adapters/kafka/cloudevents"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
@@ -71,14 +72,14 @@ type TransferEncoder struct {
 func NewTransferEncoder() *TransferEncoder { return &TransferEncoder{mintID: uuidMinter} }
 
 // Encode implements Encoder.
-func (e *TransferEncoder) Encode(_ context.Context, event transfer.DomainEvent) ([]Encoded, error) {
+func (e *TransferEncoder) Encode(ctx context.Context, event transfer.DomainEvent) ([]Encoded, error) {
 	switch evt := event.(type) {
 	case transfer.PlanApproved:
-		return e.encodePlanApproved(evt)
+		return e.encodePlanApproved(ctx, evt)
 	case transfer.AllocationRequested:
-		return e.encodeAllocationRequested(evt)
+		return e.encodeAllocationRequested(ctx, evt)
 	case transfer.DemandReleased:
-		return e.encodeDemandReleased(evt)
+		return e.encodeDemandReleased(ctx, evt)
 	default:
 		return nil, nil
 	}
@@ -88,7 +89,24 @@ func (e *TransferEncoder) Encode(_ context.Context, event transfer.DomainEvent) 
 // WES's consumed contract names the entity `workdemand`, not `transfer`.
 const entityWorkDemand = "workdemand"
 
-func (e *TransferEncoder) encodeDemandReleased(evt transfer.DemandReleased) ([]Encoded, error) {
+// tracedHeaders builds the Kafka headers every encoded message carries:
+// the fleet content-type header plus W3C trace headers injected from
+// whatever span is active on ctx (ADR 0007). The injected traceparent
+// rides along with the outbox row, so the relay's eventual Kafka write
+// carries the trace of the use case that raised the event even though it
+// happens later and in another goroutine.
+//
+// With no live span the propagator writes nothing (a no-op tracer
+// produces no valid traceparent), so an un-instrumented deployment ships
+// clean headers instead of an all-zero traceparent a consumer would try
+// to parent onto.
+func tracedHeaders(ctx context.Context) []kafkago.Header {
+	headers := []kafkago.Header{cloudevents.ContentTypeHeader()}
+	otel.GetTextMapPropagator().Inject(ctx, headerCarrier{headers: &headers})
+	return headers
+}
+
+func (e *TransferEncoder) encodeDemandReleased(ctx context.Context, evt transfer.DemandReleased) ([]Encoded, error) {
 	// EXACTLY WES's consumed contract (mirrored from its
 	// apis/asyncapi.yaml on origin/develop): data {demand_id, work_kind,
 	// transfer_ref, path_id, site_id, cpt, sku, quantity}, subject/key
@@ -121,11 +139,11 @@ func (e *TransferEncoder) encodeDemandReleased(evt transfer.DemandReleased) ([]E
 		EventType: cloudevents.Type(entityWorkDemand, "WorkDemandReleased"),
 		Key:       []byte(evt.DemandID),
 		Value:     value,
-		Headers:   []kafkago.Header{cloudevents.ContentTypeHeader()},
+		Headers:   tracedHeaders(ctx),
 	}}, nil
 }
 
-func (e *TransferEncoder) encodePlanApproved(evt transfer.PlanApproved) ([]Encoded, error) {
+func (e *TransferEncoder) encodePlanApproved(ctx context.Context, evt transfer.PlanApproved) ([]Encoded, error) {
 	payload := map[string]any{
 		"transfer_id":         string(evt.TransferID),
 		"origin_site_id":      evt.OriginSiteID,
@@ -154,11 +172,11 @@ func (e *TransferEncoder) encodePlanApproved(evt transfer.PlanApproved) ([]Encod
 		EventType: cloudevents.Type(entityTransfer, "TransferPlanApproved"),
 		Key:       []byte(evt.TransferID),
 		Value:     value,
-		Headers:   []kafkago.Header{cloudevents.ContentTypeHeader()},
+		Headers:   tracedHeaders(ctx),
 	}}, nil
 }
 
-func (e *TransferEncoder) encodeAllocationRequested(evt transfer.AllocationRequested) ([]Encoded, error) {
+func (e *TransferEncoder) encodeAllocationRequested(ctx context.Context, evt transfer.AllocationRequested) ([]Encoded, error) {
 	// EXACTLY inventory-storage's consumed contract (read from its
 	// apis/asyncapi.yaml on origin/develop): data {transfer_id,
 	// transfer_line_id, origin_site_id, sku, quantity}, subject/key
@@ -188,16 +206,21 @@ func (e *TransferEncoder) encodeAllocationRequested(evt transfer.AllocationReque
 		EventType: cloudevents.Type(entityTransfer, "TransferAllocationRequested"),
 		Key:       []byte(evt.TransferLineID),
 		Value:     value,
-		Headers:   []kafkago.Header{cloudevents.ContentTypeHeader()},
+		Headers:   tracedHeaders(ctx),
 	}}, nil
 }
 
 // RelaySink is the production Sink: ONE shared *kafkago.Writer with no
 // fixed topic (outbox rows may span topics) and synchronous writes, so
-// RelayOnce's return reflects real send outcomes.
+// RelayOnce's return reflects real send outcomes. The headers on each
+// Encoded row are forwarded VERBATIM: the traceparent injected at Encode
+// time is the one that reaches the broker (ADR 0007).
 type RelaySink struct {
 	writer *kafkago.Writer
 	once   sync.Once
+	// send is the single-message write, split out so tests intercept
+	// sends without a broker. nil in production (writes go to writer).
+	send func(ctx context.Context, msg kafkago.Message) error
 }
 
 // NewRelaySink constructs the RelaySink writing to brokers.
@@ -211,6 +234,14 @@ func NewRelaySink(brokers []string) *RelaySink {
 
 // Send publishes one encoded message.
 func (s *RelaySink) Send(ctx context.Context, msg Encoded) error {
+	if s.send != nil {
+		return s.send(ctx, kafkago.Message{
+			Topic:   msg.Topic,
+			Key:     msg.Key,
+			Value:   msg.Value,
+			Headers: msg.Headers,
+		})
+	}
 	return s.writer.WriteMessages(ctx, kafkago.Message{
 		Topic:   msg.Topic,
 		Key:     msg.Key,
