@@ -20,7 +20,7 @@ console architecture; reference: `warehouse-planning/web`, container
   module. Federation container **`nip_mfe`**, exposing one module `./App`
   (default export, no props, relative routes). Production Vite `base` is
   `/mfes/network-inventory-planning/`; dev/preview port **5192** (5190 is
-  `capacity_mfe`, 5191 is `product_master_mfe`).
+  `capacity_mfe`, 5191 is `productmaster_mfe`).
 - It is a plain browser client of **this service's own REST API only**, through
   `${apiOrigin}/api/network-inventory-planning` (`apiOrigin` from the console's
   runtime `/config.json`, published as `window.__WAREHOUSE_CONFIG__`; a
