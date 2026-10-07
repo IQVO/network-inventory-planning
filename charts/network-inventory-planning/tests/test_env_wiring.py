@@ -41,6 +41,7 @@ EXPECTED_ENV = {
     "TRANSFER_DISPATCH_CPT_OFFSET",
     "OUTBOX_RELAY_ENABLED",
     "DATABASE_URL",
+    "MIGRATIONS_DATABASE_URL",
     "KAFKA_BROKERS",
     "SITE_CAPABILITY_CONSUMER_GROUP",
     "SITE_SKU_DEMAND_CONSUMER_GROUP",
@@ -90,9 +91,10 @@ def main() -> int:
     if missing:
         failures.append(f"env vars missing with everything enabled: {sorted(missing)}")
 
-    # DATABASE_URL must come from a secretKeyRef, never a literal value.
-    if "DATABASE_URL" in plain or "DATABASE_URL" not in from_ref:
-        failures.append("DATABASE_URL must be wired via secretKeyRef, not a plain value")
+    # Both DSNs must come from a secretKeyRef, never a literal value.
+    for dsn in ("DATABASE_URL", "MIGRATIONS_DATABASE_URL"):
+        if dsn in plain or dsn not in from_ref:
+            failures.append(f"{dsn} must be wired via secretKeyRef, not a plain value")
 
     # Default values: no kafka env at all (groups are off switches), no
     # DATABASE_URL (no secret set), no transfer_* release config.
@@ -107,12 +109,22 @@ def main() -> int:
             "TRANSFER_REPLY_CONSUMER_GROUP",
             "TRANSFER_FACT_CONSUMER_GROUP",
             "DATABASE_URL",
+            "MIGRATIONS_DATABASE_URL",
             "TRANSFER_PICK_PATH_ID",
             "TRANSFER_DISPATCH_PATH_ID",
         }
     )
     if leaked:
         failures.append(f"env vars leaked with default values: {leaked}")
+
+    # Routing is opt-in and renders the right kind.
+    kinds = {d["kind"] for d in render(["--set", "database.existingSecret=x", "--set", "gatewayApi.enabled=true",
+                                         "--set", "gatewayApi.parentRefs[0].name=gw", "--set", "ingress.enabled=true"])}
+    if not {"HTTPRoute", "Ingress"} <= kinds:
+        failures.append(f"routing templates did not render when enabled: {sorted(kinds)}")
+    default_kinds = {d["kind"] for d in render(["--set", "database.existingSecret=x"])}
+    if default_kinds & {"HTTPRoute", "Ingress"}:
+        failures.append("routing resources rendered with default values; they must be opt-in")
 
     if failures:
         for f in failures:

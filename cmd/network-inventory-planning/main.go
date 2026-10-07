@@ -28,6 +28,7 @@ import (
 const (
 	envDatabaseURL     = "DATABASE_URL"
 	envMigrationsPath  = "MIGRATIONS_PATH"
+	envMigrationsDBURL = "MIGRATIONS_DATABASE_URL"
 	envKafkaBrokers    = "KAFKA_BROKERS"
 	envCapabilityGroup = "SITE_CAPABILITY_CONSUMER_GROUP"
 	envDemandGroup     = "SITE_SKU_DEMAND_CONSUMER_GROUP"
@@ -136,7 +137,7 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	if migrationsPath == "" {
 		migrationsPath = defaultMigrationsPath
 	}
-	if err := postgres.RunMigrations(databaseURL, migrationsPath); err != nil {
+	if err := postgres.RunMigrations(migrationsURL(databaseURL), migrationsPath); err != nil {
 		return handler, nil, closeAll, fmt.Errorf("run migrations: %w", err)
 	}
 	pool, err := postgres.NewPool(ctx, databaseURL)
@@ -163,6 +164,18 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	closers = append(closers, wired.closers...)
 
 	return handler, runners, closeAll, nil
+}
+
+// migrationsURL returns the DSN the golang-migrate step uses:
+// MIGRATIONS_DATABASE_URL when set, else the runtime DSN. golang-migrate takes a
+// session-scoped pg_advisory_lock that PgBouncer's transaction pooling cannot
+// honour, so a deployment whose DATABASE_URL goes through a pooler supplies a
+// DIRECT connection string here. The runtime pgxpool never uses it.
+func migrationsURL(databaseURL string) string {
+	if direct := os.Getenv(envMigrationsDBURL); direct != "" {
+		return direct
+	}
+	return databaseURL
 }
 
 // maxStalenessFromEnv resolves PLANNING_MAX_STALENESS (default 10m).
