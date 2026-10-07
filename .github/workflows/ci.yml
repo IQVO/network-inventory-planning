@@ -303,15 +303,36 @@ jobs:
 
   # Packaging validation runs for every pull request, including the normal
   # GitFlow path to develop; main-only gating left ordinary changes untested.
+  # The chart landed with this repo's first packaging PR: ct lint validates
+  # charts/network-inventory-planning (template render + helm lint + YAML
+  # schema + maintainer/version checks) on every PR that carries the chart.
   # ============================================================
-  # CLASSIFICATION: DOCS/API DRIFT
-  # Guards against the generated "API Reference" docs
-  # (docs/docs/api-reference/rest/, produced by docusaurus-plugin-openapi-docs
-  # from apis/openapi.yaml) drifting out of sync with the spec they're
-  # supposed to mirror. Regenerates them exactly as `gen-api-docs` would and
-  # fails the PR if that produces any diff -- i.e. someone changed
-  # apis/openapi.yaml (or hand-edited the generated files) without running
-  # `npm run gen-api-docs inventory` and committing the result.
+  # CLASSIFICATION: PACKAGING (Helm chart lint)
+  # ============================================================
+  helm-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The chart exists in this repo now, so validate on every PR (the
+    # earlier artifact-conditional skip is no longer needed). Job-level
+    # `if:` cannot call hashFiles() — GitHub rejects the workflow.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.x"
+          check-latest: true
+      - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+      - name: Run chart-testing (lint)
+        run: ct lint --charts charts/network-inventory-planning --validate-maintainers=false --check-version-increment=false
+
+  # ============================================================
+  # CLASSIFICATION: LINTERS & STATIC ANALYSIS (architecture fitness)
   # ============================================================
   arch-test:
     runs-on: ubuntu-latest
@@ -331,9 +352,55 @@ jobs:
   # of pass/fail so history is visible even when nothing blocks.
   # ============================================================
   # CLASSIFICATION: SECURITY SCANNER (container image)
-  # Runs ONLY for a pull_request targeting main -- validated pre-merge,
-  # never on develop pushes/PRs or on push-to-main (already validated).
+  # The Dockerfile landed with this repo's first packaging PR; the gate runs
+  # on every PR (job-level `if:` cannot call hashFiles() — GitHub rejects
+  # the whole workflow, which is why the earlier artifact-conditional form
+  # produced zero-job failures).
   # ============================================================
+  trivy-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - name: Build image (local only, not pushed)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: "network-inventory-planning:scan"
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy scan (SARIF, always uploaded)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        if: always()
+        with:
+          image-ref: 'network-inventory-planning:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+      - name: Upload Trivy SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      - name: "Trivy scan (blocking gate: CRITICAL/HIGH with a fix available)"
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: 'network-inventory-planning:scan'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
   docker-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20

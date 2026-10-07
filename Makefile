@@ -147,6 +147,25 @@ check: fmt-check vet build lint test
 # (needs a DB) and `mutation` (slow).
 check-all: check coverage arch-test bdd
 
+# --- packaging (mirrors the helm-lint / trivy-scan CI jobs) -----------------
+.PHONY: image helm-lint helm-template
+IMAGE_REPO ?= claudioed/network-inventory-planning
+IMAGE_TAG  ?= dev
+
+## image: build the container image locally (same Dockerfile trivy-scan builds)
+image:
+	docker build -t $(IMAGE_REPO):$(IMAGE_TAG) .
+
+## helm-lint: chart-testing lint of charts/network-inventory-planning,
+## the exact command the CI helm-lint job runs
+helm-lint:
+	ct lint --charts charts/network-inventory-planning --validate-maintainers=false --check-version-increment=false
+
+## helm-template: render the chart with default values (smoke check)
+helm-template:
+	helm template charts/network-inventory-planning >/dev/null
+	@echo "helm template: clean"
+
 # --- agent harness (harness-template v3) -----------------------------------
 .PHONY: check-fast guide-lint harness-test
 # Fast local gate used by the agent Stop hook: format, vet, fitness tests, and the tests of

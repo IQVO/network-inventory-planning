@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "network-inventory-planning.fullname" . }}
+  labels:
+    {{- include "network-inventory-planning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "network-inventory-planning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "network-inventory-planning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "network-inventory-planning.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: HTTP_ADDR
+              value: {{ .Values.config.httpAddr | quote }}
+            {{- if .Values.config.maxStaleness }}
+            - name: PLANNING_MAX_STALENESS
+              value: {{ .Values.config.maxStaleness | quote }}
+            {{- end }}
+            # ADR 0005 work-release configuration. TRANSFER_PICK_PATH_ID has
+            # no default on purpose: unset, the approval endpoint answers
+            # 503 config-incomplete (fail-closed).
+            {{- if .Values.config.transferPickPathId }}
+            - name: TRANSFER_PICK_PATH_ID
+              value: {{ .Values.config.transferPickPathId | quote }}
+            {{- end }}
+            {{- if .Values.config.transferPickCptOffset }}
+            - name: TRANSFER_PICK_CPT_OFFSET
+              value: {{ .Values.config.transferPickCptOffset | quote }}
+            {{- end }}
+            {{- if .Values.config.transferDispatchPathId }}
+            - name: TRANSFER_DISPATCH_PATH_ID
+              value: {{ .Values.config.transferDispatchPathId | quote }}
+            {{- end }}
+            {{- if .Values.config.transferDispatchCptOffset }}
+            - name: TRANSFER_DISPATCH_CPT_OFFSET
+              value: {{ .Values.config.transferDispatchCptOffset | quote }}
+            {{- end }}
+            - name: OUTBOX_RELAY_ENABLED
+              value: {{ .Values.config.outboxRelayEnabled | quote }}
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            {{- if or .Values.database.url .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.databaseSecretName" . }}
+                  key: {{ .Values.database.existingSecretKey }}
+            {{- end }}
+            {{- if .Values.kafka.enabled }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.kafka.brokers | quote }}
+            # Each consumer-group env var is its own off switch: EMPTY means
+            # that consumer does not run (no default would be safe -- a
+            # default group id would let a locally run process join the live
+            # cluster's group and steal its partitions).
+            {{- if .Values.kafka.siteCapabilityConsumerGroup }}
+            - name: SITE_CAPABILITY_CONSUMER_GROUP
+              value: {{ .Values.kafka.siteCapabilityConsumerGroup | quote }}
+            {{- end }}
+            {{- if .Values.kafka.siteSkuDemandConsumerGroup }}
+            - name: SITE_SKU_DEMAND_CONSUMER_GROUP
+              value: {{ .Values.kafka.siteSkuDemandConsumerGroup | quote }}
+            {{- end }}
+            {{- if .Values.kafka.capacityPlanConsumerGroup }}
+            - name: CAPACITY_PLAN_CONSUMER_GROUP
+              value: {{ .Values.kafka.capacityPlanConsumerGroup | quote }}
+            {{- end }}
+            {{- if .Values.kafka.transferReplyConsumerGroup }}
+            - name: TRANSFER_REPLY_CONSUMER_GROUP
+              value: {{ .Values.kafka.transferReplyConsumerGroup | quote }}
+            {{- end }}
+            {{- if .Values.kafka.transferFactConsumerGroup }}
+            - name: TRANSFER_FACT_CONSUMER_GROUP
+              value: {{ .Values.kafka.transferFactConsumerGroup | quote }}
+            {{- end }}
+            {{- end }}
+            {{- range .Values.extraEnv }}
+            - {{ toYaml . | nindent 14 | trim }}
+            {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
