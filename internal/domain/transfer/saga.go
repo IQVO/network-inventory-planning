@@ -10,14 +10,18 @@ import (
 // TransferState is the lifecycle state of an InterWarehouseTransfer (the
 // Phase-2 saga aggregate). Legal progression:
 //
-//	DRAFT -> PROPOSED -> APPROVED -> ALLOCATING -> ALLOCATED
+//	DRAFT -> PROPOSED -> APPROVED -> ALLOCATING -> ALLOCATED -> PICKED
+//	                                              -> IN_TRANSIT -> ARRIVED
+//	                                              -> RECEIVED (terminal)
 //	                                        \-> UNFULFILLABLE
 //	Any pre-release state              -> CANCELLED
 //
 // CANCELLED is allowed only BEFORE the origin reservation exists (in v1,
 // from DRAFT, PROPOSED, APPROVED or ALLOCATING): once stock is ALLOCATED
 // the saga must not silently forget a hold inventory-storage is keeping;
-// releasing it needs the explicit revocation path of a later phase.
+// releasing it needs the explicit revocation path of a later phase. The
+// fact-driven tail (PICKED onwards, ADR 0005) is likewise not cancellable:
+// the stock is physically in motion.
 type TransferState string
 
 const (
@@ -26,6 +30,10 @@ const (
 	StateApproved      TransferState = "APPROVED"
 	StateAllocating    TransferState = "ALLOCATING"
 	StateAllocated     TransferState = "ALLOCATED"
+	StatePicked        TransferState = "PICKED"
+	StateInTransit     TransferState = "IN_TRANSIT"
+	StateArrived       TransferState = "ARRIVED"
+	StateReceived      TransferState = "RECEIVED"
 	StateUnfulfillable TransferState = "UNFULFILLABLE"
 	StateCancelled     TransferState = "CANCELLED"
 )
@@ -65,6 +73,12 @@ func (r RejectionReason) Valid() bool {
 
 // ErrTransferNotFound marks a Load of an absent transfer.
 var ErrTransferNotFound = errors.New("transfer: not found")
+
+// ErrFactRefused marks a fact whose payload fails the aggregate's
+// consistency checks (an impossible quantity, a foreign line, a wrong
+// site/SKU). Deterministic: consumers log it and commit past, never
+// retry — the same payload always refuses the same way.
+var ErrFactRefused = errors.New("transfer: fact refused")
 
 // ErrProposalExpired marks an approval attempted at or after expires_at.
 var ErrProposalExpired = errors.New("transfer: proposal expired")
@@ -134,6 +148,8 @@ type InterWarehouseTransfer struct {
 	reservationID       string
 	allocations         []Allocation
 	allocationExpiresAt time.Time
+	pickedQuantity      int
+	stowAllocations     []StowAllocation
 	rejectionReason     RejectionReason
 	audit               []AuditEntry
 	createdAt           time.Time
@@ -392,6 +408,8 @@ type Snapshot struct {
 	ReservationID       string
 	Allocations         []Allocation
 	AllocationExpiresAt time.Time
+	PickedQuantity      int
+	StowAllocations     []StowAllocation
 	RejectionReason     RejectionReason
 	Audit               []AuditEntry
 	CreatedAt           time.Time
@@ -418,6 +436,8 @@ func Rehydrate(s Snapshot) *InterWarehouseTransfer {
 		reservationID:       s.ReservationID,
 		allocations:         append([]Allocation(nil), s.Allocations...),
 		allocationExpiresAt: s.AllocationExpiresAt,
+		pickedQuantity:      s.PickedQuantity,
+		stowAllocations:     append([]StowAllocation(nil), s.StowAllocations...),
 		rejectionReason:     s.RejectionReason,
 		audit:               append([]AuditEntry(nil), s.Audit...),
 		createdAt:           s.CreatedAt,
@@ -471,6 +491,26 @@ func (t *InterWarehouseTransfer) Allocations() []Allocation {
 
 // AllocationExpiresAt returns the origin reservation's expiry.
 func (t *InterWarehouseTransfer) AllocationExpiresAt() time.Time { return t.allocationExpiresAt }
+
+// PickedQuantity returns the quantity the origin pick actually picked
+// (set once PICKED; equals the allocated quantity unless the pick was
+// short).
+func (t *InterWarehouseTransfer) PickedQuantity() int { return t.pickedQuantity }
+
+// DispatchQuantity is the quantity the dispatch leg moves: the PICKED
+// quantity once a pick has completed, else the allocated quantity.
+func (t *InterWarehouseTransfer) DispatchQuantity() int {
+	if t.pickedQuantity > 0 {
+		return t.pickedQuantity
+	}
+	return t.quantity
+}
+
+// StowAllocations returns a copy of the per-stock-unit destination stow
+// allocations (set once RECEIVED).
+func (t *InterWarehouseTransfer) StowAllocations() []StowAllocation {
+	return append([]StowAllocation(nil), t.stowAllocations...)
+}
 
 // RejectionReason returns inventory-storage's closed rejection reason (set
 // once UNFULFILLABLE).

@@ -33,8 +33,13 @@ const (
 	envDemandGroup     = "SITE_SKU_DEMAND_CONSUMER_GROUP"
 	envCapacityGroup   = "CAPACITY_PLAN_CONSUMER_GROUP"
 	envTransferGroup   = "TRANSFER_REPLY_CONSUMER_GROUP"
+	envTransferFactGrp = "TRANSFER_FACT_CONSUMER_GROUP"
 	envOutboxRelay     = "OUTBOX_RELAY_ENABLED"
 	envMaxStaleness    = "PLANNING_MAX_STALENESS"
+	envPickPathID      = "TRANSFER_PICK_PATH_ID"
+	envPickCPTOffset   = "TRANSFER_PICK_CPT_OFFSET"
+	envDispatchPathID  = "TRANSFER_DISPATCH_PATH_ID"
+	envDispatchCPTOffs = "TRANSFER_DISPATCH_CPT_OFFSET"
 )
 
 const defaultMigrationsPath = "internal/adapters/outbound/postgres/migrations"
@@ -172,6 +177,51 @@ func maxStalenessFromEnv() (time.Duration, error) {
 	return defaultMaxStaleness, nil
 }
 
+// defaultCPTOffset is the release CPT horizon used when a leg's
+// TRANSFER_*_CPT_OFFSET is unset: 2h out for the pick, 3h for the
+// dispatch (the dispatch happens after the pick, so its CPT sits further
+// out to preserve the pick-before-dispatch slack).
+const (
+	defaultPickCPTOffset   = 2 * time.Hour
+	defaultDispatchCPTOffs = 3 * time.Hour
+)
+
+// cptOffsetFromEnv resolves one TRANSFER_*_CPT_OFFSET (default d).
+func cptOffsetFromEnv(envName string, def time.Duration) (time.Duration, error) {
+	raw := os.Getenv(envName)
+	if raw == "" {
+		return def, nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration, got %q", envName, raw)
+	}
+	return parsed, nil
+}
+
+// workReleaseConfigFromEnv resolves the ADR 0005 release configuration.
+// TRANSFER_PICK_PATH_ID deliberately has NO default: unset means the
+// approval endpoint answers 503 config-incomplete (fail-closed) rather
+// than minting transfers whose pick demand could not be released.
+func workReleaseConfigFromEnv(logger *slog.Logger) usecases.WorkReleaseConfig {
+	pickOffset, err := cptOffsetFromEnv(envPickCPTOffset, defaultPickCPTOffset)
+	if err != nil {
+		logger.Warn("invalid TRANSFER_PICK_CPT_OFFSET; using default", "error", err, "default", defaultPickCPTOffset)
+		pickOffset = defaultPickCPTOffset
+	}
+	dispatchOffset, err := cptOffsetFromEnv(envDispatchCPTOffs, defaultDispatchCPTOffs)
+	if err != nil {
+		logger.Warn("invalid TRANSFER_DISPATCH_CPT_OFFSET; using default", "error", err, "default", defaultDispatchCPTOffs)
+		dispatchOffset = defaultDispatchCPTOffs
+	}
+	return usecases.WorkReleaseConfig{
+		PickPathID:        os.Getenv(envPickPathID),
+		PickCPTOffset:     pickOffset,
+		DispatchPathID:    os.Getenv(envDispatchPathID),
+		DispatchCPTOffset: dispatchOffset,
+	}
+}
+
 // sagaWiring is what wireSagas assembles: the two read/approve use cases
 // plus the runner/closer funcs of the consumers and the outbox relay.
 type sagaWiring struct {
@@ -205,25 +255,53 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		out.runners = append(out.runners, relayRunner)
 	}
 
-	// The approval endpoint requires the outbox: without it the saga would
-	// persist state and never emit the allocation command. Unconfigured
+	// Work-release configuration (ADR 0005): the pick leg's path has no
+	// default, so an unconfigured deployment fails approval closed (503
+	// config-incomplete) instead of minting transfers whose pick demand
+	// could never be released.
+	release := workReleaseConfigFromEnv(logger)
+
+	// The approval endpoint requires the outbox AND a valid pick-leg
+	// release config: without either the saga would persist state and
+	// never emit the allocation command or the pick demand. Unconfigured
 	// means the endpoint answers 503 (fail-closed), exactly like Simulate.
 	if outboxPublisher != nil {
-		out.approve = &usecases.ApproveTransfer{
+		approve := &usecases.ApproveTransfer{
 			Transfers:    transfers,
 			Events:       outboxPublisher,
 			Snapshot:     snapshots,
 			UoW:          uow,
 			MaxStaleness: maxStaleness,
+			Release:      release,
 			Now:          time.Now,
+		}
+		if err := approve.Release.Validate(); err != nil {
+			logger.Warn("work release not configured; POST /v1/transfers:approve answers 503 (no transfer may be approved without a releasable pick leg)",
+				"error", err, "enable_with", strings.Join([]string{envPickPathID, envPickCPTOffset}, ","))
+			out.approve = approve // non-nil: the endpoint answers the typed 503 with the missing-var detail
+		} else {
+			out.approve = approve
 		}
 	} else {
 		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers:approve answers 503 (the saga cannot emit its allocation command without the outbox)")
 	}
 
-	replyAllocate := &usecases.ApplyTransferAllocation{Transfers: transfers, UoW: uow}
+	replyAllocate := &usecases.ApplyTransferAllocation{
+		Transfers: transfers,
+		Events:    outboxPublisher,
+		UoW:       uow,
+		Release:   release,
+		Now:       time.Now,
+	}
 	replyReject := &usecases.ApplyTransferRejection{Transfers: transfers, UoW: uow}
-	replyApplier := inboundkafka.ReplyUseCases{Allocate: *replyAllocate, Reject: *replyReject}
+	replyStaged := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, UoW: uow}
+	replyStow := &usecases.ApplyTransferStow{Transfers: transfers, UoW: uow}
+	replyApplier := inboundkafka.ReplyUseCases{Allocate: *replyAllocate, Reject: *replyReject, Staged: *replyStaged, Stow: *replyStow}
+
+	factPick := &usecases.ApplyTransferPick{Transfers: transfers, Events: outboxPublisher, UoW: uow, Release: release}
+	factDispatched := &usecases.ApplyTransferDispatched{Transfers: transfers, UoW: uow}
+	factArrival := &usecases.ApplyTransferArrival{Transfers: transfers, UoW: uow}
+	factApplier := inboundkafka.FactUseCases{Pick: *factPick, Dispatched: *factDispatched, Arrival: *factArrival}
 
 	consumerRunners, consumerClosers, err := startConsumers(logger, consumerDeps{
 		uow:             uow,
@@ -232,6 +310,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		demands:         postgres.NewSiteSkuDemandRepo(pool),
 		plans:           postgres.NewPublishedCapacityPlanRepo(pool),
 		replyApplier:    replyApplier,
+		factApplier:     factApplier,
 	})
 	if err != nil {
 		return out, err
@@ -249,6 +328,7 @@ type consumerDeps struct {
 	demands         ports.SiteSkuDemandRepository
 	plans           ports.PublishedCapacityPlanRepository
 	replyApplier    inboundkafka.TransferReplyApplier
+	factApplier     inboundkafka.TransferFactApplier
 }
 
 // wireOutbox builds the transactional-outbox publisher and, when
@@ -331,6 +411,9 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 	})
 	spawn("transfer-reply", os.Getenv(envTransferGroup), func() consumer {
 		return inboundkafka.NewTransferReplyConsumer(brokers, os.Getenv(envTransferGroup), d.replyApplier, d.processedEvents, d.uow, logger)
+	})
+	spawn("transfer-fact", os.Getenv(envTransferFactGrp), func() consumer {
+		return inboundkafka.NewTransferFactConsumer(brokers, os.Getenv(envTransferFactGrp), d.factApplier, d.processedEvents, d.uow, logger)
 	})
 	return runners, closers, nil
 }

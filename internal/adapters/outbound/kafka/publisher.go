@@ -50,13 +50,17 @@ type Encoder interface {
 	Encode(ctx context.Context, event transfer.DomainEvent) ([]Encoded, error)
 }
 
-// TransferEncoder encodes the two Phase-2 published types:
+// TransferEncoder encodes the published types:
 //
 //   - transfer.PlanApproved → TransferPlanApproved (subject/key transfer id)
 //   - transfer.AllocationRequested → TransferAllocationRequested
 //     (subject/key transfer_line_id, payload exactly inventory-storage's
 //     consumed contract {transfer_id, transfer_line_id, origin_site_id,
 //     sku, quantity})
+//   - transfer.DemandReleased → WorkDemandReleased (subject/key
+//     demand_id, payload exactly WES's consumed contract {demand_id,
+//     work_kind, transfer_ref, path_id, site_id, cpt, sku, quantity} —
+//     ADR 0005)
 //
 // Any other domain event encodes to zero messages (skipped, not an error).
 type TransferEncoder struct {
@@ -73,9 +77,52 @@ func (e *TransferEncoder) Encode(_ context.Context, event transfer.DomainEvent) 
 		return e.encodePlanApproved(evt)
 	case transfer.AllocationRequested:
 		return e.encodeAllocationRequested(evt)
+	case transfer.DemandReleased:
+		return e.encodeDemandReleased(evt)
 	default:
 		return nil, nil
 	}
+}
+
+// entityWorkDemand is the `type` entity segment of WorkDemandReleased —
+// WES's consumed contract names the entity `workdemand`, not `transfer`.
+const entityWorkDemand = "workdemand"
+
+func (e *TransferEncoder) encodeDemandReleased(evt transfer.DemandReleased) ([]Encoded, error) {
+	// EXACTLY WES's consumed contract (mirrored from its
+	// apis/asyncapi.yaml on origin/develop): data {demand_id, work_kind,
+	// transfer_ref, path_id, site_id, cpt, sku, quantity}, subject/key
+	// demand_id, every field required by the producer.
+	payload := map[string]any{
+		"demand_id":    evt.DemandID,
+		"work_kind":    string(evt.WorkKind),
+		"transfer_ref": string(evt.TransferRef),
+		"path_id":      evt.PathID,
+		"site_id":      evt.SiteID,
+		"cpt":          evt.CPT.UTC().Format(time.RFC3339),
+		"sku":          evt.SKU,
+		"quantity":     evt.Quantity,
+	}
+	value, err := cloudevents.New(cloudevents.Spec{
+		ID:        e.mintID(),
+		Entity:    entityWorkDemand,
+		EventName: "WorkDemandReleased",
+		Subject:   evt.DemandID,
+		Time:      evt.OccurredAt,
+		Stream:    cloudevents.StreamEvents,
+		Version:   1,
+		Data:      payload,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode WorkDemandReleased: %w", err)
+	}
+	return []Encoded{{
+		Topic:     TransferTopic,
+		EventType: cloudevents.Type(entityWorkDemand, "WorkDemandReleased"),
+		Key:       []byte(evt.DemandID),
+		Value:     value,
+		Headers:   []kafkago.Header{cloudevents.ContentTypeHeader()},
+	}}, nil
 }
 
 func (e *TransferEncoder) encodePlanApproved(evt transfer.PlanApproved) ([]Encoded, error) {

@@ -25,6 +25,14 @@ const (
 	typeTransferStockAllocationRejected = "com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationRejected"
 )
 
+// The two destination facts (the receiving side of the saga, ADR 0005),
+// byte-identical to inventory-storage's apis/asyncapi.yaml — the contract
+// being built in parallel; the strings below are the agreed shape.
+const (
+	typeTransferReceiptStaged = "com.warehouse.wms.inventory-storage.stock.TransferReceiptStaged"
+	typeTransferStockStowed   = "com.warehouse.wms.inventory-storage.stock.TransferStockStowed"
+)
+
 // transferReplyConsumerName namespaces this consumer's processed-event rows.
 const transferReplyConsumerName = "transfer-reply-consumer"
 
@@ -59,18 +67,55 @@ type transferStockAllocationRejectedData struct {
 	Reason            string `json:"reason"`
 }
 
+// transferReceiptStagedData mirrors inventory-storage's
+// TransferReceiptStaged payload (data {transfer_id, transfer_line_id,
+// destination_site_id, sku, expected_quantity, received_quantity,
+// variance}; subject/key transfer_line_id).
+type transferReceiptStagedData struct {
+	TransferID        string `json:"transfer_id"`
+	TransferLineID    string `json:"transfer_line_id"`
+	DestinationSiteID string `json:"destination_site_id"`
+	SKU               string `json:"sku"`
+	ExpectedQuantity  int    `json:"expected_quantity"`
+	ReceivedQuantity  int    `json:"received_quantity"`
+	Variance          int    `json:"variance"`
+}
+
+// transferStockStowedData mirrors inventory-storage's
+// TransferStockStowed payload (data {transfer_id, transfer_line_id,
+// destination_site_id, sku, received_quantity, stowed_quantity,
+// allocations:[{stock_unit_id, bin_id, quantity}]}; subject/key
+// transfer_line_id).
+type transferStockStowedData struct {
+	TransferID        string `json:"transfer_id"`
+	TransferLineID    string `json:"transfer_line_id"`
+	DestinationSiteID string `json:"destination_site_id"`
+	SKU               string `json:"sku"`
+	ReceivedQuantity  int    `json:"received_quantity"`
+	StowedQuantity    int    `json:"stowed_quantity"`
+	Allocations       []struct {
+		StockUnitID string `json:"stock_unit_id"`
+		BinID       string `json:"bin_id"`
+		Quantity    int    `json:"quantity"`
+	} `json:"allocations"`
+}
+
 // TransferReplyApplier is the application surface the reply consumer
 // drives. implemented by ReplyUseCases (a pair of the two use cases).
 type TransferReplyApplier interface {
 	ApplyAllocation(ctx context.Context, in usecases.ApplyAllocationInput) error
 	ApplyRejection(ctx context.Context, in usecases.ApplyRejectionInput) error
+	// The two destination facts (ADR 0005), same topic, same consumer.
+	ApplyReceiptStaged(ctx context.Context, in usecases.ApplyReceiptStagedInput) error
+	ApplyStowed(ctx context.Context, in usecases.ApplyStowInput) error
 }
 
-// ReplyUseCases pairs the two reply use cases into a
-// TransferReplyApplier.
+// ReplyUseCases pairs the reply use cases into a TransferReplyApplier.
 type ReplyUseCases struct {
 	Allocate usecases.ApplyTransferAllocation
 	Reject   usecases.ApplyTransferRejection
+	Staged   usecases.ApplyTransferReceiptStaged
+	Stow     usecases.ApplyTransferStow
 }
 
 // ApplyAllocation implements TransferReplyApplier.
@@ -81,6 +126,16 @@ func (r ReplyUseCases) ApplyAllocation(ctx context.Context, in usecases.ApplyAll
 // ApplyRejection implements TransferReplyApplier.
 func (r ReplyUseCases) ApplyRejection(ctx context.Context, in usecases.ApplyRejectionInput) error {
 	return r.Reject.Execute(ctx, in)
+}
+
+// ApplyReceiptStaged implements TransferReplyApplier.
+func (r ReplyUseCases) ApplyReceiptStaged(ctx context.Context, in usecases.ApplyReceiptStagedInput) error {
+	return r.Staged.Execute(ctx, in)
+}
+
+// ApplyStowed implements TransferReplyApplier.
+func (r ReplyUseCases) ApplyStowed(ctx context.Context, in usecases.ApplyStowInput) error {
+	return r.Stow.Execute(ctx, in)
 }
 
 // TransferReplyConsumer consumes inventory-storage's two transfer
@@ -159,6 +214,10 @@ func (c *TransferReplyConsumer) HandleMessage(ctx context.Context, value []byte)
 		return c.handleAllocated(ctx, e)
 	case typeTransferStockAllocationRejected:
 		return c.handleRejected(ctx, e)
+	case typeTransferReceiptStaged:
+		return c.handleReceiptStaged(ctx, e)
+	case typeTransferStockStowed:
+		return c.handleStowed(ctx, e)
 	default:
 		return nil // unknown type: ignore (full-type dispatch)
 	}
@@ -251,6 +310,91 @@ func (c *TransferReplyConsumer) handleRejected(ctx context.Context, e ce.Event) 
 			return fmt.Errorf("apply TransferStockAllocationRejected: %w", err)
 		}
 		c.Logger.InfoContext(ctx, "transfer unfulfillable", "event_id", e.ID(), "transfer_id", data.TransferID, "reason", data.Reason)
+		return nil
+	})
+}
+
+// handleReceiptStaged applies inventory-storage's TransferReceiptStaged
+// destination fact: IN_TRANSIT → ARRIVED (the scan-driven receiving path).
+// The transfer_id (not the line-keyed subject) is the Load key; the
+// variance is informational (recorded in the log, not the aggregate — v1
+// has no variance disposition workflow).
+func (c *TransferReplyConsumer) handleReceiptStaged(ctx context.Context, e ce.Event) error {
+	var data transferReceiptStagedData
+	if err := e.DataAs(&data); err != nil {
+		c.Logger.WarnContext(ctx, "skipping malformed TransferReceiptStaged payload", "error", err, "event_id", e.ID())
+		return nil
+	}
+	in := usecases.ApplyReceiptStagedInput{
+		TransferID: transfer.TransferID(data.TransferID),
+		LineID:     data.TransferLineID,
+		OccurredAt: e.Time().UTC(),
+	}
+
+	return c.UoW.Do(ctx, func(ctx context.Context) error {
+		claimed, err := c.ProcessedEvents.Claim(ctx, transferReplyConsumerName, e.ID())
+		if err != nil {
+			return fmt.Errorf("claim processed event: %w", err)
+		}
+		if !claimed {
+			c.Logger.InfoContext(ctx, "skipping already-processed TransferReceiptStaged event", "event_id", e.ID())
+			return nil
+		}
+		if err := c.Applier.ApplyReceiptStaged(ctx, in); err != nil {
+			if usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err) {
+				c.Logger.WarnContext(ctx, "skipping deterministic TransferReceiptStaged failure (unknown or out-of-order transfer)", "error", err, "event_id", e.ID(), "transfer_id", data.TransferID)
+				return nil
+			}
+			return fmt.Errorf("apply TransferReceiptStaged: %w", err)
+		}
+		c.Logger.InfoContext(ctx, "transfer receipt staged (ARRIVED)", "event_id", e.ID(), "transfer_id", data.TransferID, "variance", data.Variance)
+		return nil
+	})
+}
+
+// handleStowed applies inventory-storage's TransferStockStowed destination
+// fact: ARRIVED → RECEIVED (terminal) with the destination stow
+// allocations persisted.
+func (c *TransferReplyConsumer) handleStowed(ctx context.Context, e ce.Event) error {
+	var data transferStockStowedData
+	if err := e.DataAs(&data); err != nil {
+		c.Logger.WarnContext(ctx, "skipping malformed TransferStockStowed payload", "error", err, "event_id", e.ID())
+		return nil
+	}
+	allocations := make([]transfer.StowAllocation, 0, len(data.Allocations))
+	for _, a := range data.Allocations {
+		allocations = append(allocations, transfer.StowAllocation{StockUnitID: a.StockUnitID, BinID: a.BinID, Quantity: a.Quantity})
+	}
+	in := usecases.ApplyStowInput{
+		TransferID: transfer.TransferID(data.TransferID),
+		Stowed: transfer.Stowed{
+			TransferLineID:   data.TransferLineID,
+			DestinationSite:  data.DestinationSiteID,
+			SKU:              data.SKU,
+			ReceivedQuantity: data.ReceivedQuantity,
+			StowedQuantity:   data.StowedQuantity,
+			Allocations:      allocations,
+		},
+		OccurredAt: e.Time().UTC(),
+	}
+
+	return c.UoW.Do(ctx, func(ctx context.Context) error {
+		claimed, err := c.ProcessedEvents.Claim(ctx, transferReplyConsumerName, e.ID())
+		if err != nil {
+			return fmt.Errorf("claim processed event: %w", err)
+		}
+		if !claimed {
+			c.Logger.InfoContext(ctx, "skipping already-processed TransferStockStowed event", "event_id", e.ID())
+			return nil
+		}
+		if err := c.Applier.ApplyStowed(ctx, in); err != nil {
+			if usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err) {
+				c.Logger.WarnContext(ctx, "skipping deterministic TransferStockStowed failure (unknown or out-of-order transfer)", "error", err, "event_id", e.ID(), "transfer_id", data.TransferID)
+				return nil
+			}
+			return fmt.Errorf("apply TransferStockStowed: %w", err)
+		}
+		c.Logger.InfoContext(ctx, "transfer stowed (RECEIVED, terminal)", "event_id", e.ID(), "transfer_id", data.TransferID, "stowed", data.StowedQuantity)
 		return nil
 	})
 }

@@ -51,13 +51,18 @@ type ApproveTransferResult struct {
 // through the transactional outbox — all in ONE UnitOfWork. The relay
 // drains the events to Kafka after commit; inventory-storage's reply then
 // drives the aggregate to ALLOCATED or UNFULFILLABLE via the reply
-// consumer.
+// consumer, which also releases the pick work demand (ADR 0005).
 type ApproveTransfer struct {
 	Transfers    ports.TransferRepository
 	Events       ports.TransferEventPublisher
 	Snapshot     ports.PlanningSnapshotRepository
 	UoW          ports.UnitOfWork
 	MaxStaleness time.Duration
+	// Release is the work-release configuration (ADR 0005). Validate()
+	// MUST pass before any approval is accepted: an approval without a
+	// configured pick path would mint a transfer whose allocation reply
+	// has no pick demand to release — fail-closed 503 instead.
+	Release WorkReleaseConfig
 	// Now supplies the approval clock (never time.Now directly).
 	Now func() time.Time
 }
@@ -162,6 +167,13 @@ func (u ApproveTransfer) validate(in ApproveTransferInput) error {
 	if u.MaxStaleness <= 0 {
 		return fmt.Errorf("%w: max staleness must be positive", ErrInvalidApproval)
 	}
+	// Fail-closed work-release gate (ADR 0005): without a configured pick
+	// path the allocation reply would have no pick demand to release, so
+	// no transfer may even be approved. 503, not 422: deployment
+	// configuration is missing, the request was fine.
+	if err := u.Release.Validate(); err != nil {
+		return err
+	}
 	if in.IdempotencyKey == "" {
 		return fmt.Errorf("%w: idempotency key is required", ErrInvalidApproval)
 	}
@@ -188,31 +200,6 @@ type ApplyAllocationInput struct {
 	TransferID transfer.TransferID
 	Allocation transfer.StockAllocation
 	OccurredAt time.Time
-}
-
-// ApplyTransferAllocation applies a TransferStockAllocated reply: the
-// saga moves ALLOCATING → ALLOCATED with reservation id, allocations and
-// expiry persisted — claim + transition in ONE transaction.
-type ApplyTransferAllocation struct {
-	Transfers ports.TransferRepository
-	UoW       ports.UnitOfWork
-}
-
-// Execute applies the reply. A reply for an unknown transfer or an illegal
-// state is a DETERMINISTIC error (the consumer logs and skips); only
-// infrastructure failures are transient.
-func (u ApplyTransferAllocation) Execute(ctx context.Context, in ApplyAllocationInput) error {
-	ierr := u.UoW.Do(ctx, func(ctx context.Context) error {
-		trf, err := u.Transfers.Load(ctx, in.TransferID)
-		if err != nil {
-			return err
-		}
-		if err := trf.MarkAllocated(in.Allocation, in.OccurredAt); err != nil {
-			return err
-		}
-		return u.Transfers.UpdateState(ctx, trf)
-	})
-	return ierr
 }
 
 // ApplyRejectionInput is one TransferStockAllocationRejected reply.

@@ -83,15 +83,18 @@ func (r *TransferRepo) Load(ctx context.Context, id transfer.TransferID) (*trans
 	var (
 		snap              transfer.Snapshot
 		allocationsRaw    []byte
+		stowRaw           []byte
 		state             string
 		rejection         *string
 		reservation       *string
 		allocationExpires *time.Time
+		pickedQty         *int
 	)
 	err := q.QueryRow(ctx, `
 		SELECT transfer_id, idempotency_key, origin_site_id, destination_site_id, sku, quantity,
 		       policy_version, operator_reason, proposal_as_of, expires_at, state,
 		       reservation_id, allocations, allocation_expires_at, rejection_reason,
+		       picked_quantity, stow_allocations,
 		       created_at, updated_at, version
 		FROM inter_warehouse_transfer
 		WHERE transfer_id = $1
@@ -99,6 +102,7 @@ func (r *TransferRepo) Load(ctx context.Context, id transfer.TransferID) (*trans
 		&snap.ID, &snap.IdempotencyKey, &snap.OriginSiteID, &snap.DestinationSiteID, &snap.SKU, &snap.Quantity,
 		&snap.PolicyVersion, &snap.OperatorReason, &snap.ProposalAsOf, &snap.ExpiresAt, &state,
 		&reservation, &allocationsRaw, &allocationExpires, &rejection,
+		&pickedQty, &stowRaw,
 		&snap.CreatedAt, &snap.UpdatedAt, &snap.Version,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -117,9 +121,17 @@ func (r *TransferRepo) Load(ctx context.Context, id transfer.TransferID) (*trans
 	if rejection != nil {
 		snap.RejectionReason = transfer.RejectionReason(*rejection)
 	}
+	if pickedQty != nil {
+		snap.PickedQuantity = *pickedQty
+	}
 	if len(allocationsRaw) > 0 {
 		if err := json.Unmarshal(allocationsRaw, &snap.Allocations); err != nil {
 			return nil, fmt.Errorf("load transfer %s: decode allocations: %w", id, err)
+		}
+	}
+	if len(stowRaw) > 0 {
+		if err := json.Unmarshal(stowRaw, &snap.StowAllocations); err != nil {
+			return nil, fmt.Errorf("load transfer %s: decode stow allocations: %w", id, err)
 		}
 	}
 	audit, err := loadAudit(ctx, q, id)
@@ -139,18 +151,27 @@ func (r *TransferRepo) UpdateState(ctx context.Context, t *transfer.InterWarehou
 	if err != nil {
 		return fmt.Errorf("update transfer %s: encode allocations: %w", t.ID(), err)
 	}
+	stow, err := json.Marshal(t.StowAllocations())
+	if err != nil {
+		return fmt.Errorf("update transfer %s: encode stow allocations: %w", t.ID(), err)
+	}
 	var rejection any
 	if t.RejectionReason() != "" {
 		rejection = string(t.RejectionReason())
+	}
+	var pickedQty any
+	if t.PickedQuantity() > 0 {
+		pickedQty = t.PickedQuantity()
 	}
 
 	tag, err := q.Exec(ctx, `
 		UPDATE inter_warehouse_transfer SET
 			state = $2, reservation_id = $3, allocations = $4, allocation_expires_at = $5,
-			rejection_reason = $6, updated_at = $7, version = version + 1
+			rejection_reason = $6, updated_at = $7, version = version + 1,
+			picked_quantity = $9, stow_allocations = $10
 		WHERE transfer_id = $1 AND version = $8
 	`, string(t.ID()), string(t.State()), t.ReservationID(), allocations, t.AllocationExpiresAt(),
-		rejection, t.UpdatedAt(), t.Version())
+		rejection, t.UpdatedAt(), t.Version(), pickedQty, stow)
 	if err != nil {
 		return fmt.Errorf("update transfer %s: %w", t.ID(), err)
 	}

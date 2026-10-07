@@ -115,6 +115,17 @@ func approveFacts() planning.Facts {
 	}
 }
 
+// testReleaseConfig is a fully-configured WorkReleaseConfig for tests
+// (production reads the TRANSFER_* env vars at the composition root).
+func testReleaseConfig() WorkReleaseConfig {
+	return WorkReleaseConfig{
+		PickPathID:        "transfer-pick-path",
+		PickCPTOffset:     2 * time.Hour,
+		DispatchPathID:    "transfer-dispatch-path",
+		DispatchCPTOffset: 3 * time.Hour,
+	}
+}
+
 func approveUseCase(repo *fakeTransferRepo, pub *fakeEventPublisher, facts planning.Facts, loadErr error) ApproveTransfer {
 	if pub == nil {
 		pub = &fakeEventPublisher{}
@@ -125,6 +136,7 @@ func approveUseCase(repo *fakeTransferRepo, pub *fakeEventPublisher, facts plann
 		Snapshot:     fakeApproveSnapshot{facts: facts, err: loadErr},
 		UoW:          passThroughUoW{},
 		MaxStaleness: 10 * time.Minute,
+		Release:      testReleaseConfig(),
 		Now:          func() time.Time { return approveNow },
 	}
 }
@@ -326,7 +338,7 @@ func TestApplyTransferAllocationAndRejection(t *testing.T) {
 		t.Fatalf("approve: %v", err)
 	}
 
-	allocUc := ApplyTransferAllocation{Transfers: repo, UoW: passThroughUoW{}}
+	allocUc := ApplyTransferAllocation{Transfers: repo, Events: &fakeEventPublisher{}, UoW: passThroughUoW{}, Release: testReleaseConfig()}
 	replyAt := approveNow.Add(time.Minute)
 	err = allocUc.Execute(context.Background(), ApplyAllocationInput{
 		TransferID: result.TransferID,

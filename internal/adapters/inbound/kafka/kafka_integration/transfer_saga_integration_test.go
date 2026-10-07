@@ -9,12 +9,14 @@
 // the same reply is a no-op.
 package kafka_integration
 
+// The import block needs strings for the fact builders below.
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,7 +155,13 @@ func TestTransferSagaIntegration(t *testing.T) {
 		Snapshot:     snapshots,
 		UoW:          uow,
 		MaxStaleness: 10 * time.Minute,
-		Now:          func() time.Time { return itNow },
+		Release: usecases.WorkReleaseConfig{
+			PickPathID:        "transfer-pick-path",
+			PickCPTOffset:     2 * time.Hour,
+			DispatchPathID:    "transfer-dispatch-path",
+			DispatchCPTOffset: 3 * time.Hour,
+		},
+		Now: func() time.Time { return itNow },
 	}
 
 	// 1. Approve: state persists through ALLOCATING and the outbox holds
@@ -256,10 +264,23 @@ func TestTransferSagaIntegration(t *testing.T) {
 	allocatedValue := syntheticInventoryReply(t, result.TransferID, replyAt)
 	produceRaw(t, brokers, inboundkafka.InventoryTopic, string(result.TransferID)+":1", allocatedValue)
 
-	allocate := &usecases.ApplyTransferAllocation{Transfers: transfers, UoW: uow}
+	allocate := &usecases.ApplyTransferAllocation{
+		Transfers: transfers,
+		Events:    outbox,
+		UoW:       uow,
+		Release: usecases.WorkReleaseConfig{
+			PickPathID:        "transfer-pick-path",
+			PickCPTOffset:     2 * time.Hour,
+			DispatchPathID:    "transfer-dispatch-path",
+			DispatchCPTOffset: 3 * time.Hour,
+		},
+		Now: func() time.Time { return itNow },
+	}
 	reject := &usecases.ApplyTransferRejection{Transfers: transfers, UoW: uow}
+	stagedUse := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, UoW: uow}
+	stowUse := &usecases.ApplyTransferStow{Transfers: transfers, UoW: uow}
 	replyConsumer := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply"),
-		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject}, processedEvents, uow, nil)
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
 	runConsumerUntil(t, replyConsumer, 15*time.Second)
 
 	loaded, err = transfers.Load(ctx, result.TransferID)
@@ -277,11 +298,50 @@ func TestTransferSagaIntegration(t *testing.T) {
 		t.Fatalf("audit entries = %d, want 5: %+v", len(audit), audit)
 	}
 
-	// 4. Replay the SAME reply (fresh consumer group, redelivered): a
-	//    no-op — the transfer stays ALLOCATED with one audit entry for
-	//    the allocation, deduped on the CE id.
+	// 4. Relay the pick WorkDemandReleased (the allocation reply released
+	//    it in the SAME transaction as the ALLOCATED transition) and read
+	//    it off the topic: exactly WES's consumed shape.
+	published, err = relay.RelayOnce(ctx)
+	if err != nil {
+		t.Fatalf("relay pick demand: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("pick-demand relay published = %d, want 1", published)
+	}
+	// The reader uses a fresh group, so it replays the whole topic: read
+	// all three messages and take the LAST (the pick demand).
+	msgs = readOutboxEvents(t, brokers, 3)
+	pickDemandMsg := msgs[len(msgs)-1]
+	var pickDemandEnvelope struct {
+		Type    string         `json:"type"`
+		Subject string         `json:"subject"`
+		Data    map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(pickDemandMsg.Value, &pickDemandEnvelope); err != nil {
+		t.Fatalf("decode pick demand: %v", err)
+	}
+	if pickDemandEnvelope.Type != "com.warehouse.wes.network-inventory-planning.workdemand.WorkDemandReleased" {
+		t.Fatalf("pick demand type = %q", pickDemandEnvelope.Type)
+	}
+	wantDemandID := string(result.TransferID) + ":pick"
+	if string(pickDemandMsg.Key) != wantDemandID || pickDemandEnvelope.Data["demand_id"] != wantDemandID {
+		t.Fatalf("pick demand key/payload = %q / %+v", msgs[0].Key, pickDemandEnvelope.Data)
+	}
+	if pickDemandEnvelope.Data["work_kind"] != "TRANSFER_PICK" ||
+		pickDemandEnvelope.Data["transfer_ref"] != string(result.TransferID) ||
+		pickDemandEnvelope.Data["path_id"] != "transfer-pick-path" ||
+		pickDemandEnvelope.Data["site_id"] != "WH1" ||
+		pickDemandEnvelope.Data["sku"] != "SKU-1" ||
+		pickDemandEnvelope.Data["quantity"].(float64) != 5 {
+		t.Fatalf("pick demand payload = %+v", pickDemandEnvelope.Data)
+	}
+
+	// 5. Replay the SAME allocation reply (fresh consumer group,
+	//    redelivered): a no-op — the transfer stays ALLOCATED with one
+	//    audit entry for the allocation, deduped on the CE id, and the
+	//    pick demand is never re-relayed.
 	replayConsumer := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply-replay"),
-		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject}, processedEvents, uow, nil)
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
 	runConsumerUntil(t, replayConsumer, 15*time.Second)
 
 	loaded, err = transfers.Load(ctx, result.TransferID)
@@ -290,6 +350,131 @@ func TestTransferSagaIntegration(t *testing.T) {
 	}
 	if loaded.State() != "ALLOCATED" || len(loaded.Audit()) != 5 {
 		t.Fatalf("after replay: state = %s audit = %d (reply replay must be a no-op)", loaded.State(), len(loaded.Audit()))
+	}
+	if n, err := relay.RelayOnce(ctx); err != nil || n != 0 {
+		t.Fatalf("replayed reply must not re-release the pick demand: n = %d err = %v", n, err)
+	}
+
+	// 6. Synthetic fulfillment-execution TransferPicked (SHORT pick: 3 of
+	//    the allocated 5) on warehouse.fulfillment.events: the fact
+	//    consumer drives ALLOCATED → PICKED, records picked_quantity 3,
+	//    and releases the dispatch WorkDemandReleased with quantity 3.
+	ensureTopic(t, brokers, inboundkafka.FulfillmentTopic)
+	pickedAt := replyAt.Add(5 * time.Minute)
+	produceRaw(t, brokers, inboundkafka.FulfillmentTopic, "task-itest-1", syntheticTransferFact(t, "com.warehouse.wes.fulfillment-execution.transfer.TransferPicked", "task-itest-1", result.TransferID, "TRANSFER_PICK", 3, pickedAt))
+
+	factAllocateCfg := usecases.WorkReleaseConfig{
+		PickPathID:        "transfer-pick-path",
+		PickCPTOffset:     2 * time.Hour,
+		DispatchPathID:    "transfer-dispatch-path",
+		DispatchCPTOffset: 3 * time.Hour,
+	}
+	factConsumer := inboundkafka.NewTransferFactConsumer(brokers, uniqueGroupID("transfer-fact"),
+		inboundkafka.FactUseCases{
+			Pick:       usecases.ApplyTransferPick{Transfers: transfers, Events: outbox, UoW: uow, Release: factAllocateCfg},
+			Dispatched: usecases.ApplyTransferDispatched{Transfers: transfers, UoW: uow},
+			Arrival:    usecases.ApplyTransferArrival{Transfers: transfers, UoW: uow},
+		}, processedEvents, uow, nil)
+	runConsumerUntil(t, factConsumer, 15*time.Second)
+
+	loaded, err = transfers.Load(ctx, result.TransferID)
+	if err != nil {
+		t.Fatalf("load after pick: %v", err)
+	}
+	if loaded.State() != "PICKED" {
+		t.Fatalf("state after pick = %s, want PICKED", loaded.State())
+	}
+	if loaded.PickedQuantity() != 3 {
+		t.Fatalf("picked quantity = %d, want 3 (short pick recorded)", loaded.PickedQuantity())
+	}
+
+	// The dispatch demand carries the PICKED quantity (3), not 5. The
+	// fresh-group reader replays the whole topic: take the LAST message.
+	if n, err := relay.RelayOnce(ctx); err != nil || n != 1 {
+		t.Fatalf("dispatch-demand relay: n = %d err = %v", n, err)
+	}
+	msgs = readOutboxEvents(t, brokers, 4)
+	dispatchDemandMsg := msgs[len(msgs)-1]
+	var dispatchDemandEnvelope struct {
+		Type string         `json:"type"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(dispatchDemandMsg.Value, &dispatchDemandEnvelope); err != nil {
+		t.Fatalf("decode dispatch demand: %v", err)
+	}
+	wantDispatchID := string(result.TransferID) + ":dispatch"
+	if dispatchDemandEnvelope.Type != "com.warehouse.wes.network-inventory-planning.workdemand.WorkDemandReleased" ||
+		dispatchDemandEnvelope.Data["demand_id"] != wantDispatchID ||
+		dispatchDemandEnvelope.Data["work_kind"] != "TRANSFER_DISPATCH" ||
+		dispatchDemandEnvelope.Data["path_id"] != "transfer-dispatch-path" ||
+		dispatchDemandEnvelope.Data["quantity"].(float64) != 3 {
+		t.Fatalf("dispatch demand = %+v", dispatchDemandEnvelope.Data)
+	}
+
+	// 7. Dispatch → IN_TRANSIT, then the inventory destination facts drive
+	//    ARRIVED and RECEIVED (terminal).
+	dispatchedAt := pickedAt.Add(5 * time.Minute)
+	produceRaw(t, brokers, inboundkafka.FulfillmentTopic, "task-itest-2", syntheticTransferFact(t, "com.warehouse.wes.fulfillment-execution.transfer.TransferDispatched", "task-itest-2", result.TransferID, "TRANSFER_DISPATCH", 3, dispatchedAt))
+	stagedAt := dispatchedAt.Add(5 * time.Minute)
+	produceRaw(t, brokers, inboundkafka.InventoryTopic, string(result.TransferID)+":1", syntheticInventoryDestinationFact(t, "com.warehouse.wms.inventory-storage.stock.TransferReceiptStaged", result.TransferID, stagedAt, 0))
+	stowedAt := stagedAt.Add(5 * time.Minute)
+	produceRaw(t, brokers, inboundkafka.InventoryTopic, string(result.TransferID)+":1", syntheticInventoryDestinationFact(t, "com.warehouse.wms.inventory-storage.stock.TransferStockStowed", result.TransferID, stowedAt, 3))
+
+	secondFactConsumer := inboundkafka.NewTransferFactConsumer(brokers, uniqueGroupID("transfer-fact-2"),
+		inboundkafka.FactUseCases{
+			Pick:       usecases.ApplyTransferPick{Transfers: transfers, Events: outbox, UoW: uow, Release: factAllocateCfg},
+			Dispatched: usecases.ApplyTransferDispatched{Transfers: transfers, UoW: uow},
+			Arrival:    usecases.ApplyTransferArrival{Transfers: transfers, UoW: uow},
+		}, processedEvents, uow, nil)
+	runConsumerUntil(t, secondFactConsumer, 15*time.Second)
+	finalReplyConsumer := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply-final"),
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
+	runConsumerUntil(t, finalReplyConsumer, 15*time.Second)
+
+	loaded, err = transfers.Load(ctx, result.TransferID)
+	if err != nil {
+		t.Fatalf("load after stow: %v", err)
+	}
+	if loaded.State() != "RECEIVED" {
+		t.Fatalf("state after stow = %s, want RECEIVED (terminal)", loaded.State())
+	}
+	if len(loaded.StowAllocations()) != 1 || loaded.StowAllocations()[0].BinID != "BIN-ITEST-DEST" {
+		t.Fatalf("stow allocations = %+v", loaded.StowAllocations())
+	}
+	fullAudit := loaded.Audit()
+	wantTail := []string{"TransferPicked", "TransferDispatched", "TransferReceiptStaged", "TransferStockStowed"}
+	if len(fullAudit) < len(wantTail) {
+		t.Fatalf("audit = %d entries: %+v", len(fullAudit), fullAudit)
+	}
+	tail := fullAudit[len(fullAudit)-len(wantTail):]
+	for i, want := range wantTail {
+		if tail[i].Event != want {
+			t.Fatalf("audit tail[%d] = %q, want %q (full: %+v)", i, tail[i].Event, want, fullAudit)
+		}
+	}
+
+	// 8. Replays of every fact (fresh groups) are no-ops: the terminal
+	// state and the audit trail are unchanged, nothing new is relayed.
+	replayFacts := inboundkafka.NewTransferFactConsumer(brokers, uniqueGroupID("transfer-fact-replay"),
+		inboundkafka.FactUseCases{
+			Pick:       usecases.ApplyTransferPick{Transfers: transfers, Events: outbox, UoW: uow, Release: factAllocateCfg},
+			Dispatched: usecases.ApplyTransferDispatched{Transfers: transfers, UoW: uow},
+			Arrival:    usecases.ApplyTransferArrival{Transfers: transfers, UoW: uow},
+		}, processedEvents, uow, nil)
+	runConsumerUntil(t, replayFacts, 15*time.Second)
+	replayReplies := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply-replay2"),
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
+	runConsumerUntil(t, replayReplies, 15*time.Second)
+
+	loaded, err = transfers.Load(ctx, result.TransferID)
+	if err != nil {
+		t.Fatalf("load after fact replays: %v", err)
+	}
+	if loaded.State() != "RECEIVED" || len(loaded.Audit()) != 9 {
+		t.Fatalf("after replays: state = %s audit = %d (replays must be no-ops)", loaded.State(), len(loaded.Audit()))
+	}
+	if n, err := relay.RelayOnce(ctx); err != nil || n != 0 {
+		t.Fatalf("replays must not re-release demands: n = %d err = %v", n, err)
 	}
 }
 
@@ -322,6 +507,80 @@ func syntheticInventoryReply(t *testing.T, id fmt.Stringer, occurredAt time.Time
 	value, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal reply: %v", err)
+	}
+	return value
+}
+
+// syntheticTransferFact builds fulfillment-execution's transfer-fact wire
+// shape (its TransferFactData contract, mirrored): data {transfer_ref,
+// demand_id, work_unit_id, task_id, work_kind, site_id, sku, quantity},
+// subject/key task_id.
+func syntheticTransferFact(t *testing.T, fullType, taskID string, transferID fmt.Stringer, workKind string, quantity int, occurredAt time.Time) []byte {
+	t.Helper()
+	payload := map[string]any{
+		"specversion":     "1.0",
+		"id":              "itest-fact-" + taskID,
+		"source":          "/warehouse/fulfillment-execution",
+		"type":            fullType,
+		"subject":         taskID,
+		"time":            occurredAt.UTC().Format(time.RFC3339Nano),
+		"datacontenttype": "application/json",
+		"dataschema":      "urn:warehouse:fulfillment-execution:events:" + strings.Split(fullType, ".")[len(strings.Split(fullType, "."))-1] + ":v1",
+		"data": map[string]any{
+			"transfer_ref": transferID.String(),
+			"demand_id":    transferID.String() + ":pick",
+			"work_unit_id": "wu-" + taskID,
+			"task_id":      taskID,
+			"work_kind":    workKind,
+			"site_id":      "WH1",
+			"sku":          "SKU-1",
+			"quantity":     quantity,
+		},
+	}
+	value, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal fact: %v", err)
+	}
+	return value
+}
+
+// syntheticInventoryDestinationFact builds inventory-storage's
+// TransferReceiptStaged / TransferStockStowed wire shape: subject/key
+// transfer_line_id, data per the agreed receiving contract.
+func syntheticInventoryDestinationFact(t *testing.T, fullType string, transferID fmt.Stringer, occurredAt time.Time, stowedQty int) []byte {
+	t.Helper()
+	eventName := strings.Split(fullType, ".")[len(strings.Split(fullType, "."))-1]
+	data := map[string]any{
+		"transfer_id":         transferID.String(),
+		"transfer_line_id":    transferID.String() + ":1",
+		"destination_site_id": "WH2",
+		"sku":                 "SKU-1",
+		"expected_quantity":   5,
+		"received_quantity":   5,
+	}
+	switch eventName {
+	case "TransferReceiptStaged":
+		data["variance"] = 0
+	case "TransferStockStowed":
+		data["stowed_quantity"] = stowedQty
+		data["allocations"] = []map[string]any{
+			{"stock_unit_id": "su-itest-1", "bin_id": "BIN-ITEST-DEST", "quantity": stowedQty},
+		}
+	}
+	payload := map[string]any{
+		"specversion":     "1.0",
+		"id":              "itest-dest-" + eventName + "-" + occurredAt.Format(time.RFC3339Nano),
+		"source":          "/warehouse/inventory-storage",
+		"type":            fullType,
+		"subject":         transferID.String() + ":1",
+		"time":            occurredAt.UTC().Format(time.RFC3339Nano),
+		"datacontenttype": "application/json",
+		"dataschema":      "urn:warehouse:inventory-storage:events:" + eventName + ":v1",
+		"data":            data,
+	}
+	value, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal destination fact: %v", err)
 	}
 	return value
 }
