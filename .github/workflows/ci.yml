@@ -312,7 +312,10 @@ jobs:
   helm-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name == 'pull_request' && hashFiles('charts/**') != ''
+    # The chart exists in this repo now, so validate on every PR (the
+    # earlier artifact-conditional skip is no longer needed). Job-level
+    # `if:` cannot call hashFiles() — GitHub rejects the workflow.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -349,13 +352,15 @@ jobs:
   # of pass/fail so history is visible even when nothing blocks.
   # ============================================================
   # CLASSIFICATION: SECURITY SCANNER (container image)
-  # The Dockerfile landed with this repo's first packaging PR; the gate
-  # stays artifact-conditional (hashFiles) so a tree without it skips.
+  # The Dockerfile landed with this repo's first packaging PR; the gate runs
+  # on every PR (job-level `if:` cannot call hashFiles() — GitHub rejects
+  # the whole workflow, which is why the earlier artifact-conditional form
+  # produced zero-job failures).
   # ============================================================
   trivy-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event_name == 'pull_request' && hashFiles('Dockerfile') != ''
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
       security-events: write
