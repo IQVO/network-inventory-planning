@@ -14,6 +14,8 @@ const REJECTION_TEXT: Record<string, string> = {
   IDEMPOTENCY_CONFLICT: "The idempotency key was already used for another transfer.",
 };
 
+const PICKED_ONWARDS: ReadonlySet<string> = new Set(["PICKED", "IN_TRANSIT", "ARRIVED", "RECEIVED"]);
+
 /**
  * Transfer detail (GET /v1/transfers/{id}): current state, quantities,
  * reservation and the immutable audit trail as a timeline. Read-only.
@@ -53,7 +55,8 @@ function Detail({ t }: { t: TransferDetail }) {
             <KpiStat
               label="Picked quantity"
               value={t.pickedQuantity ?? null}
-              caption={t.pickedQuantity === undefined ? "not picked yet" : undefined}
+              // The service omits a zero pickedQuantity, so "absent" past PICKED means none was picked, not "not yet".
+              caption={t.pickedQuantity === undefined ? (PICKED_ONWARDS.has(t.state) ? "none recorded" : "not picked yet") : undefined}
             />
           </div>
           <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px var(--wh-space-4)", margin: 0 }}>

@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
 import { json, mockApi } from "./test/fetchMock";
-import { OPTIONS, detail, transfer, transferList } from "./test/fixtures";
+import { fillApproval } from "./test/approval";
+import { approved, detail, simulation, transfer, transferList } from "./test/fixtures";
 
 const NAV = "Network inventory sections";
 const LABELS = ["Transfers", "Network simulation", "Rebalance runs"];
@@ -34,7 +35,7 @@ function routes() {
   return mockApi({
     "GET /v1/transfers": json(transferList([transfer()])),
     "GET /v1/transfers/t-1001": json(detail()),
-    "GET /v1/transfer-simulations": json({ asOf: "2026-10-07T09:50:00Z", options: OPTIONS }),
+    "GET /v1/transfer-simulations": json(simulation()),
     "GET /v1/rebalance-runs": json({ runs: [] }),
   });
 }
@@ -117,16 +118,13 @@ describe("App (the exposed ./App)", () => {
 
     it("the approved-transfer link from the simulation resolves under the mount point", async () => {
       mockApi({
-        "GET /v1/transfer-simulations": json({ asOf: "2026-10-07T09:50:00Z", options: OPTIONS }),
-        "POST /v1/transfers:approve": json({
-          transferId: "t-2001", state: "ALLOCATING", originSiteId: "DC-EAST", destinationSiteId: "DC-WEST", sku: "SKU-RED-42",
-          quantity: 120, policyVersion: "v7", replayed: false, expiresAt: "2026-10-08T10:00:00Z", transferLineId: "t-2001:1",
-        }),
+        "GET /v1/transfer-simulations": json(simulation()),
+        "POST /v1/transfers:approve": json(approved()),
       });
       const user = userEvent.setup();
       mountUnderHost("/network-inventory/simulation");
-      await user.click(await screen.findByRole("button", { name: /^Approve 120/ }));
-      await user.click(screen.getByRole("button", { name: "Confirm approval" }));
+      await fillApproval(user);
+      await user.click(await screen.findByRole("button", { name: "Confirm approval" }));
       const notice = await screen.findByRole("status");
       expect(within(notice).getByRole("link", { name: "t-2001" })).toHaveAttribute("href", "/network-inventory/transfers/t-2001");
     });
