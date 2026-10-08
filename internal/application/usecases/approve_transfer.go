@@ -123,7 +123,7 @@ func (u ApproveTransfer) Execute(ctx context.Context, in ApproveTransferInput) (
 	ierr := u.UoW.Do(ctx, func(ctx context.Context) error {
 		trf, err := transfer.ProposeTransfer(proposal)
 		if err != nil {
-			return err
+			return classifyProposalError(err)
 		}
 		approved, err := trf.Approve(now)
 		if err != nil {
@@ -241,4 +241,15 @@ func (u ApplyTransferRejection) Execute(ctx context.Context, in ApplyRejectionIn
 func IsDeterministic(err error) bool {
 	var illegal *transfer.IllegalTransitionError
 	return errors.Is(err, transfer.ErrTransferNotFound) || errors.As(err, &illegal)
+}
+
+// classifyProposalError marks a proposal the domain refuses on its face as the
+// caller's input (ErrInvalidApproval, which the HTTP adapter answers with 422
+// invalid-approval) instead of letting it surface unclassified as a 503 outage.
+// Any other error is returned unchanged.
+func classifyProposalError(err error) error {
+	if errors.Is(err, transfer.ErrInvalidProposal) {
+		return fmt.Errorf("%w: %w", ErrInvalidApproval, err)
+	}
+	return err
 }
