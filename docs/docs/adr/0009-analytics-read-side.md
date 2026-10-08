@@ -35,7 +35,7 @@ CloudEvents `type` (`com.warehouse.wes.network-inventory-planning.saga.<Event>`;
 
 | event | payload | fact table |
 | --- | --- | --- |
-| `TransferStateAdvanced` | `transfer_id`, `from` (empty for the creation entry), `to`, `age_seconds` (saga age at the transition) | `transfer_state_advances` |
+| `TransferStateAdvanced` | `transfer_id`, `from` (empty for the creation entry), `to`, `age_seconds` (saga age at the transition), optional `dwell_seconds` (time spent in `from`; Amendment) | `transfer_state_advances` |
 | `TransferStuckDetected` | `transfer_id`, `state`, `age_seconds`, `threshold_seconds` | `transfer_stuck_detections` |
 | `RebalanceRunCompleted` | `run_id`, `proposal_count`, `rejected_count`, `stale_facts` | `rebalance_run_facts` |
 
@@ -107,20 +107,17 @@ snake_case, like the event payloads.
 | endpoint | question | shape |
 | --- | --- | --- |
 | `GET /reports/transfer-funnel` | how many distinct transfers reached each state per day | `days[]`: `day`, `state` (= `to`), `transfers` |
-| `GET /reports/state-dwell` | `age_seconds` p50/p95 per `from` state per day | `days[]`: `day`, `state` (= `from`), `transitions`, `p50_age_seconds`, `p95_age_seconds` |
+| `GET /reports/state-dwell` | time spent in each `from` state per day (Amendment: `dwell_seconds` p50/p95) | `days[]`: `day`, `state` (= `from`), `transitions`, `without_dwell`, `p50_dwell_seconds`, `p95_dwell_seconds` |
 | `GET /reports/stuck-transfers` | stuck detections per state per day, plus the latest occurrences (`?limit=` 1–100, default 20) | `days[]`: `day`, `state`, `detections`, `transfers`; `latest[]`: `transfer_id`, `state`, `age_seconds`, `threshold_seconds`, `detected_at` |
 | `GET /reports/rebalance-runs` | proposals vs rejected per day | `days[]`: `day`, `runs`, `proposals`, `rejected`, `rejection_rate`, `stale_facts` |
 | `GET /reports/freshness` | how far the projection is behind (fleet analytics charter §4; one endpoint for all reports, which read one projection) | `as_of` (newest applied CloudEvents time), `lag_seconds` (now − as_of, never negative); both `null` until the first event |
 
-**What `state-dwell` is and is not.** `TransferStateAdvanced.age_seconds` is the
-saga's age **since creation** at the moment of the transition (ADR 0007), not
-the time spent in the state it left. The report therefore shows how far along
-the saga was when it left each state; the difference between consecutive states'
-percentiles approximates the time spent. A true per-state dwell would need a
-payload field (`dwell_seconds`) added to the publisher; that is a deliberate
-follow-up, not done here because the publisher contract is out of scope. The
-`stuck-transfers` report is the real "stuck in a state" signal (its
-`age_seconds` is the age in the current state).
+**What `state-dwell` is.** Since the Amendment below, the report is the true time
+spent in each state, from `dwell_seconds`. The original version of this report
+percentiled `age_seconds` (the saga's age since creation, ADR 0007), which was
+only a proxy for how far along the saga was; that caveat is superseded. The
+`stuck-transfers` report remains the real "stuck in a state right now" signal
+(its `age_seconds` is the age in the current state).
 
 SQL only counts, sums and takes `percentile_cont`; rejection rate, range rules,
 limit rules and the percentile definition live in `internal/analytics/report`
@@ -163,7 +160,8 @@ exactly one Deployment; `tests/test_env_wiring.py` pins the env contracts.
 - Reports are only as fresh as the projector; `/reports/freshness` makes the lag
   observable. The model begins at the earliest retained offset of the topic;
   events published before ADR 0007 shipped do not exist.
-- `state-dwell` carries the age-since-creation caveat above.
+- `state-dwell` reports true per-state dwell (see the Amendment); events
+  published before `dwell_seconds` existed are counted in `without_dwell`.
 
 ## Alternatives considered and rejected
 
@@ -181,6 +179,40 @@ exactly one Deployment; `tests/test_env_wiring.py` pins the env contracts.
 - **Fan the projector out of the `.events` topic**: the integration contract
   would have to carry analytics-only occurrences, and the siblings' convention
   is a dedicated analytics topic (already chosen in ADR 0007).
-- **Add `dwell_seconds` to `TransferStateAdvanced` now**: changes the published
-  contract (and its asyncapi/golden tests) outside this slice; recorded as a
-  follow-up above.
+- **Add `dwell_seconds` to `TransferStateAdvanced` now**: rejected in the
+  original slice (it changes the published contract); done in the Amendment.
+
+## Amendment: true per-state dwell (`dwell_seconds`)
+
+Status: Accepted. Supersedes the age-since-creation caveat of the original
+`state-dwell` report; the ADR number is unchanged.
+
+- **Publisher.** `TransferStateAdvanced` gains an additive integer
+  `dwell_seconds`: occurred-at minus the time of the audit entry that moved the
+  transfer INTO `from`. It is derived from the aggregate's own audit trail (the
+  nearest earlier entry whose `to` equals `from`), so it is exact for a
+  multi-hop trail and for a single transition appended to a loaded aggregate.
+  The creation entry has no earlier entry and no entry time for `from`: the
+  field is **omitted** there (never sent as 0). `age_seconds` is unchanged. The
+  dataschema stays `...:TransferStateAdvanced:v1` — a new optional field is
+  additive within v1 and consumers must tolerate its absence (catalogue row in
+  ADR 0004 updated; `apis/asyncapi.yaml` updated).
+- **Projector.** Additive migration `analytics/migrations/0002_state_advance_dwell`
+  adds a nullable `dwell_seconds` (`>= 0`) to `transfer_state_advances`. The
+  consumer stores it when present and projects an event without it as `NULL`
+  (old events replay unchanged); a negative value is dead-lettered like any
+  other deterministically bad payload. Idempotency on the CloudEvents id is
+  unchanged. Rolling back the migration drops only the new column.
+- **Report.** `GET /reports/state-dwell` returns per UTC day and `from` state:
+  `transitions` (all), `without_dwell` (those with no `dwell_seconds`),
+  `p50_dwell_seconds` and `p95_dwell_seconds`. Transitions without a dwell are
+  **excluded** from the percentiles and never treated as zero; the percentiles
+  are `null` when every transition of the day lacks one. The report fields
+  `p50_age_seconds` / `p95_age_seconds` are removed (the service is
+  cluster-internal and its only consumer is this repo's tests). A state "left"
+  into itself — the aggregate's DRAFT → DRAFT creation record — leaves no state
+  and is no longer counted (before, it was a spurious zero-age DRAFT row).
+- **Consequence.** Events published before this change stay in the model as
+  `NULL`, so a day mixing old and new events shows a non-zero `without_dwell`;
+  the model is not backfilled (a dwell cannot be reconstructed from
+  `age_seconds` alone).

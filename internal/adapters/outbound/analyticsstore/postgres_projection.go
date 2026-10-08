@@ -33,8 +33,8 @@ const claimSQL = `
 
 const (
 	insertAdvanceSQL = `
-	INSERT INTO transfer_state_advances (event_id, transfer_id, from_state, to_state, age_seconds, occurred_at)
-	VALUES ($1, $2, $3, $4, $5, $6)`
+	INSERT INTO transfer_state_advances (event_id, transfer_id, from_state, to_state, age_seconds, dwell_seconds, occurred_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 	insertStuckSQL = `
 	INSERT INTO transfer_stuck_detections (event_id, transfer_id, state, age_seconds, threshold_seconds, occurred_at)
@@ -76,7 +76,8 @@ func insertFact(ctx context.Context, tx pgx.Tx, e report.Event) error {
 	var err error
 	switch e.Kind {
 	case report.KindStateAdvanced:
-		_, err = tx.Exec(ctx, insertAdvanceSQL, e.EventID, e.TransferID, e.From, e.To, e.AgeSeconds, e.At)
+		// e.DwellSeconds is a *int64: pgx writes nil as NULL (never 0).
+		_, err = tx.Exec(ctx, insertAdvanceSQL, e.EventID, e.TransferID, e.From, e.To, e.AgeSeconds, e.DwellSeconds, e.At)
 	case report.KindStuckDetected:
 		_, err = tx.Exec(ctx, insertStuckSQL, e.EventID, e.TransferID, e.State, e.AgeSeconds, e.ThresholdSeconds, e.At)
 	case report.KindRebalanceRunCompleted:

@@ -58,6 +58,11 @@ func (e *AnalyticsEncoder) encodeStateAdvanced(ctx context.Context, evt transfer
 		"to":          string(evt.To),
 		"age_seconds": evt.AgeSeconds,
 	}
+	// dwell_seconds is additive within v1 (ADR 0009 amendment): omitted —
+	// never sent as 0 — when the entry time of `from` is unknown.
+	if evt.DwellSeconds != nil {
+		payload["dwell_seconds"] = *evt.DwellSeconds
+	}
 	value, err := cloudevents.New(cloudevents.Spec{
 		ID:        e.mintID(),
 		Entity:    entitySaga,

@@ -29,12 +29,16 @@ type funnelDayDTO struct {
 	Transfers int    `json:"transfers"`
 }
 
+// dwellDayDTO: p50/p95 are over the transitions that carry dwell_seconds
+// only; without_dwell counts the rest (pre-field events) and p50/p95 are
+// null when every transition of the day lacks a dwell.
 type dwellDayDTO struct {
-	Day           string  `json:"day"`
-	State         string  `json:"state"`
-	Transitions   int     `json:"transitions"`
-	P50AgeSeconds float64 `json:"p50_age_seconds"`
-	P95AgeSeconds float64 `json:"p95_age_seconds"`
+	Day             string   `json:"day"`
+	State           string   `json:"state"`
+	Transitions     int      `json:"transitions"`
+	WithoutDwell    int      `json:"without_dwell"`
+	P50DwellSeconds *float64 `json:"p50_dwell_seconds"`
+	P95DwellSeconds *float64 `json:"p95_dwell_seconds"`
 }
 
 type stuckDayDTO struct {
@@ -181,7 +185,7 @@ func (s *ReportsServer) handleStateDwell(w http.ResponseWriter, r *http.Request)
 	for _, d := range days {
 		out.Days = append(out.Days, dwellDayDTO{
 			Day: d.Day.UTC().Format(reportDayLayout), State: d.State, Transitions: d.Transitions,
-			P50AgeSeconds: d.P50Seconds, P95AgeSeconds: d.P95Seconds,
+			WithoutDwell: d.WithoutDwell, P50DwellSeconds: d.P50Seconds, P95DwellSeconds: d.P95Seconds,
 		})
 	}
 	writeReportJSON(w, http.StatusOK, out)

@@ -44,18 +44,21 @@ func (r *Reader) TransferFunnel(ctx context.Context, rg report.Range) ([]report.
 
 const dwellSQL = `
 	SELECT (occurred_at AT TIME ZONE 'UTC')::date AS day, from_state, count(*),
-	       percentile_cont(0.5)  WITHIN GROUP (ORDER BY age_seconds::double precision),
-	       percentile_cont(0.95) WITHIN GROUP (ORDER BY age_seconds::double precision)
+	       count(*) FILTER (WHERE dwell_seconds IS NULL),
+	       percentile_cont(0.5)  WITHIN GROUP (ORDER BY dwell_seconds::double precision),
+	       percentile_cont(0.95) WITHIN GROUP (ORDER BY dwell_seconds::double precision)
 	FROM transfer_state_advances
-	WHERE occurred_at >= $1 AND occurred_at < $2 AND from_state <> ''
+	WHERE occurred_at >= $1 AND occurred_at < $2 AND from_state <> '' AND from_state <> to_state
 	GROUP BY day, from_state
 	ORDER BY day, from_state`
 
-// StateDwell implements report.Reader.
+// StateDwell implements report.Reader. percentile_cont ignores NULL
+// dwell_seconds (events without the field are counted in without_dwell, not
+// treated as zero) and is NULL when every row is NULL.
 func (r *Reader) StateDwell(ctx context.Context, rg report.Range) ([]report.DwellDay, error) {
 	return collect(ctx, r.pool, dwellSQL, func(rows pgx.Rows) (report.DwellDay, error) {
 		var d report.DwellDay
-		err := rows.Scan(&d.Day, &d.State, &d.Transitions, &d.P50Seconds, &d.P95Seconds)
+		err := rows.Scan(&d.Day, &d.State, &d.Transitions, &d.WithoutDwell, &d.P50Seconds, &d.P95Seconds)
 		d.Day = d.Day.UTC()
 		return d, err
 	}, rg.From, rg.To)

@@ -69,10 +69,39 @@ func TestAnalyticsEncoderEncodesStateAdvanced(t *testing.T) {
 		env.Data["from"] != "ALLOCATING" ||
 		env.Data["to"] != "ALLOCATED" ||
 		env.Data["age_seconds"].(float64) != 3600 {
-		t.Fatalf("data = %+v, want exactly {transfer_id, from, to, age_seconds}", env.Data)
+		t.Fatalf("data = %+v, want exactly {transfer_id, from, to, age_seconds} (no dwell known: field omitted, not 0)", env.Data)
+	}
+	if _, present := env.Data["dwell_seconds"]; present {
+		t.Fatalf("dwell_seconds present in %+v; an unknown dwell must be omitted, never sent as 0", env.Data)
 	}
 	if !hasHeader(m.Headers, "content-type") {
 		t.Fatalf("headers = %+v, want the content-type header", m.Headers)
+	}
+}
+
+func TestAnalyticsEncoderPublishesDwellSeconds(t *testing.T) {
+	e := &AnalyticsEncoder{mintID: func() string { return "ce-an-dwell" }}
+	for name, dwell := range map[string]int64{"non-zero": 2700, "a genuine zero": 0} {
+		d := dwell
+		msgs, err := e.Encode(context.Background(), transfer.StateAdvanced{
+			TransferID:   transfer.TransferID("trf-1"),
+			From:         transfer.StateApproved,
+			To:           transfer.StateAllocating,
+			AgeSeconds:   9000,
+			DwellSeconds: &d,
+			OccurredAt:   analyticsNow,
+		})
+		if err != nil || len(msgs) != 1 {
+			t.Fatalf("%s: encode = %d msgs, %v", name, len(msgs), err)
+		}
+		env := decodeAnalytics(t, msgs[0].Value)
+		if env.DataSchema != "urn:warehouse:network-inventory-planning:analytics:TransferStateAdvanced:v1" {
+			t.Errorf("%s: dataschema = %q; the additive field must stay within v1", name, env.DataSchema)
+		}
+		got, present := env.Data["dwell_seconds"].(float64)
+		if len(env.Data) != 5 || !present || int64(got) != dwell || env.Data["age_seconds"].(float64) != 9000 {
+			t.Errorf("%s: data = %+v, want {transfer_id, from, to, age_seconds=9000, dwell_seconds=%d}", name, env.Data, dwell)
+		}
 	}
 }
 

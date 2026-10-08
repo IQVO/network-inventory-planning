@@ -97,13 +97,19 @@ func TestAnalyticsProjectorAndReportsEndToEnd(t *testing.T) {
 	ensureTopic(t, brokers, outboundkafka.AnalyticsTopic)
 
 	day := func(h, m int) time.Time { return time.Date(2026, 10, 5, h, m, 0, 0, time.UTC) }
-	advanced := encodeAnalytics(t, transfer.StateAdvanced{TransferID: "t1", From: "PROPOSED", To: "APPROVED", AgeSeconds: 60, OccurredAt: day(8, 1)})
+	dwell45 := int64(45) // seconds in PROPOSED; the saga's age at the transition (60) is NOT the dwell
+	advanced := encodeAnalytics(t, transfer.StateAdvanced{TransferID: "t1", From: "PROPOSED", To: "APPROVED", AgeSeconds: 60, DwellSeconds: &dwell45, OccurredAt: day(8, 1)})
+	// An event published before dwell_seconds existed (age 500): counted in
+	// without_dwell, excluded from the percentiles, never a zero or its age.
+	legacy := rawCloudEvent(t, "TransferStateAdvanced", "t3",
+		map[string]any{"transfer_id": "t3", "from": "PROPOSED", "to": "APPROVED", "age_seconds": 500})
 	poison := rawCloudEvent(t, "TransferStateAdvanced", "other-subject",
 		map[string]any{"transfer_id": "t9", "from": "A", "to": "X", "age_seconds": 1})
 	messages := []kafkago.Message{
 		encodeAnalytics(t, transfer.StateAdvanced{TransferID: "t1", To: "PROPOSED", AgeSeconds: 0, OccurredAt: day(8, 0)}),
 		advanced,
 		advanced, // the same CloudEvents id delivered twice
+		legacy,
 		{Key: []byte("junk"), Value: []byte("this is not a CloudEvent")},
 		rawCloudEvent(t, "TransferTeleported", "t1", map[string]any{"transfer_id": "t1"}),
 		poison,
@@ -140,9 +146,9 @@ func TestAnalyticsProjectorAndReportsEndToEnd(t *testing.T) {
 		_ = consumer.Close()
 	}()
 
-	// Five distinct valid events are projected; the duplicate, junk, unknown
+	// Six distinct valid events are projected; the duplicate, junk, unknown
 	// type and poison add nothing.
-	waitForProcessed(ctx, t, writePool, 5)
+	waitForProcessed(ctx, t, writePool, 6)
 
 	readPool, err := analyticsstore.NewReadOnlyPool(ctx, analyticsURL)
 	if err != nil {
@@ -160,19 +166,22 @@ func TestAnalyticsProjectorAndReportsEndToEnd(t *testing.T) {
 		}
 	}
 	getJSON(t, srv.URL+"/reports/transfer-funnel"+rng, &funnel)
-	if fmt.Sprint(funnel.Days) != "[{2026-10-05 APPROVED 1} {2026-10-05 PROPOSED 2}]" {
-		t.Errorf("funnel = %+v; the duplicate must count once and t1, t2 reach PROPOSED", funnel.Days)
+	if fmt.Sprint(funnel.Days) != "[{2026-10-05 APPROVED 2} {2026-10-05 PROPOSED 2}]" {
+		t.Errorf("funnel = %+v; the duplicate must count once, t1 and t3 reach APPROVED, t1 and t2 reach PROPOSED", funnel.Days)
 	}
 	var dwell struct {
 		Days []struct {
-			State         string
-			Transitions   int
-			P50AgeSeconds float64 `json:"p50_age_seconds"`
+			State        string
+			Transitions  int
+			WithoutDwell int      `json:"without_dwell"`
+			P50Dwell     *float64 `json:"p50_dwell_seconds"`
+			P95Dwell     *float64 `json:"p95_dwell_seconds"`
 		}
 	}
 	getJSON(t, srv.URL+"/reports/state-dwell"+rng, &dwell)
-	if len(dwell.Days) != 1 || dwell.Days[0].State != "PROPOSED" || dwell.Days[0].Transitions != 1 || dwell.Days[0].P50AgeSeconds != 60 {
-		t.Errorf("dwell = %+v", dwell.Days)
+	if len(dwell.Days) != 1 || dwell.Days[0].State != "PROPOSED" || dwell.Days[0].Transitions != 2 || dwell.Days[0].WithoutDwell != 1 ||
+		dwell.Days[0].P50Dwell == nil || *dwell.Days[0].P50Dwell != 45 || dwell.Days[0].P95Dwell == nil || *dwell.Days[0].P95Dwell != 45 {
+		t.Errorf("dwell = %+v; want PROPOSED, 2 transitions, 1 without dwell, p50=p95=45 (the real dwell, not age 60 or 500)", dwell.Days)
 	}
 	var stuck struct {
 		Days []struct {

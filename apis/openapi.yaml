@@ -293,16 +293,19 @@ paths:
         description: nip-reports (cluster-internal Service <release>-reports)
     get:
       operationId: getStateDwellReport
-      summary: Saga age percentiles at the moment of leaving each state, per day
+      summary: Time spent in each state (dwell_seconds percentiles), per day
       tags: [reports]
       description: |
         For the TransferStateAdvanced occurrences in [from, to), per UTC day and state `from` (the state
         the transition LEFT), the number of transitions and the continuous p50/p95 (linear
-        interpolation) of `age_seconds`. `age_seconds` is the saga's age since creation at the moment of
-        the transition, so it is how far along the saga was when it left the state, not a per-state
-        duration; the difference between consecutive states approximates the time spent. Creation
-        entries (empty `from`) leave no state and are not counted. Ordered by day, then state. `from` /
-        `to` as in /reports/transfer-funnel. 200 with `days: []` when nothing matches.
+        interpolation) of `dwell_seconds`: the seconds the transfer actually spent in that state
+        (occurred-at minus when it entered it; ADR 0009 amendment). Transitions from events published
+        before `dwell_seconds` existed carry no dwell: they are counted in `without_dwell`, EXCLUDED from
+        the percentiles and never treated as zero; the percentiles are `null` when every transition of the
+        day lacks a dwell. `transitions` counts all of them (those with and without a dwell). Creation
+        entries (empty `from`, or a state left into itself) leave no state and are not counted. Ordered by
+        day, then state. `from` / `to` as in /reports/transfer-funnel. 200 with `days: []` when nothing
+        matches.
       parameters:
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
@@ -878,7 +881,7 @@ components:
                 $ref: '#/components/schemas/TransferFunnelDay'
     StateDwellDay:
       type: object
-      required: [day, state, transitions, p50_age_seconds, p95_age_seconds]
+      required: [day, state, transitions, without_dwell, p50_dwell_seconds, p95_dwell_seconds]
       properties:
         day:
           type: string
@@ -891,16 +894,22 @@ components:
         transitions:
           type: integer
           minimum: 1
+          description: Every transition that left the state that day, with or without a dwell.
           example: 6
-        p50_age_seconds:
-          type: number
+        without_dwell:
+          type: integer
+          minimum: 0
+          description: Of `transitions`, how many carry no dwell_seconds (events published before the field existed). Excluded from the percentiles, never treated as zero.
+          example: 1
+        p50_dwell_seconds:
+          type: [number, 'null']
           format: double
-          description: Median saga age (seconds since creation) when the state was left.
+          description: Median seconds spent in the state, over the transitions that carry a dwell; null when none does.
           example: 200
-        p95_age_seconds:
-          type: number
+        p95_dwell_seconds:
+          type: [number, 'null']
           format: double
-          description: 95th percentile (continuous) of the same.
+          description: 95th percentile (continuous) of the same; null when none carries a dwell.
           example: 601.25
     StateDwellReport:
       allOf:

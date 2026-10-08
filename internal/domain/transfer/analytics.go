@@ -3,8 +3,9 @@ package transfer
 import "time"
 
 // StateAdvanced is the analytics occurrence of one saga state transition
-// (ADR 0007): {transfer_id, from, to, age_seconds} — the age being how
-// long the saga had lived when the transition fired. It is raised by the
+// (ADR 0007): {transfer_id, from, to, age_seconds, dwell_seconds} — the
+// age being how long the saga had lived when the transition fired and the
+// dwell how long it sat in `from` (ADR 0009 amendment). It is raised by the
 // use cases in the SAME transaction as the transition (through the
 // transactional outbox, onto the analytics topic), so an occurrence
 // exists for every step of every transfer even though the integration
@@ -15,7 +16,12 @@ type StateAdvanced struct {
 	To         TransferState
 	// AgeSeconds is occurred-at minus the saga's creation time.
 	AgeSeconds int64
-	OccurredAt time.Time
+	// DwellSeconds is the time spent in From: occurred-at minus when the
+	// saga entered From (the occurrence of the audit entry that moved it
+	// there). Nil when that entry time is unknown (the creation entry);
+	// the publisher then omits the field rather than send a false 0.
+	DwellSeconds *int64
+	OccurredAt   time.Time
 }
 
 // EventName implements DomainEvent.
@@ -91,20 +97,48 @@ func (t *InterWarehouseTransfer) StateAdvancedSince(persistedVersion int64) []St
 		return nil
 	}
 	out := make([]StateAdvanced, 0, len(audit)-loaded)
-	for _, e := range audit[loaded:] {
+	for i := loaded; i < len(audit); i++ {
+		e := audit[i]
 		age := int64(0)
 		if !t.createdAt.IsZero() && e.OccurredAt.After(t.createdAt) {
 			age = int64(e.OccurredAt.Sub(t.createdAt).Seconds())
 		}
 		out = append(out, StateAdvanced{
-			TransferID: t.id,
-			From:       e.From,
-			To:         e.To,
-			AgeSeconds: age,
-			OccurredAt: e.OccurredAt,
+			TransferID:   t.id,
+			From:         e.From,
+			To:           e.To,
+			AgeSeconds:   age,
+			DwellSeconds: dwellInFrom(audit, i),
+			OccurredAt:   e.OccurredAt,
 		})
 	}
 	return out
+}
+
+// dwellInFrom is how long the saga sat in audit[i].From before audit[i]
+// moved it out: audit[i].OccurredAt minus the occurrence of the nearest
+// EARLIER entry that moved INTO that state. The whole trail is searched
+// (not just the delta being published), so a use case that appends one
+// transition to a loaded aggregate still gets a true dwell. Nil — never
+// zero — when the entry time of From is not on the trail (the creation
+// entry, which has no earlier entry) or From is empty: "unknown" must not
+// masquerade as "instant".
+func dwellInFrom(audit []AuditEntry, i int) *int64 {
+	from := audit[i].From
+	if from == "" {
+		return nil
+	}
+	for j := i - 1; j >= 0; j-- {
+		if audit[j].To != from {
+			continue
+		}
+		d := int64(0)
+		if audit[i].OccurredAt.After(audit[j].OccurredAt) {
+			d = int64(audit[i].OccurredAt.Sub(audit[j].OccurredAt).Seconds())
+		}
+		return &d
+	}
+	return nil
 }
 
 // RebalanceRun is one persisted scheduled-rebalance outcome (ADR 0007).

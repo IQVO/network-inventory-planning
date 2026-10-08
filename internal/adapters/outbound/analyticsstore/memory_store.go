@@ -125,20 +125,38 @@ func (m *Memory) TransferFunnel(_ context.Context, r report.Range) ([]report.Fun
 func (m *Memory) StateDwell(_ context.Context, r report.Range) ([]report.DwellDay, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ages := map[dayState][]float64{}
+	type agg struct {
+		total   int
+		dwells  []float64 // only transitions that carry dwell_seconds
+		without int
+	}
+	days := map[dayState]*agg{}
 	for _, e := range m.advances {
-		if e.From == "" || !inRange(e.At, r) {
+		// A creation entry leaves no state: empty `from`, or a state "left"
+		// into itself (the aggregate's DRAFT -> DRAFT creation record).
+		if e.From == "" || e.From == e.To || !inRange(e.At, r) {
 			continue
 		}
 		k := dayState{day(e.At), e.From}
-		ages[k] = append(ages[k], float64(e.AgeSeconds))
+		if days[k] == nil {
+			days[k] = &agg{}
+		}
+		days[k].total++
+		if e.DwellSeconds == nil {
+			days[k].without++ // excluded from the percentiles, never zero
+			continue
+		}
+		days[k].dwells = append(days[k].dwells, float64(*e.DwellSeconds))
 	}
-	out := make([]report.DwellDay, 0, len(ages))
-	for _, k := range sortedKeys(ages) {
-		out = append(out, report.DwellDay{
-			Day: k.day, State: k.state, Transitions: len(ages[k]),
-			P50Seconds: report.Percentile(ages[k], 0.5), P95Seconds: report.Percentile(ages[k], 0.95),
-		})
+	out := make([]report.DwellDay, 0, len(days))
+	for _, k := range sortedKeys(days) {
+		a := days[k]
+		d := report.DwellDay{Day: k.day, State: k.state, Transitions: a.total, WithoutDwell: a.without}
+		if len(a.dwells) > 0 {
+			p50, p95 := report.Percentile(a.dwells, 0.5), report.Percentile(a.dwells, 0.95)
+			d.P50Seconds, d.P95Seconds = &p50, &p95
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }

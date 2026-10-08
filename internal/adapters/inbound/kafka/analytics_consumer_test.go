@@ -111,6 +111,8 @@ func anConsumer(p report.Projection, dlq DeadLetterWriter, w io.Writer) *Analyti
 	}
 }
 
+func i64p(v int64) *int64 { return &v }
+
 func TestAnalyticsConsumer_ProjectsEachKnownTypeFromItsFullCloudEventsType(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -123,6 +125,12 @@ func TestAnalyticsConsumer_ProjectsEachKnownTypeFromItsFullCloudEventsType(t *te
 		{"state advanced, creation entry has an empty from", anWire(t, "e2", "TransferStateAdvanced", "tr-2", anAt,
 			map[string]any{"transfer_id": "tr-2", "from": "", "to": "PROPOSED", "age_seconds": 0}),
 			report.Event{Kind: report.KindStateAdvanced, EventID: "e2", At: anAt, TransferID: "tr-2", To: "PROPOSED"}},
+		{"state advanced carrying dwell_seconds", anWire(t, "e5", "TransferStateAdvanced", "tr-5", anAt,
+			map[string]any{"transfer_id": "tr-5", "from": "APPROVED", "to": "ALLOCATING", "age_seconds": 900, "dwell_seconds": 300}),
+			report.Event{Kind: report.KindStateAdvanced, EventID: "e5", At: anAt, TransferID: "tr-5", From: "APPROVED", To: "ALLOCATING", AgeSeconds: 900, DwellSeconds: i64p(300)}},
+		{"state advanced with a genuine zero dwell keeps the zero", anWire(t, "e6", "TransferStateAdvanced", "tr-6", anAt,
+			map[string]any{"transfer_id": "tr-6", "from": "DRAFT", "to": "PROPOSED", "age_seconds": 0, "dwell_seconds": 0}),
+			report.Event{Kind: report.KindStateAdvanced, EventID: "e6", At: anAt, TransferID: "tr-6", From: "DRAFT", To: "PROPOSED", DwellSeconds: i64p(0)}},
 		{"stuck detected", anWire(t, "e3", "TransferStuckDetected", "tr-3", anAt,
 			map[string]any{"transfer_id": "tr-3", "state": "ALLOCATING", "age_seconds": 700, "threshold_seconds": 600}),
 			report.Event{Kind: report.KindStuckDetected, EventID: "e3", At: anAt, TransferID: "tr-3", State: "ALLOCATING", AgeSeconds: 700, ThresholdSeconds: 600}},
@@ -231,6 +239,8 @@ func TestAnalyticsConsumer_UnusablePayloadsAreDeadLetteredAtOnce(t *testing.T) {
 			map[string]any{"transfer_id": "tr-1", "from": "A", "to": "B"}),
 		"negative age": anWire(t, "p4", "TransferStateAdvanced", "tr-1", anAt,
 			map[string]any{"transfer_id": "tr-1", "from": "A", "to": "B", "age_seconds": -5}),
+		"negative dwell": anWire(t, "p4b", "TransferStateAdvanced", "tr-1", anAt,
+			map[string]any{"transfer_id": "tr-1", "from": "A", "to": "B", "age_seconds": 5, "dwell_seconds": -1}),
 		"stuck without state": anWire(t, "p5", "TransferStuckDetected", "tr-1", anAt,
 			map[string]any{"transfer_id": "tr-1", "age_seconds": 5, "threshold_seconds": 1}),
 		"stuck negative threshold": anWire(t, "p6", "TransferStuckDetected", "tr-1", anAt,

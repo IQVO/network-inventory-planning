@@ -45,6 +45,7 @@ type sagaData struct {
 	To               string `json:"to"`
 	State            string `json:"state"`
 	AgeSeconds       *int64 `json:"age_seconds"`
+	DwellSeconds     *int64 `json:"dwell_seconds"`
 	ThresholdSeconds *int64 `json:"threshold_seconds"`
 	RunID            string `json:"run_id"`
 	ProposalCount    *int   `json:"proposal_count"`
@@ -190,8 +191,13 @@ func fillAdvanced(e *report.Event, d sagaData, subject string) error {
 		return errors.New("to is required")
 	case d.AgeSeconds == nil || *d.AgeSeconds < 0:
 		return errors.New("age_seconds is required and must not be negative")
+	case d.DwellSeconds != nil && *d.DwellSeconds < 0:
+		return errors.New("dwell_seconds must not be negative")
 	}
 	e.TransferID, e.From, e.To, e.AgeSeconds = d.TransferID, d.From, d.To, *d.AgeSeconds
+	// dwell_seconds is optional (additive within v1): an event from before
+	// the field existed, or a creation entry, projects as NULL.
+	e.DwellSeconds = d.DwellSeconds
 	return nil
 }
 

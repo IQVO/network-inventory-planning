@@ -250,24 +250,79 @@ func TestPostgresStore_PoolsApplyTheirStatementTimeouts(t *testing.T) {
 func TestAnalyticsMigration_DownThenUpIsClean(t *testing.T) {
 	_, _, pool := freshStores(t)
 	ctx := context.Background()
-	down, err := os.ReadFile(filepath.Join(analyticsMigrationsDir(t), "0001_saga_facts.down.sql"))
-	if err != nil {
-		t.Fatal(err)
+	dir := analyticsMigrationsDir(t)
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
 	}
-	up, err := os.ReadFile(filepath.Join(analyticsMigrationsDir(t), "0001_saga_facts.up.sql"))
-	if err != nil {
-		t.Fatal(err)
+	run := func(name string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, read(name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
-	if _, err := pool.Exec(ctx, string(down)); err != nil {
-		t.Fatalf("down: %v", err)
+	run("0002_state_advance_dwell.down.sql")
+	var hasCol bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transfer_state_advances' AND column_name = 'dwell_seconds')`).Scan(&hasCol); err != nil || hasCol {
+		t.Fatalf("dwell_seconds still exists after 0002 down (%v, %v)", hasCol, err)
 	}
+	run("0001_saga_facts.down.sql")
 	for _, table := range []string{"transfer_state_advances", "transfer_stuck_detections", "rebalance_run_facts", "analytics_processed_events"} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil || exists {
 			t.Fatalf("%s still exists after down (%v, %v)", table, exists, err)
 		}
 	}
-	if _, err := pool.Exec(ctx, string(up)); err != nil {
-		t.Fatalf("up again: %v", err)
+	run("0001_saga_facts.up.sql")
+
+	// A row projected BEFORE 0002 (no dwell column yet) must survive the
+	// additive migration as NULL, not 0.
+	if _, err := pool.Exec(ctx, `INSERT INTO transfer_state_advances (event_id, transfer_id, from_state, to_state, age_seconds, occurred_at)
+		VALUES ('old-1', 't-old', 'PROPOSED', 'APPROVED', 77, now())`); err != nil {
+		t.Fatal(err)
+	}
+	run("0002_state_advance_dwell.up.sql")
+	var dwell *int64
+	if err := pool.QueryRow(ctx, `SELECT dwell_seconds FROM transfer_state_advances WHERE event_id = 'old-1'`).Scan(&dwell); err != nil || dwell != nil {
+		t.Fatalf("pre-migration row dwell_seconds = %v, %v; want NULL", dwell, err)
+	}
+}
+
+// The dwell round-trips as stored, an event without it is NULL (never 0), and
+// a negative dwell is a deterministic rejection.
+func TestPostgresStore_StoresDwellWhenPresentAndNullWhenAbsent(t *testing.T) {
+	p, _, pool := freshStores(t)
+	ctx := context.Background()
+	with := advancedEvent("evt-with")
+	d := int64(0)
+	with.DwellSeconds = &d // a genuine zero is stored as 0
+	without := advancedEvent("evt-without")
+	for _, e := range []report.Event{with, without} {
+		if applied, err := p.Apply(ctx, e); err != nil || !applied {
+			t.Fatalf("Apply(%s) = %v, %v", e.EventID, applied, err)
+		}
+	}
+	read := func(id string) *int64 {
+		var v *int64
+		if err := pool.QueryRow(ctx, `SELECT dwell_seconds FROM transfer_state_advances WHERE event_id = $1`, id).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if got := read("evt-with"); got == nil || *got != 0 {
+		t.Errorf("stored dwell for evt-with = %v, want 0", got)
+	}
+	if got := read("evt-without"); got != nil {
+		t.Errorf("stored dwell for evt-without = %d, want NULL", *got)
+	}
+
+	neg := advancedEvent("evt-neg")
+	n := int64(-5)
+	neg.DwellSeconds = &n
+	if applied, err := p.Apply(ctx, neg); applied || !errors.Is(err, report.ErrRejected) {
+		t.Fatalf("negative dwell Apply = %v, %v; want report.ErrRejected", applied, err)
 	}
 }

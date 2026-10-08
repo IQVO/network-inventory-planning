@@ -39,6 +39,16 @@ func advance(transfer, from, to string, age int64, when time.Time) report.Event 
 	}
 }
 
+// dwelled is an advance that carries dwell_seconds; plain advance models an
+// event published before the field existed (NULL in the store).
+func dwelled(transfer, from, to string, age, dwell int64, when time.Time) report.Event {
+	e := advance(transfer, from, to, age, when)
+	e.DwellSeconds = &dwell
+	return e
+}
+
+func fptr(v float64) *float64 { return &v }
+
 func stuck(transfer, state string, age, threshold int64, when time.Time) report.Event {
 	return report.Event{
 		Kind: report.KindStuckDetected, EventID: nextID("stk"), At: when,
@@ -57,22 +67,23 @@ func contractEvents() []report.Event {
 	return []report.Event{
 		// Oct 5: t1 walks the start of the saga; its creation entry has no `from`.
 		advance("t1", "", "PROPOSED", 0, at(5, 8, 0, 0)),
-		advance("t1", "PROPOSED", "APPROVED", 100, at(5, 8, 1, 0)),
-		advance("t1", "APPROVED", "ALLOCATING", 101, at(5, 8, 1, 1)),
+		dwelled("t1", "PROPOSED", "APPROVED", 100, 40, at(5, 8, 1, 0)),
+		dwelled("t1", "APPROVED", "ALLOCATING", 101, 1, at(5, 8, 1, 1)),
 		advance("t2", "", "PROPOSED", 0, at(5, 9, 0, 0)),
-		advance("t2", "PROPOSED", "APPROVED", 300, at(5, 9, 5, 0)),
+		dwelled("t2", "PROPOSED", "APPROVED", 300, 120, at(5, 9, 5, 0)),
 		// t2 reaches APPROVED a second time (a redelivery under a new id):
 		// the funnel counts DISTINCT transfers, the dwell counts transitions.
+		// This one predates dwell_seconds: counted, but NOT a zero dwell.
 		advance("t2", "PROPOSED", "APPROVED", 305, at(5, 9, 6, 0)),
-		advance("t3", "PROPOSED", "APPROVED", 50, at(5, 10, 0, 0)),
-		advance("t4", "PROPOSED", "APPROVED", 700, at(5, 11, 0, 0)),
+		dwelled("t3", "PROPOSED", "APPROVED", 50, 30, at(5, 10, 0, 0)),
+		dwelled("t4", "PROPOSED", "APPROVED", 700, 650, at(5, 11, 0, 0)),
 		// Exactly AT from: in.
-		advance("t5", "PROPOSED", "APPROVED", 5, at(5, 0, 0, 0)),
-		// Oct 6, on the day boundary.
+		dwelled("t5", "PROPOSED", "APPROVED", 5, 2, at(5, 0, 0, 0)),
+		// Oct 6, on the day boundary; a day whose only transition has no dwell.
 		advance("t1", "ALLOCATING", "ALLOCATED", 90000, at(6, 0, 0, 0)),
 		// Exactly AT to, and one second before from: out.
-		advance("t6", "PROPOSED", "APPROVED", 9, at(7, 0, 0, 0)),
-		advance("t7", "PROPOSED", "APPROVED", 9, at(4, 23, 59, 59)),
+		dwelled("t6", "PROPOSED", "APPROVED", 9, 9, at(7, 0, 0, 0)),
+		dwelled("t7", "PROPOSED", "APPROVED", 9, 9, at(4, 23, 59, 59)),
 
 		stuck("t1", "ALLOCATING", 700, 600, at(5, 12, 0, 0)),
 		stuck("t1", "ALLOCATING", 1300, 600, at(5, 12, 10, 0)),
@@ -102,6 +113,29 @@ func loadContract(t *testing.T, p report.Projection) []report.Event {
 }
 
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
+
+// nearPtr compares optional percentiles: both nil, or both set and equal.
+func nearPtr(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return near(*a, *b)
+}
+
+func showDwell(days []report.DwellDay) string {
+	s := ""
+	for _, d := range days {
+		p := func(v *float64) string {
+			if v == nil {
+				return "nil"
+			}
+			return fmt.Sprint(*v)
+		}
+		s += fmt.Sprintf("{%s %s transitions=%d without=%d p50=%s p95=%s} ",
+			d.Day.Format("01-02"), d.State, d.Transitions, d.WithoutDwell, p(d.P50Seconds), p(d.P95Seconds))
+	}
+	return s
+}
 
 type storeFactory func(t *testing.T) (report.Projection, report.Reader)
 
@@ -136,26 +170,39 @@ var contractCases = []struct {
 		}
 	}},
 
-	{"dwell: age percentiles per `from` state, creation entries excluded", func(t *testing.T, newStore storeFactory) {
+	{"dwell: dwell_seconds percentiles per `from` state; no-dwell counted apart, never zero; creation entries excluded", func(t *testing.T, newStore storeFactory) {
 		p, r := newStore(t)
 		loadContract(t, p)
+		// Creation records leave no state: an empty `from`, and the
+		// aggregate's DRAFT -> DRAFT self-record (no dwell known).
+		for _, e := range []report.Event{
+			advance("t8", "DRAFT", "DRAFT", 0, at(5, 7, 0, 0)),
+			advance("t9", "", "DRAFT", 0, at(5, 7, 0, 1)),
+		} {
+			if applied, err := p.Apply(context.Background(), e); err != nil || !applied {
+				t.Fatalf("Apply(%s) = %v, %v", e.EventID, applied, err)
+			}
+		}
 		got, err := r.StateDwell(context.Background(), contractRange)
 		if err != nil {
 			t.Fatal(err)
 		}
+		// PROPOSED: dwells {40,120,30,650,2} -> p50 40, p95 120+(650-120)*0.8 = 544;
+		// the sixth transition (t2's second) has no dwell: counted, excluded.
+		// The age_seconds of these events (5..700) must not leak into the result.
 		want := []report.DwellDay{
-			{Day: at(5, 0, 0, 0), State: "APPROVED", Transitions: 1, P50Seconds: 101, P95Seconds: 101},
-			{Day: at(5, 0, 0, 0), State: "PROPOSED", Transitions: 6, P50Seconds: 200, P95Seconds: 601.25},
-			{Day: at(6, 0, 0, 0), State: "ALLOCATING", Transitions: 1, P50Seconds: 90000, P95Seconds: 90000},
+			{Day: at(5, 0, 0, 0), State: "APPROVED", Transitions: 1, WithoutDwell: 0, P50Seconds: fptr(1), P95Seconds: fptr(1)},
+			{Day: at(5, 0, 0, 0), State: "PROPOSED", Transitions: 6, WithoutDwell: 1, P50Seconds: fptr(40), P95Seconds: fptr(544)},
+			{Day: at(6, 0, 0, 0), State: "ALLOCATING", Transitions: 1, WithoutDwell: 1}, // percentiles nil: nothing to measure
 		}
 		if len(got) != len(want) {
-			t.Fatalf("got %+v, want %+v", got, want)
+			t.Fatalf("got %s, want %s", showDwell(got), showDwell(want))
 		}
 		for i := range want {
 			g, w := got[i], want[i]
-			if !g.Day.Equal(w.Day) || g.State != w.State || g.Transitions != w.Transitions ||
-				!near(g.P50Seconds, w.P50Seconds) || !near(g.P95Seconds, w.P95Seconds) {
-				t.Errorf("row %d = %+v, want %+v", i, g, w)
+			if !g.Day.Equal(w.Day) || g.State != w.State || g.Transitions != w.Transitions || g.WithoutDwell != w.WithoutDwell ||
+				!nearPtr(g.P50Seconds, w.P50Seconds) || !nearPtr(g.P95Seconds, w.P95Seconds) {
+				t.Errorf("row %d = %s, want %s", i, showDwell([]report.DwellDay{g}), showDwell([]report.DwellDay{w}))
 			}
 		}
 	}},

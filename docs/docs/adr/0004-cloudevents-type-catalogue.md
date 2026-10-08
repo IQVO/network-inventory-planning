@@ -31,7 +31,7 @@ occurrences on the analytics topic
 
 | Type | Dataschema | Subject / Kafka key | Raised when |
 | --- | --- | --- | --- |
-| `com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced` | `urn:warehouse:network-inventory-planning:analytics:TransferStateAdvanced:v1` | `transfer_id` | Every saga state transition (ADR 0007), published through the outbox in the same transaction as the transition. |
+| `com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced` | `urn:warehouse:network-inventory-planning:analytics:TransferStateAdvanced:v1` | `transfer_id` | Every saga state transition (ADR 0007), published through the outbox in the same transaction as the transition. Payload gained an optional `dwell_seconds` (seconds spent in `from`) within v1: an additive, tolerated-if-absent field (ADR 0009 Amendment), so no version bump. |
 | `com.warehouse.wes.network-inventory-planning.saga.TransferStuckDetected` | `urn:warehouse:network-inventory-planning:analytics:TransferStuckDetected:v1` | `transfer_id` | The bounded health ticker finds a non-terminal transfer past its per-state threshold (ADR 0007). Observe-only. |
 | `com.warehouse.wes.network-inventory-planning.saga.RebalanceRunCompleted` | `urn:warehouse:network-inventory-planning:analytics:RebalanceRunCompleted:v1` | `run_id` | A scheduled rebalance pass completes (ADR 0007). Observe-only: no approval, no allocation command. |
 

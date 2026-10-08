@@ -308,7 +308,9 @@ operations:
     description: |
       Published through the transactional outbox in the SAME transaction
       as the transition it describes (ADR 0007): data {transfer_id, from,
-      to, age_seconds}, subject/key transfer_id. An occurrence exists for
+      to, age_seconds, dwell_seconds}, subject/key transfer_id; dwell_seconds
+      (seconds spent in `from`) is additive within v1 and omitted for the
+      creation entry. An occurrence exists for
       every step of every transfer.
   sendTransferStuckDetected:
     action: send
@@ -996,6 +998,16 @@ components:
                   type: integer
                   format: int64
                   description: Seconds since the aggregate's creation at the moment of the transition.
+                dwell_seconds:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: |
+                    Seconds the transfer spent in `from` before this transition (the transition's time minus the time of
+                    the audit entry that moved it INTO `from`). Additive within v1 (ADR 0009 amendment): absent, never 0,
+                    when the entry time of `from` is unknown (the creation entry), and absent on events published before
+                    the field existed. Consumers must tolerate its absence.
+                  examples: [2700]
     TransferStuckDetectedEvent:
       description: CloudEvents 1.0 envelope of this context's TransferStuckDetected analytics occurrence (ADR 0007, published by the bounded observe-only health ticker).
       allOf:

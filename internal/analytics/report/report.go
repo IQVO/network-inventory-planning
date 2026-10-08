@@ -37,6 +37,10 @@ type Event struct {
 	// TransferStateAdvanced: From is "" for the creation entry.
 	From string
 	To   string
+	// DwellSeconds is the seconds spent in From, nil when the event does
+	// not carry it (published before the field existed, or the creation
+	// entry): NULL in the store, never 0.
+	DwellSeconds *int64
 
 	// TransferStuckDetected.
 	State            string
@@ -85,17 +89,20 @@ type FunnelDay struct {
 	Transfers int
 }
 
-// DwellDay is the age_seconds distribution of the transitions that LEFT State
-// on Day (TransferStateAdvanced `from`; the creation entry, whose `from` is
-// empty, leaves no state and is not counted). age_seconds is the saga's age
-// when it left the state, a monotone proxy for how long it took to get that
-// far, not a per-state duration.
+// DwellDay is the dwell_seconds distribution of the transitions that LEFT
+// State on Day (TransferStateAdvanced `from`). The creation entries (empty
+// `from`, or a state "left" into itself) leave no state and are not counted.
+// Transitions counts every counted transition; WithoutDwell is how many of
+// them carry no dwell_seconds (events published before the field existed)
+// and are EXCLUDED from the percentiles, never treated as zero. P50/P95 are
+// nil when every transition lacks a dwell.
 type DwellDay struct {
-	Day         time.Time
-	State       string
-	Transitions int
-	P50Seconds  float64
-	P95Seconds  float64
+	Day          time.Time
+	State        string
+	Transitions  int
+	WithoutDwell int
+	P50Seconds   *float64
+	P95Seconds   *float64
 }
 
 // StuckDay is the TransferStuckDetected occurrences for State on Day. The

@@ -141,14 +141,14 @@ func TestReports_ShapesAreSnakeCaseWithUTCDates(t *testing.T) {
 	day := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	rd := &stubReader{
 		funnel:     []report.FunnelDay{{Day: day, State: "APPROVED", Transfers: 5}},
-		dwell:      []report.DwellDay{{Day: day, State: "PROPOSED", Transitions: 6, P50Seconds: 200, P95Seconds: 601.25}},
+		dwell:      []report.DwellDay{{Day: day, State: "PROPOSED", Transitions: 6, WithoutDwell: 1, P50Seconds: ptrf(200), P95Seconds: ptrf(601.25)}},
 		stuckDays:  []report.StuckDay{{Day: day, State: "ALLOCATING", Detections: 2, Transfers: 1}},
 		stuckLast:  []report.StuckOccurrence{{TransferID: "t1", State: "ALLOCATING", AgeSeconds: 700, ThresholdSeconds: 600, DetectedAt: day.Add(12 * time.Hour)}},
 		rebalances: []report.RebalanceDay{{Day: day, Runs: 2, Proposals: 14, Rejected: 2, StaleFacts: 1}},
 	}
 	want := map[string]string{
 		"/reports/transfer-funnel": `{"day":"2026-10-05","state":"APPROVED","transfers":5}`,
-		"/reports/state-dwell":     `{"day":"2026-10-05","state":"PROPOSED","transitions":6,"p50_age_seconds":200,"p95_age_seconds":601.25}`,
+		"/reports/state-dwell":     `{"day":"2026-10-05","state":"PROPOSED","transitions":6,"without_dwell":1,"p50_dwell_seconds":200,"p95_dwell_seconds":601.25}`,
 		"/reports/stuck-transfers": `{"day":"2026-10-05","state":"ALLOCATING","detections":2,"transfers":1}`,
 		"/reports/rebalance-runs":  `{"day":"2026-10-05","runs":2,"proposals":14,"rejected":2,"rejection_rate":0.14285714285714285,"stale_facts":1}`,
 	}
@@ -162,6 +162,20 @@ func TestReports_ShapesAreSnakeCaseWithUTCDates(t *testing.T) {
 	latest := `{"transfer_id":"t1","state":"ALLOCATING","age_seconds":700,"threshold_seconds":600,"detected_at":"2026-10-05T12:00:00Z"}`
 	if !strings.Contains(rec.Body.String(), latest) {
 		t.Errorf("latest occurrence missing: %s", rec.Body)
+	}
+}
+
+func ptrf(v float64) *float64 { return &v }
+
+// A day of only pre-dwell events has no measurement: the percentiles are JSON
+// null (not 0) and the transitions are counted in without_dwell.
+func TestReports_StateDwellWithNoMeasuredDwellIsNullNotZero(t *testing.T) {
+	day := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	rd := &stubReader{dwell: []report.DwellDay{{Day: day, State: "APPROVED", Transitions: 3, WithoutDwell: 3}}}
+	rec := reportsGet(t, rd, "/reports/state-dwell")
+	row := `{"day":"2026-10-05","state":"APPROVED","transitions":3,"without_dwell":3,"p50_dwell_seconds":null,"p95_dwell_seconds":null}`
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), row) {
+		t.Fatalf("state-dwell = %d %s; want it to contain %s", rec.Code, rec.Body, row)
 	}
 }
 
