@@ -328,8 +328,10 @@ operations:
       $ref: '#/channels/warehouse.network-inventory-planning.analytics'
     summary: Announce one scheduled rebalance pass (observe-only).
     description: |
-      One occurrence per NIP_REBALANCE_SCHEDULE tick (no default: unset
-      means the loop is off). The pass runs the same fail-closed snapshot
+      One occurrence per COMPLETED scheduled rebalance pass (NIP_REBALANCE_SCHEDULE
+      tick; no default: unset means the loop is off). A FAILED run (stale facts, or
+      no placement policies / lanes configured — ADR 0007 Amendment) publishes
+      NOTHING. The pass runs the same fail-closed snapshot
       build + planner as the simulation and records a rebalance_runs row
       (served by GET /v1/rebalance-runs); it NEVER approves anything and
       NEVER emits an allocation command. Data {run_id, proposal_count,

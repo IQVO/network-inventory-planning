@@ -132,10 +132,12 @@ type RebalanceRun struct {
 type RebalanceOutcome string
 
 const (
-	// RebalanceCompleted means the pass built a snapshot and ran the
-	// planner (even if it proposed nothing).
+	// RebalanceCompleted means the pass built a snapshot AND evaluated it
+	// against a placement-policy / lane catalogue (even if it proposed
+	// nothing). A pass that could not evaluate anything is FAILED.
 	RebalanceCompleted RebalanceOutcome = "COMPLETED"
-	// RebalanceFailed means the fail-closed snapshot build refused; the
-	// reason is on the row.
+	// RebalanceFailed means the pass could not evaluate: the fail-closed
+	// snapshot build refused (stale/missing facts) or no placement
+	// policies / lanes are configured. The reason is on the row.
 	RebalanceFailed RebalanceOutcome = "FAILED"
 )

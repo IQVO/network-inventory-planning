@@ -126,3 +126,35 @@ deterministically — no sleep-based tests.
   with no lane/policy catalogue projected yet (a later phase wires the
   lane catalogue); a COMPLETED run with zero proposals is a legitimate
   outcome, not a failure.
+
+## Amendment: scheduled runs are honest about a missing catalogue
+
+The last Consequences bullet above was wrong in practice. With no
+placement-policy / lane catalogue the planner is handed nil policies and
+nil lanes and **cannot evaluate any transfer**, so every run recorded
+`COMPLETED` with zero proposals — which reads as "nothing to rebalance"
+when the truth is "nothing could be evaluated". That bullet is superseded:
+
+- A scheduled pass whose policy set **or** lane set is empty is recorded as
+  `FAILED` with `fail_closed_reason` =
+  `no placement policies / lanes configured; the planner cannot evaluate any transfer`
+  (`usecases.NoPlanningCatalogueReason`), exactly like the stale-read-model
+  refusal (the snapshot watermark is kept on the row since the snapshot did
+  build). A stale/missing-facts refusal keeps its own reason and takes
+  precedence (it is checked first).
+- **No `RebalanceRunCompleted` is published for a run that did not
+  complete** — consistent with the other FAILED branches, which already
+  publish nothing. `COMPLETED` now means "evaluated against a catalogue";
+  a COMPLETED run with zero proposals is therefore genuine.
+- Consequence for the analytics `rebalance-runs` report: it only counts
+  `RebalanceRunCompleted`, so while no catalogue exists it is empty. An
+  empty report is **not** evidence of a balanced network; FAILED runs and
+  their reasons live in `GET /v1/rebalance-runs`. The OpenAPI descriptions
+  of both operations say so.
+- The structure is kept: `RunScheduledRebalance` carries `Policies` and
+  `Lanes`; nothing is invented (the composition root wires none), and when
+  a catalogue is wired the same code path evaluates it. Stock **positions**
+  are not a projected read model either (`snapshotPositions` returns none):
+  that projection must land together with the catalogue, otherwise a
+  catalogue-bearing run would again report zero proposals it never
+  evaluated.

@@ -162,6 +162,8 @@ func TestRunScheduledRebalanceRecordsCompletedRun(t *testing.T) {
 	uc := RunScheduledRebalance{
 		Snapshot:     fakeApproveSnapshot{facts: rebalanceFacts()},
 		Planner:      transfer.Planner{},
+		Policies:     rebalancePolicies(),
+		Lanes:        rebalanceLanes(),
 		Runs:         runs,
 		Events:       pub,
 		MaxStaleness: 10 * time.Minute,
@@ -285,6 +287,8 @@ func TestRunScheduledRebalanceDerivesRunID(t *testing.T) {
 	uc := RunScheduledRebalance{
 		Snapshot:     fakeApproveSnapshot{facts: rebalanceFacts()},
 		Planner:      transfer.Planner{},
+		Policies:     rebalancePolicies(),
+		Lanes:        rebalanceLanes(),
 		Runs:         &fakeRebalanceRuns{},
 		Events:       pub,
 		MaxStaleness: 10 * time.Minute,
@@ -329,6 +333,8 @@ func TestRunScheduledRebalancePublishFailureSurfaces(t *testing.T) {
 	uc := RunScheduledRebalance{
 		Snapshot:     fakeApproveSnapshot{facts: rebalanceFacts()},
 		Planner:      transfer.Planner{},
+		Policies:     rebalancePolicies(),
+		Lanes:        rebalanceLanes(),
 		Runs:         runs,
 		Events:       &failingPublisher{},
 		MaxStaleness: 10 * time.Minute,
