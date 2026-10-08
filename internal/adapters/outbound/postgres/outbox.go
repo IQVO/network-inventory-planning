@@ -99,10 +99,12 @@ type RelaySink interface {
 }
 
 // OutboxRelay polls outbox_events for unpublished rows and sends them to
-// sink ONE AT A TIME in id order, marking each published as it succeeds —
-// the same pattern as inventory-storage's relay (per-key ordering is never
-// violated by a later row overtaking a failed earlier one). Publish only
-// ever inserts rows; this is the only path by which a row reaches Kafka.
+// sink ONE AT A TIME in id order, marking each published as it succeeds.
+// Ordering is guaranteed per (topic, key): when a row fails, the pass
+// records the failure and carries on, skipping only later rows of the SAME
+// (topic, key) so none overtakes it — rows of other keys/topics are never
+// held behind a poison row. Publish only ever inserts rows; this is the
+// only path by which a row reaches Kafka.
 type OutboxRelay struct {
 	pool        *pgxpool.Pool
 	sink        RelaySink
@@ -172,29 +174,44 @@ func (r *OutboxRelay) RelayOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	published := 0
+	// blocked holds every (topic,key) that already failed in this pass:
+	// its later rows are skipped so they never overtake the failed one
+	// (per-key order), while rows of every OTHER (topic,key) keep flowing
+	// — one poison row must not hold the whole outbox hostage.
+	blocked := map[relayStream]struct{}{}
+	var sendErrs []error
 	for _, row := range rows {
+		stream := relayStream{topic: row.Encoded.Topic, key: string(row.Encoded.Key)}
+		if _, skip := blocked[stream]; skip {
+			continue
+		}
 		if sendErr := r.sink.Send(ctx, row.Encoded); sendErr != nil {
 			if _, uerr := tx.Exec(ctx, `
 				UPDATE outbox_events SET attempts = attempts + 1, last_error = $2 WHERE id = $1
 			`, row.ID, sendErr.Error()); uerr != nil {
 				return published, uerr
 			}
-			// Commit what published so far plus this row's failure
-			// record; stop the pass here so no later row overtakes it.
-			if commitErr := tx.Commit(ctx); commitErr != nil {
-				return published, commitErr
-			}
-			return published, sendErr
+			blocked[stream] = struct{}{}
+			sendErrs = append(sendErrs, fmt.Errorf("outbox row %d: %w", row.ID, sendErr))
+			continue
 		}
 		if _, uerr := tx.Exec(ctx, `UPDATE outbox_events SET published_at = now() WHERE id = $1`, row.ID); uerr != nil {
 			return published, uerr
 		}
 		published++
 	}
+	// Commit what published plus every failure record.
 	if err := tx.Commit(ctx); err != nil {
 		return published, err
 	}
-	return published, nil
+	return published, errors.Join(sendErrs...)
+}
+
+// relayStream identifies one ordering domain of the outbox: rows with the
+// same topic AND key must be delivered in id order.
+type relayStream struct {
+	topic string
+	key   string
 }
 
 // claimBatch selects and locks up to batchSize unpublished rows, oldest
