@@ -18,6 +18,11 @@ templates/
 tools/
 scripts/
 
+# The console remote has its own Dockerfile (web/Dockerfile) and build context;
+# none of it is part of the Go image (and a local web/node_modules must never
+# reach this build context).
+web/
+
 # Tool configs irrelevant to `go build`
 .golangci.yml
 .gremlins.yaml

@@ -345,6 +345,43 @@ jobs:
       - name: Architecture fitness tests
         run: go test ./internal/architecture/... -v
 
+  # ============================================================
+  # CLASSIFICATION: UNIT TESTING + STATIC ANALYSIS (web/ micro-frontend remote)
+  # web/ is `nip_mfe`, the Module Federation remote the warehouse-console shell
+  # loads (ADR 0010). A separate npm project (not part of the Go module): lint
+  # (oxlint) + typecheck (tsc -b) + vitest/Testing Library tests + the production
+  # build. @warehouse/ui-kit is a sibling checkout (file:../../warehouse-ui-kit),
+  # so both repos are checked out side by side and the kit is built first.
+  # Not a required check: the Go gates are; this one keeps the remote honest.
+  # ============================================================
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: network-inventory-planning/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: network-inventory-planning
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: IQVO/warehouse-ui-kit
+          ref: develop
+          path: warehouse-ui-kit
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: network-inventory-planning/web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: warehouse-ui-kit
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b
+      - run: npm test
+      - run: npm run build
+
   # Shift-left container scan: builds the image (no push) on every push AND
   # every PR, so a vulnerable base image or dependency is caught before
   # merge, not just at publish time. Blocks on CRITICAL/HIGH with a known
