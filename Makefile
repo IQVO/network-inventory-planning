@@ -18,7 +18,7 @@ GREMLINS_VERSION   := v0.6.0
 GOVULNCHECK        ?= govulncheck
 
 COVERAGE_OUT       := coverage.out
-COVERAGE_PKGS      := ./internal/domain/...,./internal/application/...
+COVERAGE_PKGS      := ./internal/domain/...,./internal/application/...,./internal/analytics/...
 COVERAGE_THRESHOLD := 90
 
 # The fast mutation subset — kept in sync with the `mutation-fast` CI job.
@@ -27,6 +27,9 @@ COVERAGE_THRESHOLD := 90
 # not necessarily the biggest package, the one with the most branching
 # domain logic (see HARNESS.md's mutation-testing section).
 MUTATION_FAST_PKG  := ./internal/domain/transfer
+# The pure analytics read-model region (ADR 0009): range rules, percentile,
+# rates. gremlins takes one path per run, so it is its own fast target.
+MUTATION_ANALYTICS_PKG := ./internal/analytics/report
 # The exhaustive scheduled run — kept in sync with the `mutation` CI job.
 MUTATION_FULL_PKG  := ./internal/domain
 
@@ -121,6 +124,7 @@ mutation:
 		exit 1; \
 	fi
 	$(GREMLINS) unleash $(MUTATION_FAST_PKG)
+	$(GREMLINS) unleash $(MUTATION_ANALYTICS_PKG)
 
 mutation-full:
 	@if ! command -v $(GREMLINS) >/dev/null 2>&1; then \

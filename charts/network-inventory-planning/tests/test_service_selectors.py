@@ -38,7 +38,14 @@ ENABLE_EVERYTHING = BASE + [
     "--set", "gatewayApi.parentRefs[0].name=gw",
     "--set", "ingress.enabled=true",
     "--set", "kafka.enabled=true",
+    "--set", "analytics.enabled=true",
+    "--set", "analytics.database.existingSecret=nip-analytics",
+    "--set", "analytics.projector.autoscaling.enabled=true",
+    "--set", "analytics.reports.autoscaling.enabled=true",
 ]
+
+PROJECTOR = f"{FULLNAME}-projector"
+REPORTS = f"{FULLNAME}-reports"
 
 
 def render(extra_args: list[str]) -> list[dict]:
@@ -137,13 +144,21 @@ def main() -> int:
         if mcp["spec"]["template"]["spec"]["containers"][0].get("command") != ["/app/mcp"]:
             failures.append("the MCP container must run /app/mcp")
 
-    # The HPA owns the api's replicas and scales the api Deployment only.
+    # Each HPA owns the replicas of EXACTLY the Deployment it scales: the api's
+    # HPA the api, the analytics ones the projector / reports.
+    hpa_targets = {}
     for d in docs:
         if d.get("kind") == "HorizontalPodAutoscaler":
-            if d["spec"]["scaleTargetRef"]["name"] != FULLNAME:
-                failures.append("the HPA must scale the api Deployment")
-            if "replicas" in (api or {}).get("spec", {}):
-                failures.append("the api Deployment must omit replicas when its HPA owns them")
+            hpa_targets[d["metadata"]["name"]] = d["spec"]["scaleTargetRef"]["name"]
+            if d["spec"]["scaleTargetRef"]["name"] not in deployments:
+                failures.append(f"HPA {d['metadata']['name']} scales a Deployment that does not exist")
+    if hpa_targets.get(FULLNAME) != FULLNAME:
+        failures.append("the api HPA must scale the api Deployment")
+    for name in (FULLNAME, PROJECTOR, REPORTS):
+        if name in hpa_targets and "replicas" in deployments.get(name, {}).get("spec", {}):
+            failures.append(f"the {name} Deployment must omit replicas when its HPA owns them")
+    if set(hpa_targets) != {FULLNAME, PROJECTOR, REPORTS} or any(hpa_targets[n] != n for n in hpa_targets):
+        failures.append(f"HPAs {hpa_targets} must be exactly one per scalable Deployment, each scaling its own")
 
     # Routing (HTTPRoute / Ingress) points at the api Service, never the MCP one.
     for d in docs:
@@ -173,6 +188,10 @@ def main() -> int:
         if not matches(match_labels, pod_labels_of(dep)):
             failures.append(f"Deployment {name} pod labels do not satisfy its own selector")
 
+    # The analytics read side (ADR 0009): projector + reports Deployments, and a
+    # reports Service that selects exactly the reports Deployment.
+    check_analytics(failures, services, deployments)
+
     # The real invariant: each Service selects exactly one Deployment.
     for svc_name, svc in services.items():
         sel = selector_of(svc)
@@ -182,13 +201,13 @@ def main() -> int:
                 f"Service {svc_name} selects {len(hit)} Deployments {sorted(hit)}; expected exactly 1"
             )
 
-    # Default values must not deploy the MCP or frontend components at all,
+    # Default values must not deploy the MCP, frontend or analytics components at all,
     # and the lone api Service still selects exactly the api Deployment.
     default_docs = render(BASE)
     stray = [
         d["metadata"]["name"]
         for d in default_docs
-        if d.get("metadata", {}).get("name", "").endswith(("-mcp", "-frontend"))
+        if d.get("metadata", {}).get("name", "").endswith(("-mcp", "-frontend", "-projector", "-reports", "-analytics"))
     ]
     if stray:
         failures.append(f"optional components rendered with default values: {stray}")
@@ -205,8 +224,56 @@ def main() -> int:
         return 1
 
     print(f"PASS: {len(services)} Services each select exactly one Deployment; "
-          "api pins component=api, mcp and frontend pin their own component, are ClusterIP and are off by default")
+          "api pins component=api, mcp and frontend pin their own component, are ClusterIP and are off by default; "
+          "analytics-projector / analytics-reports pin their components, are off by default and fail closed")
     return 0
+
+
+def check_analytics(failures: list[str], services: dict, deployments: dict) -> None:
+    """The projector and reports Deployments, the reports Service, the guards."""
+    for name, component, command in (
+        (PROJECTOR, "analytics-projector", ["/app/nip-projector"]),
+        (REPORTS, "analytics-reports", ["/app/nip-reports"]),
+    ):
+        dep = deployments.get(name)
+        if dep is None:
+            failures.append(f"the {component} Deployment {name} was not rendered with analytics.enabled=true")
+            continue
+        if (dep["spec"]["selector"].get("matchLabels") or {}).get("app.kubernetes.io/component") != component \
+                or pod_labels_of(dep).get("app.kubernetes.io/component") != component:
+            failures.append(f"the {component} Deployment must carry component={component} in selector.matchLabels and its pod labels")
+        if dep["spec"]["template"]["spec"]["containers"][0].get("command") != command:
+            failures.append(f"the {component} container must run {command}")
+
+    # The reports Service exists and selects the reports Deployment; the projector has no Service.
+    svc = services.get(REPORTS)
+    if svc is None:
+        failures.append("the reports Service was not rendered with analytics.enabled=true")
+    elif selector_of(svc).get("app.kubernetes.io/component") != "analytics-reports":
+        failures.append("the reports Service selector must pin component=analytics-reports")
+    if PROJECTOR in services:
+        failures.append("the projector serves only its admin port to probes and must have no Service")
+
+    # Render-time guards: analytics without a DSN source, or without kafka, must not render.
+    no_dsn = [*BASE, "--set", "kafka.enabled=true", "--set", "analytics.enabled=true"]
+    no_kafka = [*BASE, "--set", "analytics.enabled=true", "--set", "analytics.database.existingSecret=x"]
+    for label, args in (("a DSN source", no_dsn), ("kafka.enabled", no_kafka)):
+        proc = subprocess.run(["helm", "template", RELEASE, str(CHART_DIR), *args], capture_output=True, text=True)
+        if proc.returncode == 0:
+            failures.append(f"analytics.enabled=true without {label} must fail at render time")
+        elif "analytics.enabled is true" not in proc.stderr:
+            failures.append(f"the missing-{label} failure must name analytics.enabled, got: {proc.stderr.strip()[:200]}")
+
+    # The chart creates its own Secret from the DSN values, with both keys.
+    docs = render([*BASE, "--set", "kafka.enabled=true", "--set", "analytics.enabled=true",
+                   "--set", "analytics.database.projectorUrl=postgres://p@h:5432/db"])
+    secrets = [d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"].endswith("-analytics")]
+    if len(secrets) != 1 or set(secrets[0].get("stringData", {})) != {"ANALYTICS_DATABASE_URL", "ANALYTICS_READER_DATABASE_URL"}:
+        failures.append("analytics.database.projectorUrl must render one analytics Secret with both DSN keys")
+    # With an existingSecret the chart creates none.
+    docs = render(ENABLE_EVERYTHING)
+    if any(d.get("kind") == "Secret" and d["metadata"]["name"].endswith("-analytics") for d in docs):
+        failures.append("analytics.database.existingSecret must suppress the chart-created Secret")
 
 
 if __name__ == "__main__":

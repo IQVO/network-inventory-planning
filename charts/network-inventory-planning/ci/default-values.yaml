@@ -1,0 +1,4 @@
+# Used by `ct lint`: the chart's default render (every optional component off).
+# Dummy secret name only; no credentials.
+database:
+  existingSecret: "nip-database"

@@ -117,6 +117,49 @@ MCP_FORBIDDEN_ENV = {
     "API_KEY",
 }
 
+# Env cmd/nip-projector reads (cmd/nip-projector/main.go) and that the chart
+# must wire. It writes ONLY the analytical database: never the OLTP DSNs, the
+# outbox relay or the OLTP consumer groups.
+PROJECTOR_EXPECTED_ENV = {
+    "ADMIN_ADDR",
+    "KAFKA_BROKERS",
+    "ANALYTICS_CONSUMER_GROUP",
+    "ANALYTICS_MIGRATIONS_PATH",
+    "LOG_LEVEL",
+    "ANALYTICS_DATABASE_URL",
+}
+PROJECTOR_FORBIDDEN_ENV = {
+    "DATABASE_URL",
+    "MIGRATIONS_DATABASE_URL",
+    "OUTBOX_RELAY_ENABLED",
+    "SITE_CAPABILITY_CONSUMER_GROUP",
+    "SITE_SKU_DEMAND_CONSUMER_GROUP",
+    "CAPACITY_PLAN_CONSUMER_GROUP",
+    "TRANSFER_REPLY_CONSUMER_GROUP",
+    "TRANSFER_FACT_CONSUMER_GROUP",
+    "ANALYTICS_READER_DATABASE_URL",
+    "MCP_API_KEY",
+    "API_KEY",
+}
+
+# Env cmd/nip-reports reads (cmd/nip-reports/main.go). Read-only over the
+# analytical database: no Kafka, no OLTP database, no projector DSN.
+REPORTS_EXPECTED_ENV = {
+    "HTTP_ADDR",
+    "LOG_LEVEL",
+    "ANALYTICS_READER_DATABASE_URL",
+}
+REPORTS_FORBIDDEN_ENV = {
+    "DATABASE_URL",
+    "MIGRATIONS_DATABASE_URL",
+    "ANALYTICS_DATABASE_URL",
+    "KAFKA_BROKERS",
+    "ANALYTICS_CONSUMER_GROUP",
+    "OUTBOX_RELAY_ENABLED",
+    "MCP_API_KEY",
+    "API_KEY",
+}
+
 
 def check_mcp(failures: list[str]) -> None:
     docs = render(ENABLE_EVERYTHING + ["--set", "mcp.enabled=true"])
@@ -152,6 +195,66 @@ def check_mcp(failures: list[str]) -> None:
     bare_plain, bare_from_ref = component_env(render(["--set", "mcp.enabled=true"]), "mcp")
     if "DATABASE_URL" in bare_plain or "DATABASE_URL" in bare_from_ref:
         failures.append("MCP rendered DATABASE_URL without a database source")
+
+
+def check_analytics(failures: list[str]) -> None:
+    """The analytics projector and reports wire exactly the env their binaries read."""
+    args = ENABLE_EVERYTHING + [
+        "--set", "analytics.enabled=true",
+        "--set", "analytics.database.existingSecret=nip-analytics",
+    ]
+    docs = render(args)
+    for component, expected, forbidden in (
+        ("analytics-projector", PROJECTOR_EXPECTED_ENV, PROJECTOR_FORBIDDEN_ENV),
+        ("analytics-reports", REPORTS_EXPECTED_ENV, REPORTS_FORBIDDEN_ENV),
+    ):
+        plain, from_ref = component_env(docs, component)
+        if not plain and not from_ref:
+            failures.append(f"analytics.enabled=true rendered no {component} Deployment")
+            continue
+        missing = expected - set(plain) - from_ref
+        if missing:
+            failures.append(f"{component} env vars missing: {sorted(missing)}")
+        leaked = sorted((set(plain) | from_ref) & forbidden)
+        if leaked:
+            failures.append(f"{component} must not carry {leaked}")
+        for dsn in {"ANALYTICS_DATABASE_URL", "ANALYTICS_READER_DATABASE_URL"} & expected:
+            if dsn in plain or dsn not in from_ref:
+                failures.append(f"{component} {dsn} must be wired via secretKeyRef, not a plain value")
+
+    plain, _ = component_env(docs, "analytics-projector")
+    if plain.get("ANALYTICS_CONSUMER_GROUP") != "network-inventory-planning-analytics":
+        failures.append(f"ANALYTICS_CONSUMER_GROUP = {plain.get('ANALYTICS_CONSUMER_GROUP')!r}, want 'network-inventory-planning-analytics'")
+    if plain.get("ANALYTICS_MIGRATIONS_PATH") != "analytics/migrations" or plain.get("ADMIN_ADDR") != ":8091":
+        failures.append("projector ANALYTICS_MIGRATIONS_PATH / ADMIN_ADDR defaults are wrong")
+    plain, _ = component_env(docs, "analytics-reports")
+    if plain.get("HTTP_ADDR") != ":8092":
+        failures.append(f"reports HTTP_ADDR = {plain.get('HTTP_ADDR')!r}, want ':8092'")
+
+    # The reports reader is fed the READER DSN key, the projector the writer's.
+    for d in docs:
+        if d.get("kind") == "Deployment":
+            comp = d["spec"]["template"]["metadata"]["labels"].get("app.kubernetes.io/component")
+            keys = {
+                e["name"]: e["valueFrom"]["secretKeyRef"]["key"]
+                for e in d["spec"]["template"]["spec"]["containers"][0]["env"]
+                if "valueFrom" in e
+            }
+            if comp == "analytics-reports" and keys.get("ANALYTICS_READER_DATABASE_URL") != "ANALYTICS_READER_DATABASE_URL":
+                failures.append("the reports Deployment must read the reader DSN key")
+            if comp == "analytics-projector" and keys.get("ANALYTICS_DATABASE_URL") != "ANALYTICS_DATABASE_URL":
+                failures.append("the projector Deployment must read the writer DSN key")
+
+    # The api Deployment is untouched by enabling analytics.
+    api_plain, api_from_ref = deployment_env(docs)
+    leaked = sorted((set(api_plain) | api_from_ref) & {"ANALYTICS_DATABASE_URL", "ANALYTICS_READER_DATABASE_URL", "ANALYTICS_CONSUMER_GROUP"})
+    if leaked:
+        failures.append(f"the api Deployment must not carry analytics env {leaked}")
+
+    # Analytics is opt-in: the default render has no analytics Deployment/Service/Secret.
+    default_names = {d["metadata"]["name"] for d in render(["--set", "database.existingSecret=x"]) if d.get("metadata")}
+    if any(n.endswith(("-projector", "-reports", "-analytics")) for n in default_names):
+        failures.append("analytics resources rendered with default values; analytics.enabled must default to false")
 
 
 def main() -> int:
@@ -198,6 +301,7 @@ def main() -> int:
         failures.append("routing resources rendered with default values; they must be opt-in")
 
     check_mcp(failures)
+    check_analytics(failures)
 
     if failures:
         for f in failures:
@@ -206,7 +310,9 @@ def main() -> int:
 
     print(f"PASS: all {len(EXPECTED_ENV)} api env vars wire correctly; "
           "defaults leak no kafka/database/release config; "
-          f"mcp wires {len(MCP_EXPECTED_ENV)} env vars, none of them kafka/relay/auth, and is off by default")
+          f"mcp wires {len(MCP_EXPECTED_ENV)} env vars, none of them kafka/relay/auth, and is off by default; "
+          f"analytics-projector wires {len(PROJECTOR_EXPECTED_ENV)} and analytics-reports {len(REPORTS_EXPECTED_ENV)} env vars "
+          "(DSNs via secretKeyRef, no OLTP database), both off by default")
     return 0
 
 
