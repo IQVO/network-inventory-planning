@@ -17,6 +17,7 @@ import (
 	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
@@ -83,6 +84,23 @@ func run() error {
 		propagation.Baggage{},
 	))
 
+	// OpenTelemetry metrics + traces over OTLP/gRPC (ADR 0011). Non-fatal
+	// by design: a failed or unreachable Collector degrades to dropped
+	// telemetry, never to a service that will not start. It must run
+	// BEFORE the router is built: the HTTP RED middleware binds to the
+	// global MeterProvider at construction.
+	shutdownTelemetry, err := telemetry.SetupFromEnv(ctx, telemetry.ServiceAPI)
+	if err != nil {
+		logger.Warn("telemetry setup failed; continuing without OTLP export", "error", err)
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTelemetry(flushCtx); err != nil {
+			logger.Warn("telemetry shutdown failed", "error", err)
+		}
+	}()
+
 	address := os.Getenv("HTTP_ADDR")
 	if address == "" {
 		address = ":8080"
@@ -96,7 +114,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              address,
-		Handler:           handler.Routes(),
+		Handler:           telemetry.HTTPMiddleware(telemetry.ServiceAPI, handler.Routes()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -277,15 +295,34 @@ type sagaWiring struct {
 	closers  []func() error
 }
 
+// wireMetrics registers the Tier-2 business counters on the global
+// MeterProvider (ADR 0011). Registration only fails on an invalid
+// instrument name (a programming error); the service runs un-instrumented
+// (nil port) rather than not at all. The nil is a true nil interface, never
+// a typed-nil pointer, so the use cases' `!= nil` guards hold.
+func wireMetrics(logger *slog.Logger) ports.TransferMetrics {
+	m, err := telemetry.NewTransferMetrics()
+	if err != nil {
+		logger.Warn("business metrics unavailable; continuing without them", "error", err)
+		return nil
+	}
+	return m
+}
+
 // wireSagas wires the Phase-1 simulation, the Phase-2 approval saga, the
 // transactional outbox relay and every inbound consumer over the pool.
 func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Duration) (sagaWiring, error) {
 	var out sagaWiring
 
+	// Tier-2 business counters (ADR 0011).
+	metrics := wireMetrics(logger)
+
 	uow := postgres.NewUnitOfWork(pool)
 	processedEvents := postgres.NewProcessedEventRepo(pool)
 	snapshots := postgres.NewSnapshotRepo(pool)
-	transfers := postgres.NewTransferRepo(pool)
+	// Every saga transition (approve + reply/fact consumers) persists
+	// through this repository, so the decorator counts each exactly once.
+	transfers := telemetry.NewMeteredTransferRepository(postgres.NewTransferRepo(pool), metrics)
 
 	out.simulate = &usecases.SimulateTransferOptions{
 		Snapshot:     snapshots,
@@ -299,7 +336,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	// since ADR 0007, the analytics occurrences onto
 	// warehouse.network-inventory-planning.analytics — the same relay,
 	// the rows carry their own topic).
-	outboxPublisher, relayRunner := wireOutbox(logger, pool)
+	outboxPublisher, relayRunner := wireOutbox(logger, pool, metrics)
 	if relayRunner != nil {
 		out.runners = append(out.runners, relayRunner)
 	}
@@ -323,6 +360,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 			MaxStaleness: maxStaleness,
 			Release:      release,
 			Now:          time.Now,
+			Metrics:      metrics,
 		}
 		if err := approve.Release.Validate(); err != nil {
 			logger.Warn("work release not configured; POST /v1/transfers:approve answers 503 (no transfer may be approved without a releasable pick leg)",
@@ -516,7 +554,7 @@ type consumerDeps struct {
 // publisher is nil (the approval endpoint then stays 503) and any rows
 // written would wait for a later relay — the saga's durability never
 // depends on the broker being up at approval time.
-func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPublisher, func() error) {
+func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool, metrics ports.TransferMetrics) (ports.TransferEventPublisher, func() error) {
 	brokers := brokersFromEnv()
 	if brokers == nil {
 		logger.Warn("KAFKA_BROKERS not configured; outbox disabled (POST /v1/transfers:approve answers 503)",
@@ -534,7 +572,9 @@ func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPub
 		return publisher, nil
 	}
 	sink := outboundkafka.NewRelaySink(brokers)
-	relay := postgres.NewOutboxRelay(pool, sink)
+	// The metered decorator counts every send the relay attempts
+	// (published|failed); the raw sink is still the one closed below.
+	relay := postgres.NewOutboxRelay(pool, telemetry.NewMeteredRelaySink(sink, metrics))
 	relayCtx, relayStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	runner := func() error {
 		defer relayStop()

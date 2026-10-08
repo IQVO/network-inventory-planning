@@ -27,6 +27,7 @@ import (
 
 	inboundmcp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/mcp"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 )
 
@@ -59,6 +60,20 @@ func run() error {
 	logger := newLogger(os.Getenv(envLogLevel))
 	slog.SetDefault(logger)
 
+	// Metrics + traces over OTLP/gRPC (ADR 0011). Non-fatal; built BEFORE the
+	// router so the HTTP RED middleware binds to the real MeterProvider.
+	shutdownTelemetry, terr := telemetry.SetupFromEnv(context.Background(), telemetry.ServiceMCP)
+	if terr != nil {
+		logger.Warn("telemetry setup failed; continuing without OTLP export", "error", terr)
+	}
+	defer func() {
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelFlush()
+		if err := shutdownTelemetry(flushCtx); err != nil {
+			logger.Warn("telemetry shutdown failed", "error", err)
+		}
+	}()
+
 	maxStaleness, err := maxStalenessFromEnv()
 	if err != nil {
 		return err
@@ -73,7 +88,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              getenv(envMCPAddr, defaultAddr),
-		Handler:           newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps))),
+		Handler:           telemetry.HTTPMiddleware(telemetry.ServiceMCP, newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps)))),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return serveMCP(logger, srv)

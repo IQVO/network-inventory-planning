@@ -33,6 +33,7 @@ import (
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/analyticsstore"
 	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/bootretry"
 )
 
@@ -110,6 +111,20 @@ func run() error {
 	}
 	logger := newLogger(cfg.logLevel)
 	slog.SetDefault(logger)
+
+	// Runtime metrics + traces (ADR 0011). Admin-only process: no HTTP RED
+	// middleware on the probe endpoints. Non-fatal: telemetry never blocks boot.
+	shutdownTelemetry, terr := telemetry.SetupFromEnv(context.Background(), telemetry.ServiceProjector)
+	if terr != nil {
+		logger.Warn("telemetry setup failed; continuing without OTLP export", "error", terr)
+	}
+	defer func() {
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelFlush()
+		if err := shutdownTelemetry(flushCtx); err != nil {
+			logger.Warn("telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	pool, err := openAnalyticsPool(context.Background(), logger, cfg.analyticsURL, cfg.migrationsPath)
 	if err != nil {

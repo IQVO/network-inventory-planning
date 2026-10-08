@@ -21,6 +21,7 @@ import (
 
 	inboundhttp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/analyticsstore"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/bootretry"
 )
 
@@ -74,6 +75,21 @@ func run() error {
 	slog.SetDefault(logger)
 
 	ctx := context.Background()
+
+	// Metrics + traces over OTLP/gRPC (ADR 0011). Non-fatal; built BEFORE the
+	// router so the HTTP RED middleware binds to the real MeterProvider.
+	shutdownTelemetry, terr := telemetry.SetupFromEnv(ctx, telemetry.ServiceReports)
+	if terr != nil {
+		logger.Warn("telemetry setup failed; continuing without OTLP export", "error", terr)
+	}
+	defer func() {
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelFlush()
+		if err := shutdownTelemetry(flushCtx); err != nil {
+			logger.Warn("telemetry shutdown failed", "error", err)
+		}
+	}()
+
 	pool, err := analyticsstore.NewReadOnlyPool(ctx, cfg.analyticsURL)
 	if err != nil {
 		return err
@@ -87,7 +103,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.httpAddr,
-		Handler:           (&inboundhttp.ReportsServer{Reader: analyticsstore.NewReader(pool)}).Routes(),
+		Handler:           telemetry.HTTPMiddleware(telemetry.ServiceReports, (&inboundhttp.ReportsServer{Reader: analyticsstore.NewReader(pool)}).Routes()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serveErr := make(chan error, 1)

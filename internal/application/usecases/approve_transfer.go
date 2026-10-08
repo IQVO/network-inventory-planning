@@ -65,6 +65,9 @@ type ApproveTransfer struct {
 	Release WorkReleaseConfig
 	// Now supplies the approval clock (never time.Now directly).
 	Now func() time.Time
+	// Metrics records the approval outcome counter (ADR 0011). OPTIONAL:
+	// nil means not instrumented and never changes behaviour.
+	Metrics ports.TransferMetrics
 }
 
 // defaultApprovalExpiry is how long an approved-but-unallocated transfer
@@ -80,6 +83,28 @@ const defaultApprovalExpiry = 24 * time.Hour
 //   - ErrIdempotencyConflict → 409;
 //   - replay of the SAME key+payload → 200 with Replayed: true.
 func (u ApproveTransfer) Execute(ctx context.Context, in ApproveTransferInput) (ApproveTransferResult, error) {
+	result, err := u.execute(ctx, in)
+	if u.Metrics != nil {
+		u.Metrics.TransferApproved(ctx, approvalOutcome(result, err))
+	}
+	return result, err
+}
+
+// approvalOutcome classifies one approval for the outcome counter: any
+// error is "refused", a replayed idempotency key is "replayed", else
+// "approved". Bounded by construction (ADR 0011): no ids, no error text.
+func approvalOutcome(result ApproveTransferResult, err error) string {
+	switch {
+	case err != nil:
+		return ports.ApprovalRefused
+	case result.Replayed:
+		return ports.ApprovalReplayed
+	default:
+		return ports.ApprovalApproved
+	}
+}
+
+func (u ApproveTransfer) execute(ctx context.Context, in ApproveTransferInput) (ApproveTransferResult, error) {
 	if err := u.validate(in); err != nil {
 		return ApproveTransferResult{}, err
 	}
