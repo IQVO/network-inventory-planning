@@ -1,4 +1,12 @@
-/** Wire shapes of network-inventory-planning's REST API (apis/openapi.yaml). */
+/**
+ * Wire shapes of network-inventory-planning's REST API.
+ *
+ * Source of truth: the Go handlers' DTOs in
+ * internal/adapters/inbound/http/{handler.go,transfers_read.go} -- NOT
+ * apis/openapi.yaml, which described GET /v1/transfer-simulations wrongly
+ * (ADR 0010, "Correction"). src/test/realShapes.ts pins these shapes and
+ * contract.test.ts fails when a fixture, or the Go DTO tags, drift from them.
+ */
 
 export const TRANSFER_STATES = [
   "DRAFT",
@@ -18,13 +26,13 @@ export type TransferState = (typeof TRANSFER_STATES)[number];
 
 export type RejectionReason = "ORIGIN_SITE_UNKNOWN" | "INSUFFICIENT_USABLE" | "IDEMPOTENCY_CONFLICT";
 
-/** GET /v1/transfers items and the head of GET /v1/transfers/{id}. */
+/** transferDTO: GET /v1/transfers items and the head of GET /v1/transfers/{id}. */
 export interface TransferView {
   id: string;
   state: TransferState;
   sku: string;
   quantity: number;
-  /** Present from PICKED onwards; may be short of `quantity`. */
+  /** `omitempty` on the wire: absent until something was picked AND when the picked quantity is 0. */
   pickedQuantity?: number;
   originSiteId: string;
   destinationSiteId: string;
@@ -39,21 +47,25 @@ export interface TransferView {
   version: number;
 }
 
+/** auditEntryDTO. */
 export interface AuditEntry {
   seq: number;
-  /** Absent on the creation entry. */
+  /** Absent on the creation entry (DRAFT). */
   from?: string;
   to: TransferState;
   event: string;
+  /** May be an empty string (an approval without operator reason). */
   cause: string;
   occurredAt: string;
 }
 
+/** transferDetailDTO. */
 export interface TransferDetail extends TransferView {
   /** Oldest first. */
   audit: AuditEntry[];
 }
 
+/** transferListDTO. */
 export interface TransferList {
   items: TransferView[];
   total: number;
@@ -65,33 +77,39 @@ export interface TransferQuery {
   state?: string;
   originSiteId?: string;
   destinationSiteId?: string;
+  /** The service accepts 1..200 and defaults to 50. */
   limit?: number;
   offset?: number;
 }
 
-/** One advisory option of GET /v1/transfer-simulations (Go-cased wire fields). */
-export interface Proposal {
-  Origin: string;
-  Destination: string;
-  SKU: string;
-  Quantity: number;
-  PolicyVersion: string;
-  PositionAsOf: string;
-  Reasons: string[];
-  ScoreBreakdown: {
-    PriorityBenefit: number;
-    HandlingPenalty: number;
-    LeadTimePenalty: number;
-  };
+/**
+ * simulateSiteDTO: one participating site's advisory view. The simulation
+ * carries NO proposals and NO quantities; it only says how each site's
+ * published capacity over the window compares with its in-window demand.
+ */
+export interface SimulationSite {
+  site: string;
+  originEnabled: boolean;
+  destinationEnabled: boolean;
+  totalDemand: number;
+  /** A float on the wire (float64). */
+  capacityOverWindow: number;
+  /** capacityOverWindow minus totalDemand (integer, truncated); negative means the published plan is already short. */
+  capacityHeadroom: number;
+  windowStart: string;
+  windowEnd: string;
 }
 
+/** GET /v1/transfer-simulations (the service sorts `sites` by site id). */
 export interface SimulationResponse {
+  /** Always true: the simulation never reserves, moves or promises stock. */
+  advisory: boolean;
   /** Oldest watermark among the facts the simulation used. */
   asOf: string;
-  options: Proposal[];
+  sites: SimulationSite[];
 }
 
-/** POST /v1/transfers:approve body. */
+/** approveRequest: POST /v1/transfers:approve body (unknown fields are a 400). */
 export interface ApproveTransferRequest {
   originSiteId: string;
   destinationSiteId: string;
@@ -102,6 +120,7 @@ export interface ApproveTransferRequest {
   proposalAsOf: string;
 }
 
+/** approveTransferDTO: the 200 body (a replay of the same key answers 200 too, never 201). */
 export interface ApproveTransferResponse {
   transferId: string;
   state: TransferState;
@@ -118,6 +137,7 @@ export interface ApproveTransferResponse {
   transferLineId: string;
 }
 
+/** rebalanceRunDTO. */
 export interface RebalanceRun {
   id: number;
   startedAt: string;

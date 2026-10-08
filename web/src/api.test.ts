@@ -48,14 +48,14 @@ describe("approveTransfer", () => {
 
 describe("errors", () => {
   it("keeps the problem+json title, detail and slug", async () => {
-    mockApi({ "GET /v1/transfer-simulations": problem(503, "read-models-not-ready", "Read models not ready", "capacity facts are stale") });
+    mockApi({ "GET /v1/transfer-simulations": problem(503, "read-models-incomplete", "Planning read models are incomplete or stale", "capacity facts are stale") });
     const err = await getSimulation().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     const e = err as ApiError;
     expect(e.status).toBe(503);
-    expect(e.title).toBe("Read models not ready");
+    expect(e.title).toBe("Planning read models are incomplete or stale");
     expect(e.detail).toBe("capacity facts are stale");
-    expect(e.slug).toBe("read-models-not-ready");
+    expect(e.slug).toBe("read-models-incomplete");
   });
 
   it("survives a non-JSON error body", async () => {
