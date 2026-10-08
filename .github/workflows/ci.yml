@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           go test ./... -race \
             -coverprofile=coverage.out \
-            -coverpkg=./internal/domain/...,./internal/application/...
+            -coverpkg=./internal/domain/...,./internal/application/...,./internal/analytics/...
 
       - name: Coverage gate
         env:
@@ -186,6 +186,8 @@ jobs:
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
       - name: Mutation testing (fast subset — transfer aggregate)
         run: gremlins unleash ./internal/domain/transfer
+      - name: Mutation testing (fast subset — analytics read model)
+        run: gremlins unleash ./internal/analytics/report
 
   mutation:
     runs-on: ubuntu-latest

@@ -205,6 +205,84 @@ frontend:
       cpu: 100m
       memory: 128Mi
 
+# --- analytics read side (docs/docs/adr/0009-analytics-read-side.md) ---
+# A projector (the ONLY writer of the analytical database; consumes
+# warehouse.network-inventory-planning.analytics) and a read-only reports
+# reader, backed by a SEPARATE analytical database (network_inventory_planning_analytics).
+# Each is its own Deployment (components analytics-projector /
+# analytics-reports; the reports one also gets a ClusterIP Service). DISABLED
+# by default and entirely absent from the rendered manifest, so a default
+# render is byte-identical to a chart without this block. The projector needs
+# kafka.enabled=true and a DSN source (the chart refuses to render otherwise).
+# The events themselves are produced by the api's transactional outbox
+# (ADR 0007) whenever its outbox relay runs (config.outboxRelayEnabled).
+analytics:
+  enabled: false
+  # Log level of both analytics binaries (LOG_LEVEL).
+  logLevel: "info"
+  # Directory (inside the image, relative to WORKDIR /app) of the analytical
+  # *.up.sql migrations the projector applies on start.
+  migrationsPath: "analytics/migrations"
+  database:
+    # The projector's read-write analytical DSN (DIRECT Postgres, not
+    # PgBouncer: it also runs the migrations). No password in committed values.
+    projectorUrl: ""
+    # The reports reader's DSN -- a read-only role where possible; falls back
+    # to projectorUrl when empty (local/dev).
+    reportsUrl: ""
+    # Name of an existing Secret holding ANALYTICS_DATABASE_URL (projector) and
+    # ANALYTICS_READER_DATABASE_URL (reports). Takes precedence over the URLs.
+    existingSecret: ""
+  projector:
+    replicaCount: 1
+    adminAddr: ":8091"                  # ADMIN_ADDR (/healthz, /readyz)
+    # ANALYTICS_CONSUMER_GROUP: the projector's FIXED consumer group. A stable
+    # id lets a rescheduled pod resume from its committed offsets; a brand-new
+    # group starts at the earliest offset and rebuilds the model from history.
+    consumerGroup: "network-inventory-planning-analytics"
+    # HorizontalPodAutoscaler (autoscaling/v2). Off by default. A fixed, stable
+    # consumer group lets N replicas share the topic's partitions and every
+    # write is idempotent on the CloudEvents id in the same transaction, so
+    # correctness does not regress at N>1. Capped at 2: a lightweight insert
+    # workload. When enabled the Deployment omits replicas.
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      targetCPUUtilizationPercentage: 70
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+  reports:
+    replicaCount: 1
+    httpAddr: ":8092"                   # HTTP_ADDR
+    service:
+      type: ClusterIP
+      port: 80
+      targetPort: 8092
+    # HorizontalPodAutoscaler (autoscaling/v2) for the stateless reader. Off by
+    # default; when enabled the Deployment omits replicas.
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# Deliberately NOT here: external routing to the reports Service (this chart
+# routes only the main REST API; warehouse-infra owns edge routing) and any
+# metrics endpoint (the analytics processes expose none).
+
 livenessProbe:
   httpGet:
     path: /healthz

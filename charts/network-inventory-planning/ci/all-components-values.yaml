@@ -1,0 +1,27 @@
+# Used by `ct lint`: every optional component enabled at once.
+database:
+  existingSecret: "nip-database"
+kafka:
+  enabled: true
+  brokers: "kafka.warehouse-systems.svc.cluster.local:9092"
+  siteCapabilityConsumerGroup: "nip-site-capability"
+  siteSkuDemandConsumerGroup: "nip-site-sku-demand"
+  capacityPlanConsumerGroup: "nip-capacity-plan"
+  transferReplyConsumerGroup: "nip-transfer-reply"
+  transferFactConsumerGroup: "nip-transfer-fact"
+autoscaling:
+  enabled: true
+mcp:
+  enabled: true
+analytics:
+  enabled: true
+  database:
+    # Dummy DSNs, no password (a real one comes from a Secret in the cluster).
+    projectorUrl: "postgres://projector@example.invalid:5432/network_inventory_planning_analytics"
+    reportsUrl: "postgres://reports@example.invalid:5432/network_inventory_planning_analytics"
+  projector:
+    autoscaling:
+      enabled: true
+  reports:
+    autoscaling:
+      enabled: true
