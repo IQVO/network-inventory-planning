@@ -34,6 +34,10 @@ type Handler struct {
 	// others: unconfigured means 503, never a fabricated empty answer.
 	GetTransfer   *usecases.GetTransfer
 	ListTransfers *usecases.ListTransfers
+	// Cancel serves POST /v1/transfers/{id}:cancel, the operator's
+	// pre-release cancel (ADR 0011). Nil-able like the others:
+	// unconfigured means 503, never a fabricated cancellation.
+	Cancel *usecases.CancelTransfer
 }
 
 // Routes creates the HTTP surface for this service.
@@ -46,6 +50,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/rebalance-runs", h.rebalanceRuns)
 	mux.HandleFunc("GET /v1/transfers", h.listTransfers)
 	mux.HandleFunc("GET /v1/transfers/{id}", h.getTransfer)
+	mux.HandleFunc("POST /v1/transfers/{idAction}", h.cancelTransfer)
 	return mux
 }
 

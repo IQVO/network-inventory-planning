@@ -183,6 +183,7 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	}
 	handler.Simulate = wired.simulate
 	handler.Approve = wired.approve
+	handler.Cancel = wired.cancel
 	handler.ListRebalanceRuns = wired.runs
 	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)
 	runners = append(runners, wired.runners...)
@@ -272,6 +273,7 @@ func workReleaseConfigFromEnv(logger *slog.Logger) usecases.WorkReleaseConfig {
 type sagaWiring struct {
 	simulate *usecases.SimulateTransferOptions
 	approve  *usecases.ApproveTransfer
+	cancel   *usecases.CancelTransfer
 	runs     *usecases.ListRebalanceRuns
 	runners  []func() error
 	closers  []func() error
@@ -335,6 +337,8 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers:approve answers 503 (the saga cannot emit its allocation command without the outbox)")
 	}
 
+	wireCancel(logger, &out, outboxPublisher, transfers, uow)
+
 	replyAllocate := &usecases.ApplyTransferAllocation{
 		Transfers: transfers,
 		Events:    outboxPublisher,
@@ -376,6 +380,24 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	wireHealthTicker(logger, pool, outboxPublisher, &out)
 	wireRebalanceTicker(logger, pool, snapshots, rebalanceRuns, outboxPublisher, maxStaleness, &out)
 	return out, nil
+}
+
+// wireCancel wires the operator cancel (ADR 0011). It needs the outbox
+// too: its TransferStateAdvanced occurrence must commit with the state
+// change, so without a publisher the endpoint stays unwired and answers 503
+// rather than cancel silently without the analytics trail.
+func wireCancel(
+	logger *slog.Logger,
+	out *sagaWiring,
+	events ports.TransferEventPublisher,
+	transfers ports.TransferRepository,
+	uow ports.UnitOfWork,
+) {
+	if events == nil {
+		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers/{id}:cancel answers 503 (the cancel's analytics occurrence needs the outbox)")
+		return
+	}
+	out.cancel = &usecases.CancelTransfer{Transfers: transfers, Events: events, UoW: uow, Now: time.Now}
 }
 
 // optionalIntervalFromEnv parses an interval env var. Unset means def;

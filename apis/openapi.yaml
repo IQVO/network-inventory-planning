@@ -149,6 +149,15 @@ paths:
         and the outcome — a fail-closed snapshot refusal is a FAILED run
         carrying its reason, never a hidden error. Runs never approve
         anything and never emit an allocation command.
+
+        A COMPLETED run means the planner EVALUATED the network, so a
+        COMPLETED run with `proposalCount` 0 genuinely found nothing to
+        propose. While no placement-policy / lane catalogue is configured
+        (the v1 state) the planner cannot evaluate any transfer, so every
+        run is FAILED with a `failClosedReason` naming the missing
+        catalogue, and no RebalanceRunCompleted occurrence is published.
+        Read FAILED as "nothing could be evaluated", never as "balanced"
+        (ADR 0007 Amendment).
       parameters:
         - name: limit
           in: query
@@ -255,6 +264,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransferDetail'
         '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/transfers/{id}:cancel:
+    post:
+      operationId: cancelTransfer
+      tags: [transfers]
+      summary: Cancel a transfer that has not yet been released (operator action).
+      description: |
+        The operator's PRE-RELEASE cancel (ADR 0011, ADR 0003). Legal only
+        while the transfer is DRAFT, PROPOSED, APPROVED or ALLOCATING; once
+        an origin reservation exists (ALLOCATED) or the transfer is past it,
+        the request is a 409 `transfer-not-cancellable` and nothing changes.
+        The new CANCELLED state, its audit entry (cause = `reason`) and the
+        TransferStateAdvanced analytics occurrence commit in one
+        transaction. No integration event is emitted. Idempotent: cancelling
+        an already CANCELLED transfer is a 200 no-op that returns the
+        transfer unchanged. A blank `reason` is a 422 `invalid-cancellation`;
+        an unknown id is a 404 `transfer-not-found`; 503 problem+json when the
+        instance runs without persistence and the outbox. REST only: the MCP
+        surface stays read-only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The transfer id (the transferId returned by approval).
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTransferRequest'
+      responses:
+        '200':
+          description: The transfer, now CANCELLED (also returned for an already CANCELLED transfer).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
@@ -367,7 +425,10 @@ paths:
         planner produced in total, how many of them the runs' own safety checks rejected (never an
         operator rejection: the run approves nothing), `rejection_rate` (rejected / proposals, 0 when
         there were no proposals) and the stale facts seen. Ordered by day. `from` / `to` as in
-        /reports/transfer-funnel. 200 with `days: []` when nothing matches.
+        /reports/transfer-funnel. 200 with `days: []` when nothing matches. Only runs that COMPLETED
+        publish the occurrence: a FAILED run (stale facts, or no placement policies / lanes configured)
+        never appears here, so an empty report is NOT evidence the network is balanced; see
+        GET /v1/rebalance-runs for the FAILED runs and their reasons.
       parameters:
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
@@ -715,7 +776,7 @@ components:
           enum: [COMPLETED, FAILED]
         failClosedReason:
           type: string
-          description: The fail-closed snapshot refusal; present only when outcome is FAILED.
+          description: The fail-closed refusal (stale/missing facts, or no placement policies / lanes configured); present only when outcome is FAILED.
     RebalanceRunsResponse:
       type: object
       required: [runs]
@@ -807,6 +868,16 @@ components:
               description: The immutable state-transition trail, oldest first.
               items:
                 $ref: '#/components/schemas/AuditEntry'
+    CancelTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: The operator's justification; required and not blank. It becomes the cause of the TransferCancelled audit entry.
     TransferList:
       type: object
       required: [items, total, limit, offset]
