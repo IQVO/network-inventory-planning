@@ -163,7 +163,19 @@ type ApplyTransferPick struct {
 }
 
 // Execute applies the fact and releases the dispatch demand.
+//
+// A dispatch leg that is not configured (TRANSFER_DISPATCH_PATH_ID /
+// _CPT_OFFSET unset) must not strand the PICKED transition, so the failure is
+// held back, the transaction commits the transition and its analytics
+// occurrence, and the error is returned only AFTER the commit. It wraps
+// ErrWorkReleaseNotConfigured, which IsDeterministicFact classes as
+// log-and-skip: the fact consumer warns and commits past the message instead
+// of retrying it forever (returning the error from inside the unit of work
+// rolled PICKED back AND wedged the whole partition behind this one message).
+// The transfer then sits in PICKED with no dispatch demand until an operator
+// fixes the configuration, which stuck-transfer triage surfaces.
 func (u ApplyTransferPick) Execute(ctx context.Context, in ApplyPickInput) error {
+	var releaseErr error
 	ierr := u.UoW.Do(ctx, func(ctx context.Context) error {
 		trf, err := u.Transfers.Load(ctx, in.TransferID)
 		if err != nil {
@@ -182,15 +194,18 @@ func (u ApplyTransferPick) Execute(ctx context.Context, in ApplyPickInput) error
 			return err
 		}
 		if err := u.Release.ValidateDispatch(); err != nil {
-			// A misconfigured dispatch leg must not strand the
-			// PICKED state: the fact is still applied (it happened),
-			// the transition commits, and the missing demand is an
-			// operator-visible failure.
-			return err
+			// The fact is still applied (it happened) and the transition
+			// commits; only the dispatch demand is withheld. Reported after
+			// the commit, see Execute's doc comment.
+			releaseErr = err
+			return nil
 		}
 		return u.Events.Publish(ctx, dispatchDemand(trf, u.Release, in.OccurredAt))
 	})
-	return ierr
+	if ierr != nil {
+		return ierr
+	}
+	return releaseErr
 }
 
 // ApplyTransferDispatched applies a TransferDispatched fact: PICKED →
@@ -340,11 +355,17 @@ func (u ApplyTransferStow) Execute(ctx context.Context, in ApplyStowInput) error
 // IsDeterministicFact reports whether a fact-apply error must be
 // logged-and-skipped by the fact consumers rather than retried: unknown
 // transfer (WARN + commit past), illegal transition (a replay or an
-// out-of-order fact), or a fact that fails the aggregate's consistency
-// checks (transfer.ErrFactRefused). Everything else is transient.
+// out-of-order fact), a fact that fails the aggregate's consistency
+// checks (transfer.ErrFactRefused), or a work-release leg this deployment
+// has not configured (ErrWorkReleaseNotConfigured). Everything else is
+// transient.
 func IsDeterministicFact(err error) bool {
 	var illegal *transfer.IllegalTransitionError
 	return errors.Is(err, transfer.ErrTransferNotFound) ||
 		errors.Is(err, transfer.ErrFactRefused) ||
+		// A deployment that does not configure a work-release leg fails the
+		// same way on every retry; retrying only wedges the partition. The
+		// transition itself has already committed (ApplyTransferPick).
+		errors.Is(err, ErrWorkReleaseNotConfigured) ||
 		errors.As(err, &illegal)
 }
