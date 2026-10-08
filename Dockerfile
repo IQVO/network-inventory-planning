@@ -17,7 +17,9 @@ COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/network-inventory-planning ./cmd/network-inventory-planning && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mcp ./cmd/mcp
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mcp ./cmd/mcp && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/nip-projector ./cmd/nip-projector && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/nip-reports ./cmd/nip-reports
 
 # --- runtime stage ---
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
@@ -32,11 +34,21 @@ COPY --from=build --chown=app:app /out/network-inventory-planning ./network-inve
 # The read-only MCP server (Streamable HTTP on :8090). The api image
 # entrypoint is unchanged; the chart's mcp Deployment runs `/app/mcp`.
 COPY --from=build --chown=app:app /out/mcp ./mcp
+# The analytics read side (ADR 0009): the projector (the only writer of the
+# separate analytical database; admin /healthz + /readyz on :8091) and the
+# read-only reports server (:8092). The api entrypoint is unchanged; the
+# chart's analytics Deployments run `/app/nip-projector` / `/app/nip-reports`.
+COPY --from=build --chown=app:app /out/nip-projector ./nip-projector
+COPY --from=build --chown=app:app /out/nip-reports ./nip-reports
+# The analytical migrations (a separate schema from the OLTP ones above); the
+# projector reads ANALYTICS_MIGRATIONS_PATH, default analytics/migrations
+# relative to WORKDIR /app.
+COPY --from=build --chown=app:app /src/analytics/migrations ./analytics/migrations
 # The golang-migrate startup step reads these (MIGRATIONS_PATH); the default
 # in cmd/network-inventory-planning/main.go points at the source tree, which
 # does not exist inside the image, so point it at /app/migrations instead.
 COPY --from=build --chown=app:app /src/internal/adapters/outbound/postgres/migrations ./migrations
 ENV MIGRATIONS_PATH=migrations
 USER 1000
-EXPOSE 8080 8090
+EXPOSE 8080 8090 8091 8092
 ENTRYPOINT ["./network-inventory-planning"]

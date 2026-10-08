@@ -24,6 +24,12 @@ tags:
     description: Inter-warehouse transfer saga (approval and lifecycle).
   - name: rebalance
     description: Scheduled (observe-only) rebalance run history (ADR 0007).
+  - name: reports
+    description: >-
+      Read-only saga-health analytics reports (ADR 0009) served by the separate
+      nip-reports binary on port 8092, from the analytical database the
+      nip-projector builds from this service's analytics topic. Not part of the
+      OLTP API on port 8080.
 paths:
   /healthz:
     get:
@@ -252,7 +258,172 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /reports/transfer-funnel:
+    servers:
+      - url: http://localhost:8092
+        description: nip-reports (cluster-internal Service <release>-reports)
+    get:
+      operationId: getTransferFunnelReport
+      summary: How many distinct transfers reached each saga state, per day
+      tags: [reports]
+      description: |
+        For the TransferStateAdvanced analytics occurrences in the half-open range [from, to) (by the
+        CloudEvents time: from inclusive, to exclusive), counts per UTC day and state `to` the DISTINCT
+        transfers that reached it. Ordered by day, then state. Built from the analytics stream only
+        (ADR 0009). `from` / `to` are optional RFC 3339 timestamps: both omitted means the 30 days
+        ending now; only `to` means the 30 days before it; only `from` means from..now; the range must
+        be non-empty and at most 366 days. 200 with `days: []` when nothing matches.
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: The report (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferFunnelReport'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /reports/state-dwell:
+    servers:
+      - url: http://localhost:8092
+        description: nip-reports (cluster-internal Service <release>-reports)
+    get:
+      operationId: getStateDwellReport
+      summary: Saga age percentiles at the moment of leaving each state, per day
+      tags: [reports]
+      description: |
+        For the TransferStateAdvanced occurrences in [from, to), per UTC day and state `from` (the state
+        the transition LEFT), the number of transitions and the continuous p50/p95 (linear
+        interpolation) of `age_seconds`. `age_seconds` is the saga's age since creation at the moment of
+        the transition, so it is how far along the saga was when it left the state, not a per-state
+        duration; the difference between consecutive states approximates the time spent. Creation
+        entries (empty `from`) leave no state and are not counted. Ordered by day, then state. `from` /
+        `to` as in /reports/transfer-funnel. 200 with `days: []` when nothing matches.
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: The report (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateDwellReport'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /reports/stuck-transfers:
+    servers:
+      - url: http://localhost:8092
+        description: nip-reports (cluster-internal Service <release>-reports)
+    get:
+      operationId: getStuckTransfersReport
+      summary: TransferStuckDetected occurrences per state per day, plus the latest ones
+      tags: [reports]
+      description: |
+        For the TransferStuckDetected occurrences in [from, to), `days`: per UTC day and `state`, the
+        detections (the health ticker re-detects a transfer on every pass while it stays stuck) and the
+        distinct transfers; `latest`: the newest occurrences, most recent first (ties by transfer id),
+        at most `limit`. `from` / `to` as in /reports/transfer-funnel. 200 with empty arrays when
+        nothing matches.
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - name: limit
+          in: query
+          required: false
+          description: How many latest occurrences to return, 1 to 100 (default 20).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: The report (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StuckTransfersReport'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /reports/rebalance-runs:
+    servers:
+      - url: http://localhost:8092
+        description: nip-reports (cluster-internal Service <release>-reports)
+    get:
+      operationId: getRebalanceRunsReport
+      summary: Scheduled rebalance runs, proposals against rejected, per day
+      tags: [reports]
+      description: |
+        For the RebalanceRunCompleted occurrences in [from, to), per UTC day: the runs, the proposals the
+        planner produced in total, how many of them the runs' own safety checks rejected (never an
+        operator rejection: the run approves nothing), `rejection_rate` (rejected / proposals, 0 when
+        there were no proposals) and the stale facts seen. Ordered by day. `from` / `to` as in
+        /reports/transfer-funnel. 200 with `days: []` when nothing matches.
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: The report (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebalanceRunsReport'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+  /reports/freshness:
+    servers:
+      - url: http://localhost:8092
+        description: nip-reports (cluster-internal Service <release>-reports)
+    get:
+      operationId: getReportsFreshness
+      summary: How far the analytics projection is behind
+      tags: [reports]
+      description: |
+        The freshness lag of the projection all the reports read: `as_of` is the CloudEvents time of the
+        newest event the projector has applied and `lag_seconds` is now minus `as_of` (never negative).
+        Both are null until the first event is applied. A growing lag means the projector is down or
+        behind, not that a report is wrong: it catches up when the projector does.
+      responses:
+        '200':
+          description: The freshness (null fields while nothing was projected).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportsFreshness'
+        '500':
+          $ref: '#/components/responses/Problem'
 components:
+  parameters:
+    ReportFrom:
+      name: from
+      in: query
+      required: false
+      description: RFC 3339; inclusive. Defaults to `to` minus 30 days.
+      schema:
+        type: string
+        format: date-time
+      example: '2026-10-05T00:00:00Z'
+    ReportTo:
+      name: to
+      in: query
+      required: false
+      description: RFC 3339; exclusive. Defaults to now.
+      schema:
+        type: string
+        format: date-time
+      example: '2026-10-07T00:00:00Z'
   responses:
     Problem:
       description: RFC 7807 problem+json error.
@@ -608,3 +779,190 @@ components:
           type: integer
         offset:
           type: integer
+    ReportsFreshness:
+      type: object
+      required: [as_of, lag_seconds]
+      properties:
+        as_of:
+          type: [string, 'null']
+          format: date-time
+          description: CloudEvents time of the newest event applied; null when none.
+        lag_seconds:
+          type: [number, 'null']
+          format: double
+          minimum: 0
+          description: now - as_of, in seconds; null when nothing was applied.
+          example: 4.2
+    ReportRange:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: The effective inclusive start.
+        to:
+          type: string
+          format: date-time
+          description: The effective exclusive end.
+    TransferFunnelDay:
+      type: object
+      required: [day, state, transfers]
+      properties:
+        day:
+          type: string
+          format: date
+          description: UTC calendar day of the transition.
+          example: '2026-10-05'
+        state:
+          type: string
+          description: The saga state reached (TransferStateAdvanced `to`).
+          example: APPROVED
+        transfers:
+          type: integer
+          minimum: 1
+          description: Distinct transfers that reached the state that day.
+          example: 5
+    TransferFunnelReport:
+      allOf:
+        - $ref: '#/components/schemas/ReportRange'
+        - type: object
+          required: [days]
+          properties:
+            days:
+              type: array
+              items:
+                $ref: '#/components/schemas/TransferFunnelDay'
+    StateDwellDay:
+      type: object
+      required: [day, state, transitions, p50_age_seconds, p95_age_seconds]
+      properties:
+        day:
+          type: string
+          format: date
+          example: '2026-10-05'
+        state:
+          type: string
+          description: The state the transitions left (TransferStateAdvanced `from`).
+          example: PROPOSED
+        transitions:
+          type: integer
+          minimum: 1
+          example: 6
+        p50_age_seconds:
+          type: number
+          format: double
+          description: Median saga age (seconds since creation) when the state was left.
+          example: 200
+        p95_age_seconds:
+          type: number
+          format: double
+          description: 95th percentile (continuous) of the same.
+          example: 601.25
+    StateDwellReport:
+      allOf:
+        - $ref: '#/components/schemas/ReportRange'
+        - type: object
+          required: [days]
+          properties:
+            days:
+              type: array
+              items:
+                $ref: '#/components/schemas/StateDwellDay'
+    StuckDay:
+      type: object
+      required: [day, state, detections, transfers]
+      properties:
+        day:
+          type: string
+          format: date
+          example: '2026-10-05'
+        state:
+          type: string
+          example: ALLOCATING
+        detections:
+          type: integer
+          minimum: 1
+          description: TransferStuckDetected occurrences (a stuck transfer is re-detected every pass).
+          example: 2
+        transfers:
+          type: integer
+          minimum: 1
+          description: Distinct transfers detected.
+          example: 1
+    StuckOccurrence:
+      type: object
+      required: [transfer_id, state, age_seconds, threshold_seconds, detected_at]
+      properties:
+        transfer_id:
+          type: string
+        state:
+          type: string
+        age_seconds:
+          type: integer
+          format: int64
+          description: Seconds since the transfer's last transition when it was detected.
+        threshold_seconds:
+          type: integer
+          format: int64
+          description: The per-state threshold that was exceeded.
+        detected_at:
+          type: string
+          format: date-time
+    StuckTransfersReport:
+      allOf:
+        - $ref: '#/components/schemas/ReportRange'
+        - type: object
+          required: [days, latest]
+          properties:
+            days:
+              type: array
+              items:
+                $ref: '#/components/schemas/StuckDay'
+            latest:
+              type: array
+              items:
+                $ref: '#/components/schemas/StuckOccurrence'
+    RebalanceRunsDay:
+      type: object
+      required: [day, runs, proposals, rejected, rejection_rate, stale_facts]
+      properties:
+        day:
+          type: string
+          format: date
+          example: '2026-10-05'
+        runs:
+          type: integer
+          minimum: 1
+          example: 2
+        proposals:
+          type: integer
+          minimum: 0
+          description: Proposals the planner produced, summed over the day's runs.
+          example: 14
+        rejected:
+          type: integer
+          minimum: 0
+          description: Proposals the runs' own safety checks refused (never an operator rejection).
+          example: 2
+        rejection_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: rejected / proposals; 0 when there were no proposals.
+          example: 0.142857
+        stale_facts:
+          type: integer
+          minimum: 0
+          example: 1
+    RebalanceRunsReport:
+      allOf:
+        - $ref: '#/components/schemas/ReportRange'
+        - type: object
+          required: [days]
+          properties:
+            days:
+              type: array
+              items:
+                $ref: '#/components/schemas/RebalanceRunsDay'

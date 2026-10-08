@@ -1,0 +1,108 @@
+{{- if .Values.analytics.enabled }}
+{{- include "network-inventory-planning.requireAnalyticsConfig" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "network-inventory-planning.reportsFullname" . }}
+  labels:
+    {{- include "network-inventory-planning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics-reports
+spec:
+  {{- if not .Values.analytics.reports.autoscaling.enabled }}
+  replicas: {{ .Values.analytics.reports.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "network-inventory-planning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: analytics-reports
+  template:
+    metadata:
+      labels:
+        {{- include "network-inventory-planning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: analytics-reports
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "network-inventory-planning.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with $.Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      containers:
+        - name: reports
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/nip-reports"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.analytics.reports.service.targetPort }}
+              protocol: TCP
+          env:
+            # Env contract verified against cmd/nip-reports/main.go. Reads only
+            # the analytical database (the READER DSN, so even a bug cannot
+            # mutate the read model); no Kafka, no OLTP DATABASE_URL.
+            - name: HTTP_ADDR
+              value: {{ .Values.analytics.reports.httpAddr | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.analytics.logLevel | quote }}
+            - name: ANALYTICS_READER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.analyticsSecretName" . }}
+                  key: ANALYTICS_READER_DATABASE_URL
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.analytics.reports.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "network-inventory-planning.reportsFullname" . }}
+  labels:
+    {{- include "network-inventory-planning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics-reports
+spec:
+  type: {{ .Values.analytics.reports.service.type }}
+  ports:
+    - port: {{ .Values.analytics.reports.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "network-inventory-planning.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: analytics-reports
+{{- end }}
