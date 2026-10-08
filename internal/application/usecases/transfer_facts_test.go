@@ -454,3 +454,56 @@ func seedPickedTransfer(t *testing.T, repo *fakeTransferRepo) transfer.TransferI
 	}
 	return id
 }
+
+// recordingUoW runs fn like passThroughUoW but remembers what fn returned: a
+// real unit of work COMMITS only when fn returns nil and rolls everything back
+// otherwise, so fnErr == nil is the assertion "this would have committed".
+type recordingUoW struct{ fnErr error }
+
+func (u *recordingUoW) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	u.fnErr = fn(ctx)
+	return u.fnErr
+}
+
+// TestPickCommitsWhenTheDispatchLegIsNotConfigured pins the behaviour the code
+// always documented: a missing dispatch path must not strand the PICKED
+// transition. The fact happened, so the transition (and its analytics
+// occurrence) commits; only the dispatch demand is withheld, and the error is
+// returned AFTER the commit as a deterministic failure so the Kafka consumer
+// logs a warning and moves on instead of retrying the same message forever
+// (which would block every later transfer fact on that partition).
+func TestPickCommitsWhenTheDispatchLegIsNotConfigured(t *testing.T) {
+	repo, pub, id := allocatedTransfer(t)
+
+	release := testReleaseConfig()
+	release.DispatchPathID = "" // TRANSFER_DISPATCH_PATH_ID unset
+	uow := &recordingUoW{}
+	pick := ApplyTransferPick{Transfers: repo, Events: pub, UoW: uow, Release: release}
+
+	err := pick.Execute(context.Background(), ApplyPickInput{
+		TransferID: id, Picked: transfer.Picked{PickedQuantity: 5}, OccurredAt: approveNow.Add(10 * time.Minute),
+	})
+
+	if !errors.Is(err, ErrWorkReleaseNotConfigured) {
+		t.Fatalf("err = %v, want ErrWorkReleaseNotConfigured so the operator sees why no dispatch was released", err)
+	}
+	if uow.fnErr != nil {
+		t.Fatalf("the transaction function returned %v: a real unit of work would ROLL BACK the PICKED transition", uow.fnErr)
+	}
+	if !IsDeterministicFact(err) {
+		t.Fatalf("%v must be deterministic (log + skip), or the consumer retries it forever", err)
+	}
+
+	loaded, lerr := repo.Load(context.Background(), id)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if loaded.State() != transfer.StatePicked {
+		t.Fatalf("state = %s, want PICKED", loaded.State())
+	}
+	for _, e := range pub.events {
+		if d, ok := e.(transfer.DemandReleased); ok && d.WorkKind == transfer.WorkKindTransferDispatch {
+			t.Fatalf("a dispatch demand was published without a configured dispatch path: %+v", d)
+		}
+	}
+}
