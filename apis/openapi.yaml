@@ -570,16 +570,59 @@ components:
             $ref: '#/components/schemas/Proposal'
     SimulationResponse:
       type: object
-      required: [asOf, options]
+      required: [advisory, asOf, sites]
       properties:
+        advisory:
+          type: boolean
+          description: Always true. The simulation reserves and moves nothing.
         asOf:
           type: string
           format: date-time
           description: Oldest watermark among the facts the simulation used.
-        options:
+        sites:
           type: array
+          description: |
+            One advisory view per site, built from the local read models. This
+            endpoint does NOT propose transfers; proposals come from
+            POST /v1/transfer-proposals:generate over an explicit snapshot, and
+            an operator approves one with POST /v1/transfers:approve.
           items:
-            $ref: '#/components/schemas/Proposal'
+            $ref: '#/components/schemas/SiteSimulation'
+    SiteSimulation:
+      type: object
+      required:
+        - site
+        - originEnabled
+        - destinationEnabled
+        - totalDemand
+        - capacityOverWindow
+        - capacityHeadroom
+        - windowStart
+        - windowEnd
+      properties:
+        site:
+          type: string
+        originEnabled:
+          type: boolean
+          description: The site may originate transfers.
+        destinationEnabled:
+          type: boolean
+          description: The site may receive transfers.
+        totalDemand:
+          type: integer
+          description: Demand over the plan window.
+        capacityOverWindow:
+          type: number
+          description: Published capacity over the plan window.
+        capacityHeadroom:
+          type: integer
+          description: Capacity minus demand. Negative means the site is short.
+        windowStart:
+          type: string
+          format: date-time
+        windowEnd:
+          type: string
+          format: date-time
     ApproveTransferRequest:
       type: object
       required: [originSiteId, destinationSiteId, sku, quantity, policyVersion, proposalAsOf]
