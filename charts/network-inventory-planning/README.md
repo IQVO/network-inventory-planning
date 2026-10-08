@@ -81,7 +81,7 @@ Secret (`DATABASE_URL`, optional direct `MIGRATIONS_DATABASE_URL`) and
 dials Kafka. Tools (all read-only): `get_transfer`, `list_transfers`,
 `find_stuck_transfers`, `simulate_transfer_options`. There is no auth: the
 ClusterIP boundary is the access control (fleet decision, 2026-09-11). See
-`docs/docs/adr/0007-transfer-read-side-and-read-only-mcp.md`.
+`docs/docs/adr/0008-transfer-read-side-and-read-only-mcp.md`.
 
 ### Consumer groups are per-consumer off switches
 
