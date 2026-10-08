@@ -37,12 +37,13 @@ describe("TransferDetailScreen", () => {
     expect(screen.getByText(/waiting for its next step/)).toBeInTheDocument();
 
     const steps = screen.getAllByRole("listitem");
-    expect(steps).toHaveLength(3);
-    expect(within(steps[0]).getByText("PROPOSED")).toBeInTheDocument();
-    expect(within(steps[0]).getByText(/TransferProposed/)).toBeInTheDocument();
-    expect(within(steps[2]).getByText("ALLOCATING")).toBeInTheDocument();
-    expect(within(steps[2]).getByText("APPROVED → ALLOCATING")).toBeInTheDocument();
-    expect(within(steps[2]).getByText(/awaiting inventory-storage/)).toBeInTheDocument();
+    expect(steps).toHaveLength(4);
+    expect(within(steps[0]).getByText("created as DRAFT")).toBeInTheDocument();
+    expect(within(steps[0]).getByText(/TransferDrafted/)).toBeInTheDocument();
+    expect(within(steps[1]).getByText(/TransferProposed — rebalance east to west/)).toBeInTheDocument();
+    expect(within(steps[3]).getByText("ALLOCATING")).toBeInTheDocument();
+    expect(within(steps[3]).getByText("APPROVED → ALLOCATING")).toBeInTheDocument();
+    expect(within(steps[3]).getByText(/origin allocation requested/)).toBeInTheDocument();
   });
 
   it("shows the reservation and picked quantity of an allocated, picked transfer", async () => {
@@ -53,6 +54,13 @@ describe("TransferDetailScreen", () => {
     expect(await screen.findByText("res-77")).toBeInTheDocument();
     expect(screen.getByText("38")).toBeInTheDocument();
     expect(screen.queryByText("No reservation yet")).not.toBeInTheDocument();
+  });
+
+  it("does not call a transfer past PICKED 'not picked yet' when the service omits a zero pickedQuantity", async () => {
+    mockApi({ "GET /v1/transfers/t-7": json(detail({ id: "t-7", state: "IN_TRANSIT", reservationId: "res-1" })) });
+    mount("t-7");
+    expect(await screen.findByText("none recorded")).toBeInTheDocument();
+    expect(screen.queryByText("not picked yet")).not.toBeInTheDocument();
   });
 
   it("explains an UNFULFILLABLE transfer's closed rejection reason", async () => {
@@ -72,10 +80,10 @@ describe("TransferDetailScreen", () => {
   });
 
   it("shows a 503 problem with guidance", async () => {
-    mockApi({ "GET /v1/transfers/t-1": problem(503, "service-unavailable", "Service unavailable", "no database") });
+    mockApi({ "GET /v1/transfers/t-1": problem(503, "read-side-unavailable", "Transfer read side is not configured", "no database") });
     mount("t-1");
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Service unavailable");
+    expect(alert).toHaveTextContent("Transfer read side is not configured");
     expect(alert).toHaveTextContent("no database");
     expect(alert).toHaveTextContent("Nothing was changed");
   });
@@ -89,12 +97,12 @@ describe("TransferDetailScreen", () => {
 
 describe("auditSteps", () => {
   it("marks earlier entries done and the last one active while non-terminal", () => {
-    expect(auditSteps(AUDIT, null).map((s) => s.state)).toEqual(["done", "done", "active"]);
+    expect(auditSteps(AUDIT, null).map((s) => s.state)).toEqual(["done", "done", "done", "active"]);
   });
 
   it("ends a RECEIVED trail done, and a failed or cancelled one in error", () => {
-    expect(auditSteps(AUDIT, "RECEIVED").map((s) => s.state)).toEqual(["done", "done", "done"]);
-    expect(auditSteps(AUDIT, "UNFULFILLABLE").map((s) => s.state)).toEqual(["done", "done", "error"]);
-    expect(auditSteps(AUDIT, "CANCELLED")[2].state).toBe("error");
+    expect(auditSteps(AUDIT, "RECEIVED").map((s) => s.state)).toEqual(["done", "done", "done", "done"]);
+    expect(auditSteps(AUDIT, "UNFULFILLABLE").map((s) => s.state)).toEqual(["done", "done", "done", "error"]);
+    expect(auditSteps(AUDIT, "CANCELLED")[3].state).toBe("error");
   });
 });

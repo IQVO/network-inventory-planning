@@ -22,15 +22,16 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-/** An RFC 7807 application/problem+json reply, shaped like the service's. */
+/** An RFC 7807 application/problem+json reply, shaped like the service's
+ *  (handler.go `writeProblem`: type = https://warehouse.example/problems/<slug>,
+ *  title, status, detail -- and nothing else, no `instance`). */
 export function problem(status: number, slug: string, title: string, detail: string): Response {
   return new Response(
     JSON.stringify({
-      type: `https://errors.network-inventory-planning.warehouse-systems.dev/${slug}`,
+      type: `https://warehouse.example/problems/${slug}`,
       title,
       status,
       detail,
-      instance: "/x",
     }),
     { status, headers: { "Content-Type": "application/problem+json" } },
   );

@@ -10,14 +10,14 @@ import type {
   TransferQuery,
 } from "./types";
 
-/** RFC 7807 problem+json body every error response from the service returns
- *  (`type` is a stable problem identifier, e.g. `.../read-models-not-ready`). */
+/** RFC 7807 problem+json body every handled error response from the service
+ *  returns (handler.go `problem`: type, title, status, detail -- no `instance`).
+ *  `type` is `https://warehouse.example/problems/<slug>`, e.g. `read-models-incomplete`. */
 export interface ProblemDetails {
   type?: string;
   title?: string;
   status?: number;
   detail?: string;
-  instance?: string;
 }
 
 /**
@@ -109,7 +109,11 @@ export function getTransfer(id: string): Promise<TransferDetail> {
   return request<TransferDetail>("GET", `/v1/transfers/${seg(id)}`);
 }
 
-/** GET /v1/transfer-simulations (503 problem+json while the read models are not ready). */
+/**
+ * GET /v1/transfer-simulations: per-site capacity vs demand (`sites`), advisory,
+ * no proposals. 503 problem+json (`read-models-unavailable` / `read-models-incomplete`)
+ * while the read models are not ready.
+ */
 export function getSimulation(): Promise<SimulationResponse> {
   return request<SimulationResponse>("GET", "/v1/transfer-simulations");
 }
@@ -117,7 +121,7 @@ export function getSimulation(): Promise<SimulationResponse> {
 /**
  * POST /v1/transfers:approve. `idempotencyKey` is REQUIRED by the service:
  * replaying the same key with the same payload returns the ORIGINAL transfer
- * (`replayed: true`), the same key with another payload is a 409.
+ * (`replayed: true`, still HTTP 200), the same key with another payload is a 409.
  */
 export function approveTransfer(
   input: ApproveTransferRequest,

@@ -55,7 +55,7 @@ function NipLayout() {
  *
  *   - Transfers (index): filterable, paged transfer list.
  *   - transfers/:id: one transfer, quantities, reservation and audit timeline.
- *   - simulation: advisory options, per-site effect, and the Approve action.
+ *   - simulation: advisory per-site capacity vs demand (no proposals), and the operator-driven Approve form.
  *   - rebalance-runs: the scheduled observe-only run history. */
 export default function App() {
   return (

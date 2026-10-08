@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ageLabel, isTerminal, lagSeconds, newIdempotencyKey, siteRollup, stateTone, utcLabel } from "./lib";
-import { OPTIONS } from "./test/fixtures";
+import { ageLabel, buildApproveRequest, isTerminal, lagSeconds, newIdempotencyKey, orderSites, stateTone, utcLabel } from "./lib";
+import type { ApproveDraft } from "./lib";
+import { SITES, simSite } from "./test/fixtures";
 
 describe("utcLabel", () => {
   it("renders a deterministic UTC label and a dash for nothing", () => {
@@ -53,16 +54,67 @@ describe("newIdempotencyKey", () => {
   });
 });
 
-describe("siteRollup", () => {
-  it("sums what each site sends and receives, sorted by site", () => {
-    expect(siteRollup(OPTIONS)).toEqual([
-      { site: "DC-EAST", outbound: 120, inbound: 0, net: -120, options: 1 },
-      { site: "DC-NORTH", outbound: 30, inbound: 0, net: -30, options: 1 },
-      { site: "DC-WEST", outbound: 0, inbound: 150, net: 150, options: 2 },
+describe("orderSites", () => {
+  it("puts short sites first (most short first), then covered sites by headroom, like explain_network_imbalance", () => {
+    expect(orderSites(SITES).map((s) => [s.site, s.capacityHeadroom])).toEqual([
+      ["DC-WEST", -150],
+      ["DC-SOUTH", -40],
+      ["DC-EAST", 120],
+      ["DC-NORTH", 30],
     ]);
   });
 
-  it("is empty for no options", () => {
-    expect(siteRollup([])).toEqual([]);
+  it("treats zero headroom as covered and breaks ties by site id, without mutating the input", () => {
+    const input = [simSite({ site: "B", capacityHeadroom: 0 }), simSite({ site: "A", capacityHeadroom: 0 }), simSite({ site: "C", capacityHeadroom: -1 })];
+    expect(orderSites(input).map((s) => s.site)).toEqual(["C", "A", "B"]);
+    expect(input.map((s) => s.site)).toEqual(["B", "A", "C"]);
+  });
+
+  it("is empty for no sites", () => {
+    expect(orderSites([])).toEqual([]);
+  });
+});
+
+describe("buildApproveRequest", () => {
+  const draft: ApproveDraft = {
+    originSiteId: "DC-EAST",
+    destinationSiteId: "DC-WEST",
+    sku: " SKU-RED-42 ",
+    quantity: "120",
+    policyVersion: "v7",
+    operatorReason: "  ",
+    proposalAsOf: "2026-10-07T09:50:00Z",
+  };
+
+  it("builds the request, trimming text and leaving out an empty reason", () => {
+    expect(buildApproveRequest(draft)).toEqual({
+      errors: {},
+      request: {
+        originSiteId: "DC-EAST",
+        destinationSiteId: "DC-WEST",
+        sku: "SKU-RED-42",
+        quantity: 120,
+        policyVersion: "v7",
+        proposalAsOf: "2026-10-07T09:50:00Z",
+      },
+    });
+  });
+
+  it.each(["0", "-3", "1.5", "1e3", "abc", ""])("refuses quantity %j", (quantity) => {
+    const out = buildApproveRequest({ ...draft, quantity });
+    expect(out.request).toBeUndefined();
+    expect(Object.keys(out.errors)).toEqual(["quantity"]);
+  });
+
+  it("requires every field but the reason, and different sites", () => {
+    const out = buildApproveRequest({ ...draft, originSiteId: "", sku: "", policyVersion: " ", proposalAsOf: "yesterday" });
+    expect(Object.keys(out.errors).sort()).toEqual(["originSiteId", "policyVersion", "proposalAsOf", "sku"]);
+    expect(Object.keys(buildApproveRequest({ ...draft, destinationSiteId: "DC-EAST" }).errors)).toEqual(["destinationSiteId"]);
+  });
+
+  it("accepts fractional seconds and numeric offsets, refuses a timestamp without an offset", () => {
+    expect(buildApproveRequest({ ...draft, proposalAsOf: "2026-10-07T09:50:00.123456Z" }).request).toBeDefined();
+    expect(buildApproveRequest({ ...draft, proposalAsOf: "2026-10-07T06:50:00-03:00" }).request).toBeDefined();
+    expect(buildApproveRequest({ ...draft, proposalAsOf: "2026-10-07T09:50:00" }).request).toBeUndefined();
   });
 });
