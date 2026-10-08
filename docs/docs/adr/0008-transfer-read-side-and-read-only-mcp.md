@@ -1,4 +1,4 @@
-# ADR-0007: Transfer read side and a read-only MCP server
+# ADR-0008: Transfer read side and a read-only MCP server
 
 Status: Accepted
 
