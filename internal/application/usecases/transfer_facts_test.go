@@ -3,6 +3,7 @@ package usecases
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -506,4 +507,53 @@ func TestPickCommitsWhenTheDispatchLegIsNotConfigured(t *testing.T) {
 			t.Fatalf("a dispatch demand was published without a configured dispatch path: %+v", d)
 		}
 	}
+}
+
+// TestApproveRefusesAMalformedProposalAsInvalidInput pins the status class of
+// a bad request body. Quantity <= 0 and origin == destination are not caught
+// by the fact checks (ValidateApproval) and used to surface from the aggregate
+// constructor as an unclassified error, which the HTTP adapter reported as
+// 503 approval-unavailable (a server outage) for what is the caller's input.
+func TestApproveRefusesAMalformedProposalAsInvalidInput(t *testing.T) {
+	cases := map[string]func(*ApproveTransferInput){
+		"zero quantity":     func(in *ApproveTransferInput) { in.Quantity = 0 },
+		"negative quantity": func(in *ApproveTransferInput) { in.Quantity = -3 },
+		"same site":         func(in *ApproveTransferInput) { in.DestinationSiteID = in.OriginSiteID },
+		"blank sku":         func(in *ApproveTransferInput) { in.SKU = "  " },
+		"blank policy":      func(in *ApproveTransferInput) { in.PolicyVersion = "" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeTransferRepo()
+			uc := approveUseCase(repo, &fakeEventPublisher{}, approveFacts(), nil)
+			in := factTestApprovalInput()
+			mutate(&in)
+
+			_, err := uc.Execute(context.Background(), in)
+
+			// A malformed request may be refused by the fact checks (also the
+			// caller's input) or by the proposal itself; what it must never be
+			// is an unclassified error that surfaces as a 503.
+			if err == nil {
+				t.Fatal("a malformed proposal must be refused")
+			}
+			classified := errors.Is(err, ErrInvalidApproval) ||
+				errors.Is(err, transfer.ErrFactsIncomplete) ||
+				errors.Is(err, transfer.ErrProposalExpired)
+			if !classified {
+				t.Fatalf("err = %v: unclassified, the API would answer 503 for the caller's own input", err)
+			}
+		})
+	}
+
+	t.Run("a proposal-level refusal carries ErrInvalidApproval and keeps its message", func(t *testing.T) {
+		_, err := approveUseCase(newFakeTransferRepo(), &fakeEventPublisher{}, approveFacts(), nil).
+			Execute(context.Background(), func() ApproveTransferInput { in := factTestApprovalInput(); in.Quantity = 0; return in }())
+		if !errors.Is(err, ErrInvalidApproval) || !errors.Is(err, transfer.ErrInvalidProposal) {
+			t.Fatalf("err = %v, want both ErrInvalidApproval and ErrInvalidProposal", err)
+		}
+		if !strings.Contains(err.Error(), "quantity must be positive") {
+			t.Fatalf("message lost: %v", err)
+		}
+	})
 }

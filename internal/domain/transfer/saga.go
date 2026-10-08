@@ -202,39 +202,57 @@ func ProposeTransfer(in ProposalInput) (*InterWarehouseTransfer, error) {
 	return t, nil
 }
 
+// ErrInvalidProposal marks a proposal snapshot the domain refuses on its face
+// (a missing field, a non-positive quantity, origin == destination). It is the
+// caller's input, never an outage: the approve use case maps it to
+// ErrInvalidApproval so the API answers 422, not 503.
+var ErrInvalidProposal = errors.New("transfer: invalid proposal")
+
+// invalidProposalError keeps the message exactly as written while letting
+// errors.Is(err, ErrInvalidProposal) match.
+type invalidProposalError struct{ msg string }
+
+func (e *invalidProposalError) Error() string { return e.msg }
+
+func (e *invalidProposalError) Is(target error) bool { return target == ErrInvalidProposal }
+
+func invalidProposal(format string, args ...any) error {
+	return &invalidProposalError{msg: fmt.Sprintf(format, args...)}
+}
+
 func (in ProposalInput) validate() error {
 	if strings.TrimSpace(string(in.ID)) == "" {
-		return fmt.Errorf("transfer proposal: transfer id is required")
+		return invalidProposal("transfer proposal: transfer id is required")
 	}
 	if strings.TrimSpace(in.IdempotencyKey) == "" {
-		return fmt.Errorf("transfer proposal %s: idempotency key is required", in.ID)
+		return invalidProposal("transfer proposal %s: idempotency key is required", in.ID)
 	}
 	if strings.TrimSpace(in.OriginSiteID) == "" {
-		return fmt.Errorf("transfer proposal %s: origin site is required", in.ID)
+		return invalidProposal("transfer proposal %s: origin site is required", in.ID)
 	}
 	if strings.TrimSpace(in.DestinationSiteID) == "" {
-		return fmt.Errorf("transfer proposal %s: destination site is required", in.ID)
+		return invalidProposal("transfer proposal %s: destination site is required", in.ID)
 	}
 	if in.OriginSiteID == in.DestinationSiteID {
-		return fmt.Errorf("transfer proposal %s: origin and destination must differ", in.ID)
+		return invalidProposal("transfer proposal %s: origin and destination must differ", in.ID)
 	}
 	if strings.TrimSpace(in.SKU) == "" {
-		return fmt.Errorf("transfer proposal %s: sku is required", in.ID)
+		return invalidProposal("transfer proposal %s: sku is required", in.ID)
 	}
 	if in.Quantity <= 0 {
-		return fmt.Errorf("transfer proposal %s: quantity must be positive, got %d", in.ID, in.Quantity)
+		return invalidProposal("transfer proposal %s: quantity must be positive, got %d", in.ID, in.Quantity)
 	}
 	if strings.TrimSpace(in.PolicyVersion) == "" {
-		return fmt.Errorf("transfer proposal %s: policy version is required", in.ID)
+		return invalidProposal("transfer proposal %s: policy version is required", in.ID)
 	}
 	if in.ProposalAsOf.IsZero() {
-		return fmt.Errorf("transfer proposal %s: proposal as-of is required", in.ID)
+		return invalidProposal("transfer proposal %s: proposal as-of is required", in.ID)
 	}
 	if in.Now.IsZero() {
-		return fmt.Errorf("transfer proposal %s: clock is required", in.ID)
+		return invalidProposal("transfer proposal %s: clock is required", in.ID)
 	}
 	if in.ExpiresAt.IsZero() {
-		return fmt.Errorf("transfer proposal %s: expiry is required", in.ID)
+		return invalidProposal("transfer proposal %s: expiry is required", in.ID)
 	}
 	if !in.ExpiresAt.After(in.Now) {
 		return fmt.Errorf("%w: transfer %s expires at %s, now %s", ErrProposalExpired, in.ID, in.ExpiresAt.UTC().Format(time.RFC3339), in.Now.UTC().Format(time.RFC3339))
