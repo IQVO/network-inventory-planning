@@ -10,8 +10,9 @@ description: Add or change a micro-frontend remote under web/ (vite federation c
 Use when adding a new screen/feature to this repo's `web/` Module
 Federation remote, or when standing up a NEW remote for a bounded context
 that doesn't have one yet. This is the Vite/React micro-frontend layer
-that `warehouse-console` (the shell) lazy-loads — see that repo's
-`.claude/rules/mfe-remotes.md` for the shell-side half of this contract.
+that `warehouse-console` (the shell) lazy-loads — see
+`docs/docs/adr/0010-console-remote-nip-mfe.md` for this repo's half of the
+contract and the warehouse-console repo's own guides for the shell side.
 
 ## `vite.config.ts` must stay in OBJECT form, always
 

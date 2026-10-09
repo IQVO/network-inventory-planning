@@ -22,7 +22,8 @@ assert nothing.
    `./internal/domain/...,./internal/application/...`) — proves lines
    executed. Proves nothing about whether the test asserted the right
    thing.
-3. **Mutation testing** (`make mutation-fast`, gremlins) — proves the
+3. **Mutation testing** (`make mutation` / `make mutation-full`, gremlins;
+   CI job `mutation-fast`) — proves the
    tests actually ASSERT, not merely execute. A mutant is a deliberately
    broken version of the code (`<` -> `<=`, `+` -> `-`, etc.); if the test
    suite still passes against the mutant, it "survived" (LIVED) — meaning
@@ -98,8 +99,8 @@ container via `testcontainers-go`. Never gate on `os.Getenv("KAFKA_BROKERS")`
 `integration` job provisions Postgres ONLY (no Kafka) — a skip-gated
 Kafka test silently skips in CI and proves nothing there, while
 testcontainers actually exercises the assertions on the runner. See
-`internal/adapters/outbound/facilitycache/consumer_integration_test.go`
-for the working recipe (unique topic per test, one shared container per
+`internal/adapters/inbound/kafka/kafka_integration/planning_read_models_integration_test.go`
+(shared helpers) and `transfer_saga_integration_test.go` for the working recipe (unique topic per test, one shared container per
 package, explicit `CreateTopics` + poll for the partition leader before
 the first read/write).
 

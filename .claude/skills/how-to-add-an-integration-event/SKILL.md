@@ -18,10 +18,12 @@ shared-broker reality has already caused a real incident once.
 
 Not every domain event this service raises belongs on the wire. Check
 `internal/adapters/outbound/kafka/publisher.go`'s doc comment — this repo
-forwards only `StockReserved`/`ReservationRevoked`; everything else is a
-local concern published only to the Postgres outbox
-(`internal/adapters/outbound/postgres/event_publisher.go`) for audit, not
-broadcast. Before adding a new event to the Kafka publisher, confirm a
+encodes only the saga events listed there (`TransferPlanApproved`,
+`TransferAllocationRequested`, `WorkDemandReleased`, ...) onto
+`warehouse.network-inventory-planning.events`, and only through the
+transactional outbox (`internal/adapters/outbound/postgres/outbox.go`,
+`OutboxWriter`, drained by the outbox relay); nothing is sent from a
+request handler. Before adding a new event to the Kafka publisher, confirm a
 sibling context genuinely needs to react to it — check
 `docs/docs/ddd/context-map.md` or the equivalent ubiquitous-language doc
 for who's actually downstream.
@@ -54,7 +56,8 @@ shape, no dual-write, no `EVENT_ENVELOPE_MODE` toggle (see
 lowercase except the final PascalCase event name — e.g.
 `com.warehouse.wms.inventory-storage.reservation.ReservationRevoked`. Take
 the subdomain/context segment from the subdomain table on warehouse-docs'
-Event Standard page (`docs/strategic-design/event-standard-cloudevents.md`);
+Event Standard page
+(https://iqvo.github.io/warehouse-docs/strategic-design/event-standard-cloudevents);
 don't guess it. The same `type` is used on the analytics topic; only
 `dataschema` changes (`…:analytics:<EventName>:v1`).
 
@@ -120,10 +123,10 @@ hardcoded `localhost:9092` fails CI).
 ### 1. Never import the sibling's Go packages
 
 This service knows a sibling's topic name, its exact CloudEvents `type`
-strings and payload shape ONLY — never its Go types. See `internal/adapters/outbound/facilitycache/consumer.go`'s
-own doc comment: "This service has no business knowing anything else
-about that context beyond this topic name and the envelope/payload shapes
-below." Hand-mirror the payload struct locally; do not add a Go module
+strings and payload shape ONLY — never its Go types. See `internal/adapters/inbound/kafka/consumers.go`: each sibling
+consumer declares only the sibling's topic constant and its confirmed
+`type` strings (read from the sibling's `apis/asyncapi.yaml`, never
+guessed) and mirrors the payload locally. Hand-mirror the payload struct locally; do not add a Go module
 dependency on the sibling repo (an architecture fitness test in most
 repos in this fleet would catch that anyway for the stricter contexts —
 check this repo's own `internal/architecture/` for a

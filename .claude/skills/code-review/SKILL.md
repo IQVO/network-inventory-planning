@@ -39,8 +39,8 @@ linter already catches.
    instead of depending on a port. Ports contain interfaces only.
 5. **Error handling that swallows or over-wraps.** Check that domain/
    application errors map cleanly to RFC 7807 problem details at the
-   HTTP boundary (`internal/adapters/inbound/http/errors.go`'s existing
-   mapping table) rather than being stringified/re-wrapped repeatedly on
+   HTTP boundary (`internal/adapters/inbound/http/handler.go`'s
+   `writeProblem` / `writeApproveProblem` helpers) rather than being stringified/re-wrapped repeatedly on
    the way out.
 6. **A new Kafka `GroupID` assigned an inline string literal** rather
    than a named const/var/function call — this fleet has a real incident
@@ -54,7 +54,7 @@ linter already catches.
    accidental (an agent "helpfully" adding back something that looks
    missing) and should be flagged even if the code itself looks correct.
 8. **Anything that would surprise the sibling-context boundary.** If this
-   repo's `AGENTS.md`/`CLAUDE.md` documents a stricter rule (e.g. "no
+   repo's `README.md` or an ADR under `docs/docs/adr/` documents a stricter rule (e.g. "no
    outbound calls to sibling contexts"), check the diff doesn't
    reintroduce exactly that.
 
