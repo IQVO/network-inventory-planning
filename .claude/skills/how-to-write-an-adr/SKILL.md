@@ -70,19 +70,17 @@ lists benefits reads as marketing, not a decision record.
 ```
 
 The `## Decision` section is the part worth the most editing effort: see
-ADR-0013 (`docs/docs/adr/0013-location-classification-via-facility-events.md`)
-for a model example — it states the exact mechanism (event-fed local
-cache replacing a synchronous HTTP read), names the readiness-gate design,
-and is specific enough that Task "how-to-add-an-integration-event"'s
-consumer-group guidance can point straight at it.
+ADR-0003 (`docs/docs/adr/0003-transfer-saga.md`) for a model example — it
+states the exact mechanism (an orchestrated saga driven by sibling replies,
+published only through the transactional outbox) and is specific enough
+that the integration-event skill can point straight at it.
 
 ## Superseding an earlier ADR
 
 Don't edit the old ADR's Decision section. Add a `## Status` line noting
 `Superseded by ADR-XXXX` on the OLD one (a one-line patch), and open the
 new ADR referencing it: `**Accepted.** <date>. Supersedes [NN. Old title](./NNNN-old-slug.md).`
-— see ADR-0015 (`0015-remove-rest-identity-layer.md`) for the exact
-wording pattern superseding ADR-0014.
+No ADR in this repo has been superseded yet, so there is no local example.
 
 ## Cross-repo decisions: use a companion ADR, not one repo's private opinion
 
@@ -90,7 +88,9 @@ When a decision genuinely spans two bounded-context repos (e.g.
 facility-layout's functional-location roles enabling wes-work-planning's
 travel-graph feature), write ONE ADR per repo, each referencing the other
 explicitly as "the companion ADR" with a one-line description of the
-split of responsibility — see facility-layout's ADR-0016/0017 pair. Don't
+split of responsibility — see facility-layout's companion pair on
+functional-location roles and the wes-work-planning travel graph (in those
+repos). Don't
 write the decision once in one repo and expect the other repo's readers
 to find it; each bounded context's docs site is read independently.
 
