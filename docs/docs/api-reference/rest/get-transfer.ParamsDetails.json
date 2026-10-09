@@ -1,0 +1,1 @@
+{"parameters":[{"name":"id","in":"path","required":true,"description":"The transfer id (the transferId returned by approval).","schema":{"type":"string","minLength":1}}]}

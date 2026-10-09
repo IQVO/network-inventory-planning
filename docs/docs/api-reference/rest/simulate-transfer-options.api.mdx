@@ -1,0 +1,64 @@
+---
+id: simulate-transfer-options
+title: "Simulate advisory transfer options from local read models."
+description: "Serves an advisory-only simulation built from the service's projected"
+sidebar_label: "Simulate advisory transfer options from local read models."
+hide_title: true
+hide_table_of_contents: true
+api: eJzlVkuP20YM/ivEXNqi8iMNigTqKUiTdtEi3mY37SHeAy3R1mRHHGWGsmMY/u8FR/JjV0Y2Pfe06xGHw8fHj9/O+IYCivV8VZrcRFu3DoVuA3JcUpg1+imazAiuosk/msYhs+WVuctMSbEINpmY3NxQWFMEZMBybaMP25Fnt4Xep/UMi9Y6gWXwNUhFECmsbUHfRWiC/0SFUDlnJtn4cA9LLCSO4S1aNyqcj1TmEEjawBF+nj7XKwtH9Y+fomfYVMTJZSAs51z7klwEDAQtF56XdtUGKjOwXPi6cSQEPkAUdJRBQKkogFTI6rXx0fJqzinMBoNYdGoqNJ6zyUyg2HiOFE2+Mz9Np/rnYSVe9fmfp568FW0IxALOF+hSrNCFOjaZKTwLsag7bBpni3RxovnpWSwqqlH/k21DJjd+oSVLAX1ubaBS23MovckMxtnSZCZaoajd0tQoiO0CPxqeHC68d4Sa4qN03Aa3ESS0NIZb7dsprUDx0HbNRf9jL5Xl1djs+xhOL0QJCp3MLH2oUUxuShQaia1p8OrMlRQFNigUagz3gLXnVWpygkaHoFMkbaQyvdklfHoUQ8Dt0D3TEaewtrSBhgLo3ewxTIfdgtvKxjkTl423LFB6ivBudtvDh0D6+Ym/9EfoIhS+puR1ztezm1uYrJ9NDoajo1m+ItaRJPBrCjpO9EXRYAUiYxMrL5lWe87I0E2vD4BNE1L1PRNsrFQweCLmvVEHYytUx6fgpPUwmfHBriy/YVw4KrtSiuVU99OheEH3K9XI+qvABgsr29mawj+WS785O/ydsAze1yYzm/TtRjDI8dcbLoeATaEMoLR/HNzTcO4QLAQ1bqG7rNU+limB6EKG/9FzoILs+rHf8yKdHFoWWlEYOOwMOyAoEpV8oatR8nahyCen3NaLCz6v24WzsaISDref9n/s19Mhvz44rS23EcqUwRje0QpFy1ET8mF2hcBGiJUPkp47x8K3kcb+HDLfeEW7YMWp3Y0VujlSiNk//HY4f98Tvn7fZ+bn6fMh5b9/+xpevJy+eLiWKAQfvsLt58bfzvHp2yHQzOhqai8wfOdiWJNHW1sU3VBjUVmmkbJcOuhDA1sSi11aCh1+u+pcGMM+jCFC0jQJWnfh2lm9r7sHU5H3malJKq+SZEWaf4NSmdw8oMwT+atASXsoqEbZmTY4k5tKpMknk0TflY+Sv5y+nA4K8Gdi95LW5HxTa5P2d5mxvPQp3j66d70queI1sejOuO6FELy6vjKZ0bc7h8/G0/G07zkWqeeMtTrZYKDKt5FGcRsT/WZnocZ8MllZqdrFuPD15Oqvv2eTXgyN7OHZ0VF/7Qdr+rDNDgrqeAkW6JALDXbpu0kfhAJLRyTjOc/5K7n2Oi1CtAtneTVKwP4i/Ur+Ps20ssbCOivbbM56Mrr540PPBBk0A/75ASyLH67ZpCn6jRrnrHgKo2PgZ8QKVwJMSmJ1qzotQlNtoy2SbvPFfd6vR3TZnDvF0mmG9MDBlL5Q0aZjp0Rlk6C0Afwmpd5nGnV77jPT+Cg18ll3e8I4kxWHCMF3MrqTFBfF34NW7k588b9R1T0xaIknjUObipyGY9cP/0ezfqaGl8b/LjM64Wq02y0w0ofg9ns9/tySityPd5lZY7DKbfprn5mKsKSQ+OKetjpARUGNks0aXZuU42MZrsxwJKbf3tya/f5fvZy/lQ==
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Simulate advisory transfer options from local read models."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/v1/transfer-simulations"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Serves an advisory-only simulation built from the service's projected
+network facts. Fail-closed: returns 503 problem+json when the read
+models are unconfigured, incomplete or stale, rather than proposing
+from partial state.
+
+
+<ParamsDetails>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./simulate-transfer-options.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./simulate-transfer-options.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

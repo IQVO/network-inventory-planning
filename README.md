@@ -30,7 +30,7 @@ curl -X POST http://localhost:8080/v1/transfer-proposals:generate \
   }'
 ```
 
-The response is an explainable, score-ordered advisory proposal. Approval, Inventory Storage reservation, WES work creation, dispatch, receipt, and reconciliation are deliberately separate upcoming slices.
+The response is an explainable, score-ordered advisory proposal. It reserves and moves nothing: an operator approves a transfer separately (`POST /v1/transfers:approve`), and the transfer saga then drives the Inventory Storage reservation, WES work release, pick, dispatch, arrival and stow through Kafka (see [Domain message flow](docs/docs/ddd/domain-message-flow.md)).
 
 ## Guardrails
 
@@ -45,3 +45,18 @@ The response is an explainable, score-ordered advisory proposal. Approval, Inven
 ```sh
 make check-all
 ```
+
+## Documentation
+
+The full documentation is a Docusaurus site under [`docs/`](docs/), published at
+<https://iqvo.github.io/network-inventory-planning/> (build it locally with `npm ci` and
+`npm run build` in `docs/`, Node 20).
+
+- Overview: [Introduction](docs/docs/overview/introduction.md), [Architecture](docs/docs/overview/architecture.md), [Quickstart](docs/docs/overview/quickstart.md)
+- Operations: [Runbook](docs/docs/operations/runbook.md), [Configuration](docs/docs/operations/configuration.md), [Observability](docs/docs/operations/observability.md), [Troubleshooting](docs/docs/operations/troubleshooting.md)
+- Development: [Testing](docs/docs/development/testing.md)
+- Domain-Driven Design: [Subdomain classification](docs/docs/ddd/subdomain-classification.md), [Use cases](docs/docs/ddd/use-cases.md), [Domain events](docs/docs/ddd/domain-events.md), [Ubiquitous language](docs/docs/ddd/ubiquitous-language.md), [Core domain chart](docs/docs/ddd/core-domain-chart.md), [Bounded context canvas](docs/docs/ddd/bounded-context-canvas.md), [Context map](docs/docs/ddd/context-map.md), [Aggregate design canvas](docs/docs/ddd/aggregate-design-canvas.md), [Domain message flow](docs/docs/ddd/domain-message-flow.md), [EventStorming](docs/docs/ddd/eventstorming.md), [Class diagrams](docs/docs/ddd/class-diagram.md), [Entity-relationship](docs/docs/ddd/entity-relationship.md), [Sequence diagrams](docs/docs/ddd/sequence-diagrams.md)
+- Ecosystem: [Integration](docs/docs/ecosystem/integration.md)
+- AI ecosystem: [MCP tools](docs/docs/mcp/tools.md)
+- API: [API reference overview](docs/docs/api-reference/overview.md) (the REST reference is generated from [`apis/openapi.yaml`](apis/openapi.yaml))
+- Decisions: [ADR index](docs/docs/adr/about.md)
