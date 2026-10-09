@@ -64,9 +64,6 @@ func rebalanceMigrationsDir(t *testing.T) string {
 }
 
 func TestRebalanceRunRepoRoundTrip(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	databaseURL := startPostgres(t)
 	if err := postgres.RunMigrations(databaseURL, rebalanceMigrationsDir(t)); err != nil {
 		t.Fatalf("run migrations (0004 must create rebalance_runs): %v", err)
@@ -136,9 +133,6 @@ func TestRebalanceRunRepoRoundTrip(t *testing.T) {
 }
 
 func TestListNonTerminalExcludesTerminalStates(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	databaseURL := startPostgres(t)
 	if err := postgres.RunMigrations(databaseURL, rebalanceMigrationsDir(t)); err != nil {
 		t.Fatalf("run migrations: %v", err)

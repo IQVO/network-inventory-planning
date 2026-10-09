@@ -97,9 +97,6 @@ func readOutboxEvents(t *testing.T, brokers []string, want int) []kafkago.Messag
 }
 
 func TestTransferSagaIntegration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	brokers := startKafkaBroker(t)
 	databaseURL := startPostgres(t)
 	if err := postgres.RunMigrations(databaseURL, migrationsDir(t)); err != nil {
