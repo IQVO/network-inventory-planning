@@ -17,12 +17,11 @@ import (
 	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 )
 
 // Environment of the Phase-1 read-model side. Each consumer group has NO
@@ -71,17 +70,25 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// W3C Trace Context is the fleet's Kafka propagation format (ADR
-	// 0006): the global propagator is what every consumer's Extract and
-	// every encoder's Inject go through. OTel's default is a NO-OP
-	// propagator, so without this line the header carriers exist but
-	// move nothing. A full tracer provider (OTLP export) is a later
-	// slice; propagation works with the no-op tracer — Inject only needs
-	// a span on ctx, which inbound extraction provides.
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	// OTLP trace + metric export, W3C Trace Context propagation (the fleet's
+	// Kafka propagation format, ADR 0006: the global propagator is what every
+	// consumer's Extract and every encoder's Inject go through) and Go runtime
+	// metrics, ADR 0012. Export never blocks: a missing Collector means
+	// dropped telemetry, not a service that will not start. This MUST run
+	// before handler.Routes(): otelhttp binds the global MeterProvider when
+	// the handler is built.
+	otelShutdown, err := telemetry.Setup(ctx, httpadapter.DefaultServiceName, getenv("SERVICE_VERSION", "dev"),
+		getenv("OTEL_EXPORTER_OTLP_ENDPOINT", telemetry.DefaultOTLPEndpoint))
+	if err != nil {
+		return fmt.Errorf("telemetry setup: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	address := os.Getenv("HTTP_ADDR")
 	if address == "" {
@@ -600,4 +607,13 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 		return inboundkafka.NewTransferFactConsumer(brokers, os.Getenv(envTransferFactGrp), d.factApplier, d.processedEvents, d.uow, logger)
 	})
 	return runners, closers, nil
+}
+
+// getenv returns the environment variable key, or fallback when it is unset
+// or empty.
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

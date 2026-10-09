@@ -44,7 +44,7 @@ Phases 1–3 left this context with a complete transfer saga
   never an all-zero traceparent a consumer would try to parent onto.
 - The composition root sets the global propagator
   (`TraceContext`+`Baggage`). A full tracer provider (OTLP export) is a
-  later slice; propagation itself only needs the propagator.
+  later slice; propagation itself only needs the propagator. *(That slice landed in ADR 0012: OTLP trace and metric export for the API process.)*
 - **Tests assert header PRESENCE, not values** — trace/span ids are
   per-run and per-sampler; the contract is that a span-carrying ctx
   yields a `traceparent` a consumer can Extract, and a span-less ctx

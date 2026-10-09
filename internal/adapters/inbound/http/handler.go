@@ -10,6 +10,7 @@ import (
 
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Handler exposes the planning API. It accepts an explicit snapshot rather
@@ -36,7 +37,16 @@ type Handler struct {
 	ListTransfers *usecases.ListTransfers
 }
 
-// Routes creates the HTTP surface for this service.
+// DefaultServiceName is the OTel instrumentation scope for the HTTP surface.
+// The OTel *service.name* resource attribute (what Prometheus/Grafana filter
+// on) is set by telemetry.Setup from the same string at the composition root.
+const DefaultServiceName = "network-inventory-planning"
+
+// Routes creates the HTTP surface for this service. The mux is wrapped in
+// otelhttp, which records http.server.request.duration (rate / errors /
+// latency per http.route, read from the ServeMux pattern) on the global
+// MeterProvider. Callers must install that provider (telemetry.Setup) before
+// calling Routes: otelhttp resolves the global provider at construction.
 func (h Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.health)
@@ -46,7 +56,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/rebalance-runs", h.rebalanceRuns)
 	mux.HandleFunc("GET /v1/transfers", h.listTransfers)
 	mux.HandleFunc("GET /v1/transfers/{id}", h.getTransfer)
-	return mux
+	return otelhttp.NewHandler(mux, DefaultServiceName)
 }
 
 type generateRequest struct {

@@ -76,6 +76,12 @@ spec:
               value: {{ .Values.config.outboxRelayEnabled | quote }}
             - name: ENVIRONMENT
               value: {{ .Values.environment | quote }}
+            - name: SERVICE_VERSION
+              value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            {{- end }}
             {{- if or .Values.database.url .Values.database.existingSecret }}
             - name: DATABASE_URL
               valueFrom:

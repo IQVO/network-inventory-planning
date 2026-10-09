@@ -91,6 +91,14 @@ gatewayApi:
 
 environment: "local"
 
+# OTLP/gRPC export (ADR 0012). Default is the in-cluster OTel Collector of the
+# kind cluster. Export is non-blocking, so a Collector that is down costs
+# telemetry and nothing else; otel.enabled=false skips the env entirely (the
+# process then targets localhost:4317 and drops everything).
+otel:
+  enabled: true
+  endpoint: "otel-collector.observability.svc.cluster.local:4317"
+
 config:
   httpAddr: ":8080"
   # Fail-closed freshness budget of the planning snapshot;
