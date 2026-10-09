@@ -116,6 +116,12 @@ func (h Handler) listTransfers(w http.ResponseWriter, r *http.Request) {
 		writeReadProblem(w, err)
 		return
 	}
+	// The spec's page size starts at 1; intParam's 0 means "absent", so an
+	// explicit limit=0 must be refused here rather than silently defaulted.
+	if query.Has("limit") && limit == 0 {
+		writeReadProblem(w, fmt.Errorf("%w: limit must be between 1 and %d, got 0", usecases.ErrInvalidTransferQuery, transfer.MaxListLimit))
+		return
+	}
 	offset, err := intParam(query.Get("offset"), "offset")
 	if err != nil {
 		writeReadProblem(w, err)
