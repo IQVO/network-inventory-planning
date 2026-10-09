@@ -218,9 +218,6 @@ func runConsumerUntil(t *testing.T, c interface {
 // real Kafka and a real Postgres, then proves the fail-closed snapshot and
 // the advisory simulation over the persisted read models.
 func TestPlanningReadModelsIntegration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	brokers := startKafkaBroker(t)
 	databaseURL := startPostgres(t)
 	if err := postgres.RunMigrations(databaseURL, migrationsDir(t)); err != nil {
