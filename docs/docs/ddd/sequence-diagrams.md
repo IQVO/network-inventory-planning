@@ -169,7 +169,7 @@ sequenceDiagram
   K->>C: TransferStockStowed
   C->>A: ApplyTransferStow
   A->>T: MarkStowed with the stow allocations, UpdateState
-  Note over A: each fact is one transaction with its claim; unknown transfer, illegal transition or refused fact is logged and committed past
+  Note over A: each fact is one transaction with its claim, an unknown transfer, illegal transition or refused fact is logged and committed past
 ```
 
 Source: `internal/application/usecases/transfer_facts.go`, `internal/adapters/inbound/kafka/transfer_fact_consumer.go`, `transfer_reply_consumer.go`

@@ -51,8 +51,8 @@ routes; `GET /healthz` answers `{"status":"ok"}`. See [MCP tools](../mcp/tools.m
 
 ## `nip-projector` (port 8091, admin only)
 
-`/healthz` (`{"status":"ok"}`) and `/readyz` (`{"status":"ready"}`, or `503
-{"status":"not_ready"}` while shutting down). Not in the OpenAPI document.
+`/healthz` (`{"status":"ok"}`) and `/readyz` (`{"status":"ready"}`, or
+`503 {"status":"not_ready"}` while shutting down). Not in the OpenAPI document.
 
 ## Error model
 
