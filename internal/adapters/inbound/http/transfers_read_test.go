@@ -235,6 +235,7 @@ func TestListTransfersEmptyPageIsAnEmptyArrayAndEchoesDefaultLimit(t *testing.T)
 func TestListTransfersBadQueryIs400Problem(t *testing.T) {
 	for _, target := range []string{
 		"/v1/transfers?state=FLYING",
+		"/v1/transfers?limit=0",
 		"/v1/transfers?limit=201",
 		"/v1/transfers?limit=abc",
 		"/v1/transfers?offset=-1",
