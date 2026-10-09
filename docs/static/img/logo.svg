@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Network Inventory Planning">
+  <circle cx="14" cy="46" r="8" fill="none" stroke="currentColor" stroke-width="4"/>
+  <circle cx="50" cy="46" r="8" fill="none" stroke="currentColor" stroke-width="4"/>
+  <circle cx="32" cy="14" r="8" fill="none" stroke="currentColor" stroke-width="4"/>
+  <path d="M22 46 L42 46 M18 39 L28 21 M46 39 L36 21" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+  <path d="M36 42 L42 46 L36 50" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

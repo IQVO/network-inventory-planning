@@ -1,0 +1,1 @@
+{"parameters":[{"name":"Idempotency-Key","in":"header","required":true,"description":"Transfer-level idempotency key; a fresh key per logical approval.\nReplaying a key replays the FIRST transfer it created.\n","schema":{"type":"string","minLength":1}}]}

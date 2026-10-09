@@ -1,0 +1,64 @@
+---
+id: get-reports-freshness
+title: "How far the analytics projection is behind"
+description: "The freshness lag of the projection all the reports read: `as_of` is the CloudEvents time of the"
+sidebar_label: "How far the analytics projection is behind"
+hide_title: true
+hide_table_of_contents: true
+api: eJztVk1v20YQ/SuDOdko9VGjRVK2KJAGSWsUaNw46cUykhU5FDdezjK7Q8mCwP9ezJKS5Y8aPfXUk8Sd3Zk3+x7fcIe+pWDEej4vMccVyXtqfZD4NlCsmWLEDMWsIuZXGIYQXmdYUiyCbfUg5vihJqj2B8CZFfgKpCZog/9Che4C41xaGpNAIFPm8NnET776DDam4Gvnu/LNmlgiiG1ozLNgpg1FAdLQcWYfoDYRTNs6SyUYLuGzM6tPkQrPZUyJ2W+gsdzFQ7UTpjUFYFoZsWs6nS74Fy81mEDAnXPQsdgBbmXDoa49FJrCK1gFv7G8Su02ZDg+wGUjlH7D4MOCl1RbLjNgr+iNgBnvQXdtgudVDlagMFLUFKFrYVMTP0hYeorTBWOGgWLrOVLEfIdn87n+PMfISWqqsuTKCJvaOlIktaLfmLgvQeXpFDMsPAuxaM7UbZHkMfsSNfEOY1FTY/SfbFvCHP1SDydUXzsbqFSppIvGDI+4UNm0QfUmdkA+bDpkusIowfIKM1S8ur/yoTGCOZZGaKKKwIfa+wfJwD3FjLT9OLCb7pY90xT7+xCPsHDXLCk8icV3S6dAGsu26RrM5w9BqeQmkPrLwDKM+e/XvyNgryrMkG5N0zrC/LvpWd9nKFb0CR+9ln2v4e+fIv/929fw4uX8hRK7dNR8o9wBheDDMwQfb/73RKfYHmaGUYx0T1A9pDikOhB9H/ilmKUjaExRW6aJWkRaGKGBLYnFVpZCYm68m4dZ+wOMu5BloRUFjZUkxronjh3d9sVQMF1yn2FDUvvRHzHD1kiNOc5GK5tVR14ZKawpqF3usAsOc6xF2nw2c74wrvZR8pfzH84etc62neyt8aRwXRQKE0Ud2Di4pLC2BcFPgRyZSD/v955if52h5cqnhkb4f5BsfLiBc1b1+7CFC2eYVW6vLs4xQ4U41P12Op/OR1GYIomCTaNJNiZQ7btIk7iNQo12d9dRzGezlZW6W04L38zO//zr3YyHshO7Lztpx7LDvR/3+6pc26jIxkNwOARL4wwXCrbyIb3Lj6BA5YhkuuAFP9Pr6GsRol06y6tJUv6tQGV09SRaIShMa5bWWdlmC9aVyeXvH6Gkxqhht93S2VhTmfYVVranYFk8JDrTEIPGl+Rimj0qeh8pLjhRNzkABwmGY0UhTuFcYJg/TSdGKEJbb6PVdFF8cZOrHQS/Ni5bcCAVlBkmqBbYb6VbKrq07Oya1GOkJhvAb1LrY6dpXvQZtj5KY/iI3d/8BiozXK9h47Zii3g8r22EYWo9lOruzkD+H/z/8eAfHUupnbXO2ERueil3oyvdfaVleOdL1xmq9Wh4t1uaSB+D63td/tpR2GJ+dZ3h2gSrdqtPfYY1mZJCMrIb2uorWxTUqv+tjesUxqPPA/Wig1f++uYD9v3fY4KzEQ==
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"How far the analytics projection is behind"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/reports/freshness"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+The freshness lag of the projection all the reports read: `as_of` is the CloudEvents time of the
+newest event the projector has applied and `lag_seconds` is now minus `as_of` (never negative).
+Both are null until the first event is applied. A growing lag means the projector is down or
+behind, not that a report is wrong: it catches up when the projector does.
+
+
+<ParamsDetails>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./get-reports-freshness.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./get-reports-freshness.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

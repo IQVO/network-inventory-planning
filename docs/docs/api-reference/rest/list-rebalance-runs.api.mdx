@@ -1,0 +1,76 @@
+---
+id: list-rebalance-runs
+title: "List scheduled rebalance runs, newest first."
+description: "The observe-only scheduled-rebalance run history (ADR 0007): one"
+sidebar_label: "List scheduled rebalance runs, newest first."
+hide_title: true
+hide_table_of_contents: true
+api: eJztV81y2zYQfpUdnJIpJdFp0mSYk2orraeu4zpJL5YnsyJXImIQYIClHFXDmT5En7BP0lmQkuVI+emh00tOkgDs4sO3u9+u1srV5JG1s6eFypTRgS9phgZtTpeNDSpRjIugsivlN+vqOlEFhdzrWgxVpl6XBG4WyC9p4KxZQchLKhpDxWBrBb6xUOrAzq/gwfjkEtI0ffowA2dpar27hZo8nJ9evL2c/Dg+G58fT96+Ov55cvLmbAKs85sEPOXOF9ougEuCYLEOpeOpvUUmX6G/ies1hgC1QWupgLl3VdIte1e7gGbk6R3lTAXkrrEckqlFW8QjruHcVQR///kXIMxRm0FuXKBiexd4mjcBDegACC/Gp2eTE3nY1Obo/UqgaQ7gCYOzCVhakgeEUhcFWSDvnR+C8LrZqmvvliQQVlyKuWDp9qjSDGgBjXF5DBHkrqrQFsOpVYmq0WNFTF6is1YWK4oRrDSrRGmJy/uG/EolytP7RnsqVDZHE+jj8F3ggiDoPyiB3GBVUwHs4OoogUdpev0cCppjYxiepEOVKIlthSpbK17VcqW2TAvyKlGVtrpqKpUdJarCD933R2kqF0YXKnuStu21IAq1s4GC+HmUpvKxn1M7KSNk3lJgmGsfWHDkzjJZFkusa6M7jkbvgpiv92G6mcT9HhtXykuOXydKsoM86w5QXL2zRO9RaNRMVfiSR10IR4yeqRjL5ibxjiXd4uEu/za/+6zbR6GLgyTPna+Qu6UfHqt297a784G9tovd4wUyDVhXFE36hB6Hl/OvtDpU9LHMtF0M5phzgC8U4nPAWSDL4Oy96gEukfus94SiHYB3zoYC+D6L+7y0HxN78MiG6wMvJivJeqWOX/56cTZ5PTlRieogqus2UaIGx1EMLmNxH3Kxz8/nNOQ51J56OswKbkuyWwXSoadnqNo2UazZyE270qzaT+2Ey7645EibqMeHyuvyxTE8fZY+FV2cGaq+k7rpFerTxbV7+OuLLO5tsMZ05eZA1XUuvkTrK8aZIagwL7WlgScs4kIPDXRBlvVck4950xP0sdd2C+NgnhTEqM0Bsx3KL7oLe5KfpN9/I/m/JblNVEVcOhlUFhSlFblUmRotj0bbOWPgu7ElTiN9b2y8UZkqmetsNJJuakoXOHuWPkv3nn4m21DQkoyrKwmP9Ctt5y4i7XGdE986fwOndkk2jjQXvRTC+OJUJUru7hweDdNh2kcb8xjtvlffoqfSNYEGYRVib0l2oIZsNFpoLpvZMHfV6PS331+ObHftQG+uHWwUuCN09yHjYqmDIOuNYGsEHVUCdu581Oo9KDA3RDyc2qn9zFtr7yQVAwQ9M9IHYkp/YOj6wYOgmSDHGmfaaF4lUysrg1e/vIGCZJRJoG5mRgeRfDmXa149BG3ZQYyT9IMCKleQCXE26voAhamVTPKDLXBgjzbMyYchnG66SdUwMgWoy1XQ4i6wy2+yfu5Ck0ytaLBfdvNVvGBzlD5Q3sRlo5cEWtoUaQ/uNj69f2mQYUz6kwtcod2J7pkOfDcIw71BOOyPM/eCt77Thm/D9f8xXPeKJBEe1QZ1jHGszXWvOldqeRQl+J7uXCdKpEW21+sZBnrjTdvKcjeLixoVOoiYfmIa3w39vxvMD2K+odXOv4IlmkbORE1botcCRGVXMuGUhAX5iLAzGuc51btWe2O2eNlK8k+T16pt/wHAFARu
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"List scheduled rebalance runs, newest first."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/v1/rebalance-runs"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+The observe-only scheduled-rebalance run history (ADR 0007): one
+row per NIP_REBALANCE_SCHEDULE tick, recording the snapshot
+watermark the pass planned from, the proposal/rejected counts,
+and the outcome — a fail-closed snapshot refusal is a FAILED run
+carrying its reason, never a hidden error. Runs never approve
+anything and never emit an allocation command.
+
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./list-rebalance-runs.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./list-rebalance-runs.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./list-rebalance-runs.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      
