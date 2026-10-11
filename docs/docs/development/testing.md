@@ -131,8 +131,8 @@ binaries and the Service selectors; no CI job runs them.
 | `arch-test` | push, PR | `go test ./internal/architecture/... -v` |
 | `web` | push, PR | in `web/`: `npm ci`, lint (oxlint), `tsc -b`, vitest, build (with `warehouse-ui-kit` built first) |
 | `trivy-scan` | PR | builds the image, uploads SARIF, blocks on fixable CRITICAL/HIGH |
-| `docker-publish` | push to `main` | pushes `claudioed/network-inventory-planning:latest` and `:<sha>`, cosign signature, SPDX SBOM attestation |
-| `release` | push to `main` after `docker-publish` | next `vX.Y.Z` tag, versioned image tag, Helm chart to `oci://ghcr.io/claudioed`, GitHub release |
+| `docker-publish` | push to `main` | pushes `ghcr.io/iqvo/network-inventory-planning:latest` and `:<sha>`, cosign signature, SPDX SBOM attestation |
+| `release` | push to `main` after `docker-publish` | next `vX.Y.Z` tag, versioned image tag, Helm chart to `oci://ghcr.io/iqvo`, GitHub release |
 
 Other workflows: `docs.yml` (builds this site on every PR touching `docs/**`
 or `apis/**`, deploys Pages from `main`), `ai-review.yml` (advisory AI review,
