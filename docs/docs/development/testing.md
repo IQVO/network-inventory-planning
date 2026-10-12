@@ -117,7 +117,7 @@ binaries and the Service selectors; no CI job runs them.
 | Job | Runs on | What it runs |
 | --- | --- | --- |
 | `lint` | push, PR | golangci-lint v2.14.0 |
-| `guide-lint` | push, PR (advisory, `continue-on-error`) | `scripts/harness/guide_lint.py`, `test_hook.py` |
+| `guide-lint` | push, PR (blocking: a stale guide reference or a failing hook self-test fails the run) | `scripts/harness/guide_lint.py`, `test_hook.py` |
 | `complexity` | push, PR | golangci-lint with only `gocyclo, gocognit, cyclop, funlen, nestif`, plus an informational gocyclo report |
 | `test` | push, PR | build, vet, race tests with coverage, 90% gate |
 | `bdd` | push, PR | `go test ./... -run TestFeatures -v` |
