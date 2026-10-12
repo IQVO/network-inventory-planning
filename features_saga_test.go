@@ -196,7 +196,7 @@ func (w *world) applyFact(ctx context.Context, fact, id string, args factArgs) e
 		if reason == "" {
 			reason = transfer.RejectionInsufficientUsable
 		}
-		return usecases.ApplyTransferRejection{Transfers: w.transfers, UoW: uow}.Execute(ctx,
+		return usecases.ApplyTransferRejection{Transfers: w.transfers, Events: w.bus, UoW: uow}.Execute(ctx,
 			usecases.ApplyRejectionInput{TransferID: tid, LineID: tid.LineID(), Reason: reason, OccurredAt: now})
 	case "TransferPicked":
 		qty := args.quantity
@@ -206,11 +206,11 @@ func (w *world) applyFact(ctx context.Context, fact, id string, args factArgs) e
 		return usecases.ApplyTransferPick{Transfers: w.transfers, Events: w.bus, UoW: uow, Release: w.release}.Execute(ctx,
 			usecases.ApplyPickInput{TransferID: tid, Picked: transfer.Picked{PickedQuantity: qty}, OccurredAt: now})
 	case "TransferDispatched":
-		return usecases.ApplyTransferDispatched{Transfers: w.transfers, UoW: uow}.Execute(ctx, usecases.FactInput{TransferID: tid, OccurredAt: now})
+		return usecases.ApplyTransferDispatched{Transfers: w.transfers, Events: w.bus, UoW: uow}.Execute(ctx, usecases.FactInput{TransferID: tid, OccurredAt: now})
 	case "TransferArrived":
-		return usecases.ApplyTransferArrival{Transfers: w.transfers, UoW: uow}.Execute(ctx, usecases.FactInput{TransferID: tid, OccurredAt: now})
+		return usecases.ApplyTransferArrival{Transfers: w.transfers, Events: w.bus, UoW: uow}.Execute(ctx, usecases.FactInput{TransferID: tid, OccurredAt: now})
 	case "TransferReceiptStaged":
-		return usecases.ApplyTransferReceiptStaged{Transfers: w.transfers, UoW: uow}.Execute(ctx,
+		return usecases.ApplyTransferReceiptStaged{Transfers: w.transfers, Events: w.bus, UoW: uow}.Execute(ctx,
 			usecases.ApplyReceiptStagedInput{TransferID: tid, LineID: tid.LineID(), OccurredAt: now})
 	case "TransferStockStowed":
 		return w.applyStowed(ctx, tid, t, known, args)
@@ -245,7 +245,7 @@ func (w *world) applyStowed(ctx context.Context, tid transfer.TransferID, t *tra
 	}
 	stowed.ReceivedQuantity, stowed.StowedQuantity = qty, qty
 	stowed.Allocations = []transfer.StowAllocation{{StockUnitID: "su-9", BinID: "bin-B2", Quantity: qty}}
-	return usecases.ApplyTransferStow{Transfers: w.transfers, UoW: memory.UnitOfWork{}}.Execute(ctx,
+	return usecases.ApplyTransferStow{Transfers: w.transfers, Events: w.bus, UoW: memory.UnitOfWork{}}.Execute(ctx,
 		usecases.ApplyStowInput{TransferID: tid, Stowed: stowed, OccurredAt: w.clock.Now()})
 }
 

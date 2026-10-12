@@ -421,3 +421,42 @@ func TestApplyTransferRejection(t *testing.T) {
 		t.Fatalf("state = %s reason = %s", loaded.State(), loaded.RejectionReason())
 	}
 }
+
+// The rejection leg of the saga must announce its transition on the analytics
+// stream like every other fact (ADR 0007); it used to be the one silent step.
+func TestApplyTransferRejection_PublishesStateAdvanced(t *testing.T) {
+	repo := newFakeTransferRepo()
+	uc := approveUseCase(repo, &fakeEventPublisher{}, approveFacts(), nil)
+	result, err := uc.Execute(context.Background(), baseApprovalInput())
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	pub := &fakeEventPublisher{}
+	rejUc := ApplyTransferRejection{Transfers: repo, Events: pub, UoW: passThroughUoW{}}
+	if err := rejUc.Execute(context.Background(), ApplyRejectionInput{
+		TransferID: result.TransferID,
+		LineID:     result.TransferID.LineID(),
+		Reason:     transfer.RejectionInsufficientUsable,
+		OccurredAt: approveNow.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("apply rejection: %v", err)
+	}
+
+	var advanced []transfer.StateAdvanced
+	for _, e := range pub.events {
+		if a, ok := e.(transfer.StateAdvanced); ok {
+			advanced = append(advanced, a)
+		}
+	}
+	// The in-memory fake does not bump the aggregate's version on save, so
+	// earlier creation entries are also "since" the loaded version; the
+	// newest occurrence is the one this fact must have produced.
+	if len(advanced) == 0 {
+		t.Fatal("no TransferStateAdvanced published for the rejection")
+	}
+	last := advanced[len(advanced)-1]
+	if last.From != transfer.StateAllocating || last.To != transfer.StateUnfulfillable {
+		t.Fatalf("newest advanced = %+v, want ALLOCATING -> UNFULFILLABLE", last)
+	}
+}

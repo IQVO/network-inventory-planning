@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
@@ -94,7 +96,7 @@ func (h Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 		writeReadSideUnavailable(w)
 		return
 	}
-	t, err := h.GetTransfer.Execute(r.Context(), r.PathValue("id"))
+	t, err := h.GetTransfer.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		writeReadProblem(w, err)
 		return

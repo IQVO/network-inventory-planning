@@ -219,6 +219,10 @@ type ApplyRejectionInput struct {
 type ApplyTransferRejection struct {
 	Transfers ports.TransferRepository
 	UoW       ports.UnitOfWork
+	// Events publishes the TransferStateAdvanced analytics occurrence for the
+	// ALLOCATING→UNFULFILLABLE transition (ADR 0007). OPTIONAL: nil skips
+	// analytics (never fails a fact).
+	Events ports.TransferEventPublisher
 }
 
 // Execute applies the rejection.
@@ -228,10 +232,14 @@ func (u ApplyTransferRejection) Execute(ctx context.Context, in ApplyRejectionIn
 		if err != nil {
 			return err
 		}
+		loadedVersion := trf.Version()
 		if err := trf.MarkUnfulfillable(in.LineID, in.Reason, in.OccurredAt); err != nil {
 			return err
 		}
-		return u.Transfers.UpdateState(ctx, trf)
+		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
+			return err
+		}
+		return publishStateAdvanced(ctx, u.Events, trf, loadedVersion)
 	})
 	return ierr
 }

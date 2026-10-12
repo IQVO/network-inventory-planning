@@ -104,7 +104,7 @@ func TestProposeTransferSeedsAuditTrail(t *testing.T) {
 	if len(audit) != 2 {
 		t.Fatalf("audit entries = %d, want 2 (drafted + proposed): %+v", len(audit), audit)
 	}
-	if audit[0].From != StateDraft || audit[0].To != StateDraft || audit[0].Event != "TransferDrafted" {
+	if audit[0].From != "" || audit[0].To != StateDraft || audit[0].Event != "TransferDrafted" {
 		t.Fatalf("creation entry = %+v", audit[0])
 	}
 	if audit[1].From != StateDraft || audit[1].To != StateProposed || audit[1].Event != "TransferProposed" {

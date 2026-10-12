@@ -81,6 +81,32 @@ Feature: Transfer saga state machine
     And the JSON field "version" is 9
     And the JSON field "pickedQuantity" is 5
 
+  Scenario: The audit trail's creation entry has no from-state
+    Given a transfer "T1" in state "ALLOCATING"
+    When I request GET "/v1/transfers/{T1}"
+    Then the response status is 200
+    And the JSON field "audit.0.to" is "DRAFT"
+    And the JSON field "audit.0.from" is absent
+    And the JSON field "audit.1.from" is "DRAFT"
+    And the JSON field "audit.1.to" is "PROPOSED"
+
+  Scenario Outline: Every fact-driven transition is announced on the analytics stream
+    Given a transfer "T1" in state "<from>"
+    When a "<fact>" fact arrives for transfer "T1"
+    Then the fact is applied
+    And transfer "T1" is in state "<to>"
+    And the domain event "TransferStateAdvanced" was published <entries> times
+
+    # ADR 0007: one occurrence per audit entry, the seeding path's included,
+    # so the count equals the length of the trail once the fact is applied.
+    Examples: one TransferStateAdvanced per transition
+      | from       | fact                            | to            | entries |
+      | ALLOCATING | TransferStockAllocationRejected | UNFULFILLABLE | 5       |
+      | PICKED     | TransferDispatched              | IN_TRANSIT    | 7       |
+      | IN_TRANSIT | TransferReceiptStaged           | ARRIVED       | 8       |
+      | IN_TRANSIT | TransferArrived                 | ARRIVED       | 8       |
+      | ARRIVED    | TransferStockStowed             | RECEIVED      | 9       |
+
   Scenario Outline: A fact that does not fit the current state is refused and changes nothing
     Given a transfer "T1" in state "<state>"
     When a "<fact>" fact arrives for transfer "T1"

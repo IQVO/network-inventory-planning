@@ -27,6 +27,7 @@ import (
 
 	inboundmcp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/mcp"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 )
 
@@ -46,6 +47,11 @@ const (
 	// snapshot when PLANNING_MAX_STALENESS is unset; it matches the api binary.
 	defaultMaxStaleness = 10 * time.Minute
 	shutdownTimeout     = 10 * time.Second
+	// defaultServiceName labels this binary's spans and metrics (distinct
+	// from the OLTP API's DefaultServiceName), overridable via
+	// OTEL_SERVICE_NAME -- the same fleet convention as inventory-storage's
+	// cmd/mcp.
+	defaultServiceName = "network-inventory-planning-mcp"
 )
 
 func main() {
@@ -58,6 +64,27 @@ func main() {
 func run() error {
 	logger := newLogger(os.Getenv(envLogLevel))
 	slog.SetDefault(logger)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serviceName := getenv("OTEL_SERVICE_NAME", defaultServiceName)
+	// OTLP trace + metric export and Go runtime metrics (ADR 0012): this
+	// MUST run before newRouter -- otelchi and otelchimetric resolve the
+	// global MeterProvider at construction. Export never blocks: a missing
+	// Collector means dropped telemetry, not a service that will not start.
+	otelShutdown, err := telemetry.Setup(ctx, serviceName, getenv("SERVICE_VERSION", "dev"),
+		getenv("OTEL_EXPORTER_OTLP_ENDPOINT", telemetry.DefaultOTLPEndpoint))
+	if err != nil {
+		return fmt.Errorf("telemetry setup: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	maxStaleness, err := maxStalenessFromEnv()
 	if err != nil {
@@ -73,7 +100,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              getenv(envMCPAddr, defaultAddr),
-		Handler:           newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps))),
+		Handler:           newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps)), serviceName),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return serveMCP(logger, srv)

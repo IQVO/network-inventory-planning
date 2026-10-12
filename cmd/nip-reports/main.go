@@ -21,6 +21,7 @@ import (
 
 	inboundhttp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/analyticsstore"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/bootretry"
 )
 
@@ -74,6 +75,25 @@ func run() error {
 	slog.SetDefault(logger)
 
 	ctx := context.Background()
+
+	serviceName := getenv("OTEL_SERVICE_NAME", inboundhttp.DefaultReportsServiceName)
+	// OTLP trace + metric export and Go runtime metrics (ADR 0012): this
+	// MUST run before Routes() -- otelchi and otelchimetric resolve the
+	// global MeterProvider at construction. Export never blocks: a missing
+	// Collector means dropped telemetry, not a service that will not start.
+	otelShutdown, err := telemetry.Setup(ctx, serviceName, getenv("SERVICE_VERSION", "dev"),
+		getenv("OTEL_EXPORTER_OTLP_ENDPOINT", telemetry.DefaultOTLPEndpoint))
+	if err != nil {
+		return fmt.Errorf("telemetry setup: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("telemetry shutdown failed", "error", err)
+		}
+	}()
+
 	pool, err := analyticsstore.NewReadOnlyPool(ctx, cfg.analyticsURL)
 	if err != nil {
 		return err
@@ -109,6 +129,13 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func newLogger(level string) *slog.Logger {
