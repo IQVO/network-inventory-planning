@@ -119,10 +119,11 @@ func TestStateAdvancedSince(t *testing.T) {
 	if len(advanced) != 2 { // ProposeTransfer only appends drafted+proposed
 		t.Fatalf("advanced since 0 = %d, want 2", len(advanced))
 	}
-	// The creation entry is DRAFT -> DRAFT (ProposeTransfer initialises
-	// the aggregate in DRAFT, then records the drafted transition).
-	if advanced[0].From != StateDraft || advanced[0].To != StateDraft {
-		t.Errorf("first advanced = %+v, want DRAFT -> DRAFT", advanced[0])
+	// The creation entry has no From state: the aggregate does not exist
+	// before it (AuditEntry: From is "" for the creation entry), so the
+	// analytics flow report can leave it out of the from-state counts.
+	if advanced[0].From != "" || advanced[0].To != StateDraft {
+		t.Errorf("first advanced = %+v, want (creation) -> DRAFT", advanced[0])
 	}
 	if advanced[1].To != StateProposed {
 		t.Errorf("second advanced = %+v, want -> PROPOSED", advanced[1])
