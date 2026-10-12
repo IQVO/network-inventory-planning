@@ -27,12 +27,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riandyrn/otelchi"
+	otelchimetric "github.com/riandyrn/otelchi/metric"
 
+	inboundhttp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http"
 	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/analyticsstore"
 	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/network-inventory-planning/internal/bootretry"
 )
 
@@ -50,6 +56,11 @@ const (
 	// defaultMigrationsPath is the analytical migrations directory relative
 	// to the repo root / the image's /app.
 	defaultMigrationsPath = "analytics/migrations"
+
+	// defaultServiceName labels this binary's spans and metrics (distinct
+	// from the OLTP API's DefaultServiceName), overridable via
+	// OTEL_SERVICE_NAME.
+	defaultServiceName = "network-inventory-planning-projector"
 )
 
 // config is the projector's environment.
@@ -111,6 +122,19 @@ func run() error {
 	logger := newLogger(cfg.logLevel)
 	slog.SetDefault(logger)
 
+	serviceName := getenv("OTEL_SERVICE_NAME", defaultServiceName)
+	otelShutdown, err := setupTelemetry(context.Background(), serviceName)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("telemetry shutdown failed", "error", err)
+		}
+	}()
+
 	pool, err := openAnalyticsPool(context.Background(), logger, cfg.analyticsURL, cfg.migrationsPath)
 	if err != nil {
 		return err
@@ -126,7 +150,7 @@ func run() error {
 	}()
 
 	var notReady atomic.Bool
-	admin := &http.Server{Addr: cfg.adminAddr, Handler: newAdminMux(&notReady), ReadHeaderTimeout: 5 * time.Second}
+	admin := &http.Server{Addr: cfg.adminAddr, Handler: newAdminMux(&notReady, logger, serviceName), ReadHeaderTimeout: 5 * time.Second}
 	adminErr := make(chan error, 1)
 	go func() {
 		logger.Info("projector admin server listening", "addr", cfg.adminAddr)
@@ -173,14 +197,26 @@ func run() error {
 }
 
 // newAdminMux serves /healthz (liveness, never flipped) and /readyz (flips to
-// 503 as the first step of shutdown).
-func newAdminMux(notReady *atomic.Bool) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+// 503 as the first step of shutdown), carrying the fleet's Tier-1 HTTP RED
+// middleware stack (ADR-0013): request ID, otelchi tracing, otelchi's RED
+// duration metric, the request logger, then panic recovery. otelchi.Middleware
+// and otelchimetric.NewServerRequestDuration resolve the global MeterProvider
+// at construction, so the caller must install it (telemetry.Setup) first.
+func newAdminMux(notReady *atomic.Bool, logger *slog.Logger, serviceName string) http.Handler {
+	r := chi.NewRouter()
+	metricCfg := otelchimetric.NewBaseConfig(serviceName)
+
+	r.Use(middleware.RequestID)
+	r.Use(otelchi.Middleware(serviceName, otelchi.WithChiRoutes(r)))
+	r.Use(otelchimetric.NewServerRequestDuration(metricCfg))
+	r.Use(inboundhttp.RequestLogger(logger))
+	r.Use(middleware.Recoverer)
+
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if notReady.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -189,7 +225,7 @@ func newAdminMux(notReady *atomic.Bool) *http.ServeMux {
 		}
 		_, _ = w.Write([]byte(`{"status":"ready"}`))
 	})
-	return mux
+	return r
 }
 
 // openAnalyticsPool applies the analytical migrations over the direct DSN,
@@ -209,6 +245,27 @@ func openAnalyticsPool(ctx context.Context, logger *slog.Logger, url, migrations
 		return nil, err
 	}
 	return pool, nil
+}
+
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// setupTelemetry installs the global TracerProvider/MeterProvider and
+// starts Go runtime metrics (ADR 0012). It MUST run before newAdminMux --
+// otelchi and otelchimetric resolve the global MeterProvider at
+// construction. Export never blocks: a missing Collector means dropped
+// telemetry, not a service that will not start.
+func setupTelemetry(ctx context.Context, serviceName string) (func(context.Context) error, error) {
+	shutdown, err := telemetry.Setup(ctx, serviceName, getenv("SERVICE_VERSION", "dev"),
+		getenv("OTEL_EXPORTER_OTLP_ENDPOINT", telemetry.DefaultOTLPEndpoint))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry setup: %w", err)
+	}
+	return shutdown, nil
 }
 
 func newLogger(level string) *slog.Logger {

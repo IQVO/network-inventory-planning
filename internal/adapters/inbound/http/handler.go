@@ -4,13 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
+	otelchimetric "github.com/riandyrn/otelchi/metric"
+
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Handler exposes the planning API. It accepts an explicit snapshot rather
@@ -42,21 +47,35 @@ type Handler struct {
 // on) is set by telemetry.Setup from the same string at the composition root.
 const DefaultServiceName = "network-inventory-planning"
 
-// Routes creates the HTTP surface for this service. The mux is wrapped in
-// otelhttp, which records http.server.request.duration (rate / errors /
-// latency per http.route, read from the ServeMux pattern) on the global
-// MeterProvider. Callers must install that provider (telemetry.Setup) before
-// calling Routes: otelhttp resolves the global provider at construction.
+// Routes creates the HTTP surface for this service: a chi router carrying
+// the fleet's Tier-1 HTTP RED middleware stack (ADR-0013), in the mandated
+// order -- request ID, otelchi tracing, otelchi's RED duration metric, the
+// request logger, then panic recovery. otelchi.Middleware and
+// otelchimetric.NewServerRequestDuration resolve the global MeterProvider
+// at construction, so callers must install it (telemetry.Setup) before
+// calling Routes.
 func (h Handler) Routes() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", h.health)
-	mux.HandleFunc("POST /v1/transfer-proposals:generate", h.generate)
-	mux.HandleFunc("GET /v1/transfer-simulations", h.simulate)
-	mux.HandleFunc("POST /v1/transfers:approve", h.approve)
-	mux.HandleFunc("GET /v1/rebalance-runs", h.rebalanceRuns)
-	mux.HandleFunc("GET /v1/transfers", h.listTransfers)
-	mux.HandleFunc("GET /v1/transfers/{id}", h.getTransfer)
-	return otelhttp.NewHandler(mux, DefaultServiceName)
+	r := chi.NewRouter()
+	metricCfg := otelchimetric.NewBaseConfig(DefaultServiceName)
+
+	r.Use(middleware.RequestID)
+	r.Use(otelchi.Middleware(DefaultServiceName, otelchi.WithChiRoutes(r)))
+	// Emits http.server.request.duration (seconds) per OTel HTTP semantic
+	// conventions, labelled by http.route (the chi pattern, not the raw
+	// path) -- the fleet's Grafana per-context dashboards read this by
+	// route.
+	r.Use(otelchimetric.NewServerRequestDuration(metricCfg))
+	r.Use(RequestLogger(slog.Default()))
+	r.Use(middleware.Recoverer)
+
+	r.Get("/healthz", h.health)
+	r.Post("/v1/transfer-proposals:generate", h.generate)
+	r.Get("/v1/transfer-simulations", h.simulate)
+	r.Post("/v1/transfers:approve", h.approve)
+	r.Get("/v1/rebalance-runs", h.rebalanceRuns)
+	r.Get("/v1/transfers", h.listTransfers)
+	r.Get("/v1/transfers/{id}", h.getTransfer)
+	return r
 }
 
 type generateRequest struct {

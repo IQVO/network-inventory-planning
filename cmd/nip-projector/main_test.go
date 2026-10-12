@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +13,8 @@ import (
 )
 
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+
+func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	c, err := loadConfig(env(map[string]string{"ANALYTICS_DATABASE_URL": "postgres://u@h/db", "KAFKA_BROKERS": "k1:9092, k2:9092,,"}))
@@ -62,7 +66,7 @@ func TestRun_FailsFastWithoutTheAnalyticalDatabase(t *testing.T) {
 
 func TestAdminMux_HealthzIsLivenessAndReadyzFlipsOnShutdown(t *testing.T) {
 	var notReady atomic.Bool
-	mux := newAdminMux(&notReady)
+	mux := newAdminMux(&notReady, quietLogger(), "test-projector")
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
