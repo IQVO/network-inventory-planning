@@ -64,6 +64,7 @@ Kafka tests must start a broker through testcontainers: the fitness test
 | --- | --- |
 | `TestHexagonalArchitecture` | domain and application never import adapters |
 | `TestMCPAdapterDependencyRule` | the MCP adapter depends only on application and domain, and nothing depends on it |
+| `TestMCPOptionalToolInputsCarryOmitempty`, `TestMCPOptionalFieldDetector` | an MCP tool input field whose `jsonschema` description marks it optional ("optional", "omit", "defaults to", "only …") carries `omitempty`/`omitzero`, so the inferred schema does not make it required |
 | `TestNoAuthMiddlewareReintroduced` | no auth middleware on REST or MCP |
 | `TestKafkaConsumerGroupNeverHardcodedInline` | group ids come from the composition root's env |
 | `TestKafkaIntegrationTestsUseTestcontainers` | see above |

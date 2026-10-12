@@ -39,7 +39,7 @@ remote under `/mfes/network-inventory-planning/`.
   `{"status":"ready"}` and flips to `503 {"status":"not_ready"}` as the first
   step of graceful shutdown. The analytical migrations and the database ping
   run before the admin server starts, each retried by `internal/bootretry`
-  (5 attempts, 1s doubling, about 31s) to survive the Istio first-dial reset.
+  (5 attempts, 1s doubling: 1+2+4+8 = 15s of backoff) to survive the Istio first-dial reset.
 - **analytics-reports**: `GET /healthz` is static; the database ping before
   listening is retried the same way.
 

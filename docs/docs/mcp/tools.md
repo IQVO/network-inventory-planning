@@ -22,8 +22,9 @@ Every tool carries the `readOnlyHint: true` annotation.
 Inputs below are the JSON field names of the tool input schemas, checked
 against a live `tools/list` of `cmd/mcp` built from this branch. Required
 inputs are `transfer_id` (`get_transfer`) and `older_than_minutes`
-(`find_stuck_transfers`); every other field is optional, and every input
-schema sets `additionalProperties: false`. Each tool is annotated
+(`find_stuck_transfers`); every other field is optional (its json tag carries
+`omitempty`, which the fitness test `TestMCPOptionalToolInputsCarryOmitempty`
+enforces), and every input schema sets `additionalProperties: false`. Each tool is annotated
 `readOnlyHint: true`, `idempotentHint: false`, and publishes an output schema.
 
 | Tool | Read-only | Inputs | Output |

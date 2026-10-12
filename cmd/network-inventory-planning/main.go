@@ -65,7 +65,26 @@ func main() {
 	}
 }
 
+// logLevel maps LOG_LEVEL onto a slog level: debug, info, warn or warning
+// (case-insensitive), error; anything else is info.
+func logLevel(raw string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 func run() error {
+	// LOG_LEVEL sets the default logger's level (debug, info, warn/warning,
+	// error), like the fleet's other binaries; the handler stays the
+	// default one.
+	slog.SetLogLoggerLevel(logLevel(os.Getenv("LOG_LEVEL")))
 	logger := slog.Default()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
