@@ -115,9 +115,28 @@ erDiagram
     text fail_closed_reason "nullable"
     timestamptz created_at
   }
+  rebalance_policies {
+    text site_id PK
+    text sku PK
+    text policy_version
+    integer safety_stock "CHECK >= 0"
+    integer target_stock "CHECK >= safety_stock"
+    integer unit_priority "CHECK >= 0"
+    bigint revision "optimistic-concurrency token"
+    timestamptz updated_at
+  }
+  transfer_lanes {
+    text origin_site_id PK
+    text destination_site_id PK "CHECK <> origin"
+    bigint lead_time_ns "CHECK >= 0"
+    integer unit_handling_cost "CHECK >= 0"
+    boolean enabled
+    bigint revision "optimistic-concurrency token"
+    timestamptz updated_at
+  }
 ```
 
-Source: `internal/adapters/outbound/postgres/migrations/0001_planning_read_models.up.sql`, `0002_transfer_saga_and_outbox.up.sql`, `0003_work_demand_release.up.sql`, `0004_rebalance_runs.up.sql`
+Source: `internal/adapters/outbound/postgres/migrations/0001_planning_read_models.up.sql`, `0002_transfer_saga_and_outbox.up.sql`, `0003_work_demand_release.up.sql`, `0004_rebalance_runs.up.sql`, `0005_rebalance_catalogue.up.sql`
 
 Only `transfer_audit` has a foreign key. The read models mirror sibling facts
 and do not reference one another, `processed_events` is a guard keyed by

@@ -1,0 +1,80 @@
+---
+id: put-rebalance-policy
+title: "Create or revise one Rebalance Policy (idempotent)."
+description: "Upserts the Policy in the body, keyed by its Site + SKU. Idempotent:"
+sidebar_label: "Create or revise one Rebalance Policy (idempotent)."
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: "put api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Create or revise one Rebalance Policy (idempotent)."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"put"}
+  path={"/v1/rebalance-policies"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Upserts the Policy in the body, keyed by its Site + SKU. Idempotent:
+a PUT carrying exactly the stored policy writes nothing and answers
+200 with outcome UNCHANGED. A changed policy bumps the revision
+(outcome UPDATED); a new one is created at revision 1 (201,
+outcome CREATED). Optimistic concurrency: send the entry's ETag in
+If-Match to update only that revision (412 when it moved on);
+without If-Match the PUT applies to the current revision. Two
+writers racing on the same revision: one wins, the other gets 409.
+422 for an entry refused on its face (missing key, negative
+quantity, TargetStock below SafetyStock).
+
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./put-rebalance-policy.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./put-rebalance-policy.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./put-rebalance-policy.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

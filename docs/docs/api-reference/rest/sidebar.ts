@@ -86,6 +86,30 @@ const sidebar: SidebarsConfig = {
           label: "List scheduled rebalance runs, newest first.",
           className: "api-method get",
         },
+        {
+          type: "doc",
+          id: "api-reference/rest/list-rebalance-policies",
+          label: "List the Rebalance Policy catalogue.",
+          className: "api-method get",
+        },
+        {
+          type: "doc",
+          id: "api-reference/rest/put-rebalance-policy",
+          label: "Create or revise one Rebalance Policy (idempotent).",
+          className: "api-method put",
+        },
+        {
+          type: "doc",
+          id: "api-reference/rest/list-transfer-lanes",
+          label: "List the Transfer Lane catalogue.",
+          className: "api-method get",
+        },
+        {
+          type: "doc",
+          id: "api-reference/rest/put-transfer-lane",
+          label: "Create or revise one Transfer Lane (idempotent).",
+          className: "api-method put",
+        },
       ],
     },
     {

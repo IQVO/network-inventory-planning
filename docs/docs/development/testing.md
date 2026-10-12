@@ -12,7 +12,7 @@ description: The test pyramid of network-inventory-planning as it exists in the 
 | Level | Where | How many | Runs with | Needs |
 | --- | --- | --- | --- | --- |
 | Unit | `internal/domain/**`, `internal/application/**`, `internal/analytics/report`, adapters with fakes, `cmd/*/main_test.go` | 240 `func Test...` across the module (unit, integration and fitness together) | `make test` | nothing |
-| HTTP adapter (httptest) | `internal/adapters/inbound/http/*_test.go` | handler, approve, simulate, transfers read, rebalance runs, reports, OTel metric and OpenAPI-contract tests | `make test` | nothing |
+| HTTP adapter (httptest) | `internal/adapters/inbound/http/*_test.go` | handler, approve, simulate, transfers read, rebalance runs, policy/lane catalogues, reports, OTel metric and OpenAPI-contract tests | `make test` | nothing |
 | BDD acceptance (godog/Gherkin, ADR 0011) | `features/*.feature`, steps in `features_test.go`, `features_saga_test.go`, `features_facts_test.go`, `features_reports_test.go` | **8 feature files, 107 `Scenario`/`Scenario Outline` blocks, 188 executed scenarios, 1361 steps** | `make bdd` (also part of `make test`) | nothing (in-memory world) |
 | Integration (testcontainers) | files tagged `//go:build integration` | 8 files | `make integration` | Docker |
 | Architecture fitness | `internal/architecture` | 10 tests | `make arch-test` | nothing |
@@ -32,6 +32,7 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | `features/transfer_lifecycle.feature` | 13 | allocation, rejection, pick, dispatch, arrival, stow |
 | `features/transfer_queries.feature` | 12 | `GET /v1/transfers` filters, paging, 400/404/503 |
 | `features/simulation.feature` | 11 | fail-closed simulation |
+| `features/rebalance_catalogue.feature` | 11 | policy and lane catalogues (idempotent PUT, `If-Match`, 422/503) and the scheduled run proposing from them (ADR 0015) |
 | `features/rebalance_runs.feature` | 10 | run history and its `limit` |
 | `features/health.feature` | 2 | `/healthz` |
 
@@ -42,6 +43,7 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | `internal/adapters/outbound/postgres/transfer_query_integration_test.go` | the query side (filters, ordering, audit) | `postgres:16-alpine` |
 | `internal/adapters/outbound/postgres/transfer_repo_rejection_integration_test.go` | the rejection path persists | Postgres |
 | `internal/adapters/outbound/postgres/postgres_integration/rebalance_integration_test.go` | `rebalance_runs` repository | Postgres |
+| `internal/adapters/outbound/postgres/postgres_integration/catalogue_integration_test.go` | migration 0005; catalogue create, idempotent replay, `If-Match`, ordered listing; two concurrent writers on one revision: exactly one wins (ADR 0015) | Postgres |
 | `internal/adapters/outbound/postgres/postgres_integration/site_sku_demand_ordering_integration_test.go` | an older demand fact (ACTIVE or REMOVED) never overwrites newer demand (ADR 0014) | Postgres |
 | `internal/adapters/outbound/analyticsstore/postgres_integration_test.go` | analytical projection and report queries | `postgres:16-alpine` |
 | `internal/adapters/inbound/kafka/kafka_integration/planning_read_models_integration_test.go` | the three read-model consumers end to end | `confluentinc/confluent-local:7.6.1` + Postgres |

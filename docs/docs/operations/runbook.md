@@ -144,7 +144,7 @@ Both run inside every API replica, only when an outbox publisher exists.
 | Ticker | Variable | Default | What a tick does |
 | --- | --- | --- | --- |
 | Saga health check | `NIP_HEALTH_CHECK_INTERVAL`, `NIP_STUCK_THRESHOLDS` | every 5m; `ALLOCATING` 1h, `PICKED` 24h, `IN_TRANSIT` 72h, others 24h | Reads up to 500 non-terminal transfers and writes one `TransferStuckDetected` outbox row per transfer older than its state's threshold. It never changes a transfer. |
-| Scheduled rebalance | `NIP_REBALANCE_SCHEDULE` | off | Builds the fail-closed snapshot, runs the planner, inserts a `rebalance_runs` row (`COMPLETED` or `FAILED` with `fail_closed_reason`) and writes a `RebalanceRunCompleted` row. It never approves anything. In this version the planner is fed no positions, policies or lanes, so every completed run records `proposal_count = 0`. |
+| Scheduled rebalance | `NIP_REBALANCE_SCHEDULE` | off | Builds the fail-closed snapshot, runs the planner, inserts a `rebalance_runs` row (`COMPLETED` or `FAILED` with `fail_closed_reason`) and writes a `RebalanceRunCompleted` row. It never approves anything. It plans from the Rebalance Policy and Transfer Lane catalogues (ADR 0015): with both empty every completed run records `proposal_count = 0`; fill them with `PUT /v1/rebalance-policies` and `PUT /v1/transfer-lanes`. An unreadable catalogue is a `FAILED` run (`load rebalance catalogue: …`). |
 
 There is no sweeper: `processed_events`, `outbox_events` (published rows),
 `transfer_audit` and `rebalance_runs` grow without bound. Pruning them is a

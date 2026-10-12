@@ -1,0 +1,65 @@
+---
+id: list-rebalance-policies
+title: "List the Rebalance Policy catalogue."
+description: "The operator-managed Rebalance Policy catalogue (ADR 0015), one entry"
+sidebar_label: "List the Rebalance Policy catalogue."
+hide_title: true
+hide_table_of_contents: true
+api: eJztVktz2zYQ/is7ONkT6tU2TYadHjy2knqcxKolpQfLB4hciYhBAAGWcjga/ffOgtQjkeJkpteeRAH7+Pb1YdfCOvSSlDXXuUiFVoHucC61NBmOrFaZwiASQXIZRHov/PZOPCQix5B55VhZpGJSIDTGrO+U0sgl5rCzBdFYDZkkqe2yQji7uLqDfn/w8jwBaxDQkK9nxqGHoAjhBYxvpglYn6PHHOZ1c0wFGr7pwlBmRaMFWM4xD3wH44v3w5lpvYVCOoTR7XgCvdWgR16asEDfcd46G6QO6RINQ0aQWYaOQgJOVwEUhZnxuFJBWQNnFGMjVapAKutk1mSV92iyGsg+ojnvAocfsgLzSmMOuzzNjJMhgNPSBFh4WwIVKuzT0J0ZkQiPwVkTMIh0LX7p9/nn6+wOV+hrcE1YysRQ90ZEIjJrCA2xpnROqywWtfcpsPpaMLRS8hfVDkUq7PwTZhR9f66Ux5zL67YVf0gE5wg9qQbU7mZvQXova5EIRViGn7Jcx8MmqSIRlcslYX5B33FX/8joR/StqbEi5J+b6bGtrdTeWCCvzFJsWr2ji0SUyrxDs6RCpINvG/2NzJRWVHe0rG1FwDYgszmCytGQWtTKLGNLP0mPha1CLBAp0uyDxa+vovOb6Y9979RuplFHLpDqMdns8UBXGcIl+kZZlVUp0v4mERPpl0g/KTw1ikZeWa+oPiG92eyxNNPFcHbVPGV+YX0pqTn6/bdDf0c5vX1muOBM6mBjxw8ncnn+BwzAGsg8xhZP4MUAmDWyQpoldhnWvrNO5HcHi2U6pEpkFVtRZsuTzYCGMd+Ly7vhxWR4JRIxHV1tvz5c/nXx4e3w6pgQ/ykkgTxgvNF0ArnK4WynBH9yz5TO8uiCR6dlnYCxVHALPXlFxORy0D2XW2u3Ld7DunzN3PWQuVFsnpF4pwKxwCYRL/u/HrPO3ZtLePW6/wqct3ON5QumE0DvrX+Gcw6Ff5574t0WaSICSapOEFFj4rhIXwMfk5xrhFJmhTLY8SjzeNBC206qQh/7pU3PCYJoYZyYB3ZJUukTaoej0jiMSd4kokQqLD+0S+T4neQpF/w27V6Mjts/uwH9Cj2/vGtReS1SURC5tNfTNpO6sIHS1/3X/aPw3/E15LhCbV3JJdo8JEKZhY1oW2wfkJ6sf4Rrs0JD1tcw0tIYbr2L0bVIxGrLnGLQ7Xf7bcVlFituJE+L2HFcJ9QhvgTJAdSQ9npLRUU172a27F3//fG2Zxq3HbV123Gt2yaph4Fc5CsVGFmrBDslaNLFYBfWR3Y4ggILjUjdmZmZZ2J13nI7BghqrpVZdmJbfyFYSD49i2tHJp2cR9pPZoZPOuObKeRYSpMn4Kq5VqHAPMpliupzUIYsxDoBtx+UNkcdQJocmvUDw8xwN/nODjhsN5TQhWsCgyv0UFYkCQO4og6KzQUm9BSkc96upE54U+FOidPXONiK4hfMqnis1QrbxUF5sE8x9DbSwFvIJhHOBiqlOaguE0TM7fcXue633bfe88L/S+F/WApbUuEC9ZyWKpYojta6JY57sRpEFj2ijodEMDuwyHo9lwGnXm82fPy5Ql+L9P4hESvpFbMi/9skokCZo49c84g1D1+MnnlA6ipufN8ulswqO0p7O5yIzeZf0QlOpQ==
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"List the Rebalance Policy catalogue."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/v1/rebalance-policies"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+The operator-managed Rebalance Policy catalogue (ADR 0015), one entry
+per site + SKU, ordered by site then SKU. Each entry embeds the SAME
+Policy shape POST /v1/transfer-proposals:generate accepts, plus its
+revision (the optimistic-concurrency token). The scheduled rebalance
+pass plans from this catalogue.
+
+
+<ParamsDetails>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./list-rebalance-policies.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./list-rebalance-policies.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

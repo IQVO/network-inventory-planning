@@ -1,0 +1,76 @@
+---
+id: put-transfer-lane
+title: "Create or revise one Transfer Lane (idempotent)."
+description: "Upserts the Lane in the body, keyed by its Origin → Destination"
+sidebar_label: "Create or revise one Transfer Lane (idempotent)."
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: "put api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Create or revise one Transfer Lane (idempotent)."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"put"}
+  path={"/v1/transfer-lanes"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Upserts the Lane in the body, keyed by its Origin → Destination
+(directed: WH1→WH2 and WH2→WH1 are two lanes). Same idempotency,
+If-Match, 409 and 422 rules as PUT /v1/rebalance-policies; a lane
+whose Origin equals its Destination, or with a negative LeadTime or
+UnitHandlingCost, is a 422. Disable a lane with Enabled: false
+(there is no DELETE).
+
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./put-transfer-lane.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./put-transfer-lane.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./put-transfer-lane.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

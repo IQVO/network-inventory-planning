@@ -26,8 +26,13 @@ type RunScheduledRebalance struct {
 	// Snapshot loads the three read models.
 	Snapshot ports.PlanningSnapshotRepository
 	// Planner is the same deterministic planner the generate endpoint
-	// uses.
+	// uses; the scheduled pass calls its PlanFromSnapshot (ADR 0015).
 	Planner transfer.Planner
+	// Policies and Lanes are the operator-managed Rebalance Policy and
+	// Transfer Lane catalogues (ADR 0015) the pass plans from. Nil means
+	// an empty catalogue (the pass then has nothing to propose).
+	Policies ports.RebalancePolicyRepository
+	Lanes    ports.TransferLaneRepository
 	// Runs persists the rebalance_runs row.
 	Runs ports.RebalanceRunRepository
 	// Events publishes the RebalanceRunCompleted occurrence.
@@ -85,20 +90,24 @@ func (u RunScheduledRebalance) Execute(ctx context.Context) (int64, error) {
 		return id, nil
 	}
 
-	proposals := u.Planner.Generate(
-		snapshotPositions(snap),
-		nil, // policies: none projected in v1; the planner proposes from
-		// positions+lanes only when policies exist, so an empty policy
-		// set yields zero proposals without error — recorded as a
-		// completed run that had nothing to propose.
-		nil, // lanes: none projected in v1.
-	)
+	policies, lanes, err := u.loadCatalogue(ctx)
+	if err != nil {
+		// An unreadable catalogue is a FAILED run, never a silent
+		// zero-proposal COMPLETED one.
+		return u.recordFailed(ctx, transfer.RebalanceRun{
+			StartedAt:        startedAt,
+			SnapshotAsOf:     snap.AsOf,
+			Outcome:          transfer.RebalanceFailed,
+			FailClosedReason: strPtr(fmt.Sprintf("load rebalance catalogue: %v", err)),
+		}, err)
+	}
+	proposals, rejected := u.Planner.PlanFromSnapshot(snap, policies, lanes)
 
 	run := transfer.RebalanceRun{
 		StartedAt:     startedAt,
 		SnapshotAsOf:  snap.AsOf,
 		ProposalCount: len(proposals),
-		RejectedCount: 0,
+		RejectedCount: rejected,
 		Outcome:       transfer.RebalanceCompleted,
 	}
 	id, err := u.Runs.Record(ctx, run)
@@ -110,7 +119,7 @@ func (u RunScheduledRebalance) Execute(ctx context.Context) (int64, error) {
 	evt := transfer.RebalanceRunCompleted{
 		RunID:         u.runID(id, startedAt),
 		ProposalCount: len(proposals),
-		RejectedCount: 0,
+		RejectedCount: rejected,
 		StaleFacts:    0,
 		CompletedAt:   completedAt,
 	}
@@ -132,13 +141,42 @@ func (u RunScheduledRebalance) runID(id int64, startedAt time.Time) string {
 	return fmt.Sprintf("rebal-%d-%s", id, startedAt.UTC().Format("20060102T150405Z"))
 }
 
-// snapshotPositions projects the fail-closed snapshot into planner
-// Positions. v1 records them empty: the planner's lane/policy inputs are
-// not projected read models yet (a later phase wires the lane catalogue);
-// the pass still exercises the SAME snapshot build + planner pipeline so
-// the run history tracks snapshot health from day one.
-func snapshotPositions(snap planning.PlanningSnapshot) []transfer.Position {
-	return nil
+// loadCatalogue reads both catalogues as planner inputs. A nil
+// repository is an empty catalogue.
+func (u RunScheduledRebalance) loadCatalogue(ctx context.Context) ([]transfer.Policy, []transfer.Lane, error) {
+	var (
+		policies []transfer.Policy
+		lanes    []transfer.Lane
+	)
+	if u.Policies != nil {
+		entries, err := u.Policies.List(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("policies: %w", err)
+		}
+		for _, e := range entries {
+			policies = append(policies, e.Policy)
+		}
+	}
+	if u.Lanes != nil {
+		entries, err := u.Lanes.List(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("lanes: %w", err)
+		}
+		for _, e := range entries {
+			lanes = append(lanes, e.Lane)
+		}
+	}
+	return policies, lanes, nil
+}
+
+// recordFailed persists a FAILED run; cause is only reported when the
+// row itself cannot be written.
+func (u RunScheduledRebalance) recordFailed(ctx context.Context, run transfer.RebalanceRun, cause error) (int64, error) {
+	id, err := u.Runs.Record(ctx, run)
+	if err != nil {
+		return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (cause: %v)", err, cause)
+	}
+	return id, nil
 }
 
 // strPtr is a tiny helper for the nullable fail_closed_reason.

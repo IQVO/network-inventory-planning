@@ -37,7 +37,9 @@ description: Symptom, cause, check and fix for the failure modes visible in the 
 | Analytics DLQ grows | A saga-health event with an unusable payload, or one the projection rejects. | Message headers `x-dlq-error`, `x-dlq-source-topic`. | Fix the producer or projection, then re-produce the message. |
 | Reports are stale | Projector down, lagging or blocked on a transient database error. | `GET /reports/freshness` `lag_seconds`; projector `/readyz`; consumer lag of `network-inventory-planning-analytics`. | Restore the analytical database; the projector resumes from its committed offset. |
 | Funnel report misses a state | The relay is off, or the analytics projector lags. Every transition (approval trail, `ALLOCATED`, `PICKED`, `IN_TRANSIT`, `ARRIVED`, `RECEIVED`, `UNFULFILLABLE`) writes one `TransferStateAdvanced` outbox row in the transition's transaction. | `SELECT event_type, count(*) FROM outbox_events WHERE event_type LIKE '%TransferStateAdvanced' AND published_at IS NULL GROUP BY 1;` then `SELECT to_state, count(*) FROM transfer_state_advances GROUP BY 1;` | Enable the relay; check projector lag. |
-| `GET /v1/rebalance-runs` is empty | `NIP_REBALANCE_SCHEDULE` is unset (the default) or there is no outbox. | Boot log `scheduled rebalance disabled`. | Set the schedule. Completed runs record zero proposals in this version (the planner gets no policies or lanes). |
+| `GET /v1/rebalance-runs` is empty | `NIP_REBALANCE_SCHEDULE` is unset (the default) or there is no outbox. | Boot log `scheduled rebalance disabled`. | Set the schedule. |
+| Scheduled runs are `COMPLETED` but `proposalCount` is always 0 | The catalogues are empty, no lane is `Enabled`, an origin has no policy for the SKU, the destination's in-window demand is 0, or the origin's headroom minus its safety stock is ≤ 0 (ADR 0015). | `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes`, `GET /v1/transfer-simulations` (`capacityHeadroom`, `totalDemand`). A positive `rejectedCount` means candidates cost more than their priority benefit. | Add the policies at BOTH ends of a lane and enable the lane; raise the destination's `UnitPriority` or lower the lane's `UnitHandlingCost`. |
+| A catalogue PUT answers 412 `version-mismatch` | The `If-Match` revision is not the entry's current one (someone else changed it), or the entry does not exist yet. | `GET` the catalogue and read the entry's `revision`. | Re-apply the change with the current revision, or omit `If-Match` for a last-writer-wins PUT. |
 | `TransferStuckDetected` repeats for the same transfer | Expected: every tick re-reports every transfer still over its threshold, and every API replica runs its own ticker. | — | Deduplicate downstream by `transfer_id`. |
 | Health check never fires | `NIP_HEALTH_CHECK_INTERVAL=0`, an invalid `NIP_STUCK_THRESHOLDS`, or no outbox. | Boot log `saga health check disabled` / `invalid stuck thresholds`. | Fix the value; an unknown state name disables the whole check. |
 | MCP tool returns `read-side-unavailable` | `cmd/mcp` runs without `DATABASE_URL`. | MCP boot log. | Configure the database. |
@@ -54,7 +56,7 @@ Every REST error is `application/problem+json` with
 
 | Slug | Status | Route(s) |
 | --- | --- | --- |
-| `invalid-request` | 400 | `POST /v1/transfer-proposals:generate`, `POST /v1/transfers:approve` (malformed JSON or unknown field) |
+| `invalid-request` | 400 | `POST /v1/transfer-proposals:generate`, `POST /v1/transfers:approve`, catalogue PUTs (malformed JSON or unknown field) |
 | `invalid-planning-snapshot` | 422 | generate (missing `asOf`, mixed position snapshot) |
 | `read-models-unavailable` | 503 | `GET /v1/transfer-simulations` |
 | `read-models-incomplete` | 503 | `GET /v1/transfer-simulations` |
@@ -68,6 +70,11 @@ Every REST error is `application/problem+json` with
 | `approval-unavailable` | 503 | approve |
 | `rebalance-runs-unavailable` | 503 | `GET /v1/rebalance-runs` |
 | `invalid-limit` | 400 | `GET /v1/rebalance-runs` (`limit` outside 1–200) |
+| `catalogue-unavailable` | 503 | `GET`/`PUT /v1/rebalance-policies`, `GET`/`PUT /v1/transfer-lanes` (no database, or the store failed) |
+| `invalid-if-match` | 400 | catalogue PUT (`If-Match` is not a revision) |
+| `invalid-catalogue-entry` | 422 | catalogue PUT (missing key, negative value, `TargetStock` below `SafetyStock`, lane to itself) |
+| `version-mismatch` | 412 | catalogue PUT (`If-Match` is not the current revision) |
+| `concurrent-modification` | 409 | catalogue PUT (lost a write race on the same revision) |
 | `read-side-unavailable` | 503 | `GET /v1/transfers`, `GET /v1/transfers/{id}` |
 | `invalid-query` | 400 | `GET /v1/transfers` (unknown state, bad `limit`/`offset`) |
 | `transfer-not-found` | 404 | `GET /v1/transfers/{id}` |

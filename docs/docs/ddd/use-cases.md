@@ -45,13 +45,21 @@ calls it** today.
 | `ListTransfers` | `GET /v1/transfers`; MCP `list_transfers` | `state`, `originSiteId`, `destinationSiteId` (REST) or `site` (MCP), `limit`, `offset` | state in the 11-state vocabulary (case-insensitive); `0 ≤ limit ≤ 200` (0 → 50; REST rejects an explicit `limit=0`); `offset ≥ 0` | none |
 | `FindStuckTransfers` | MCP `find_stuck_transfers` | `older_than_minutes`, `state`, `limit` | threshold positive; state must be non-terminal; ordered stalest first | none |
 | `ListRebalanceRuns` | `GET /v1/rebalance-runs` | `limit` | clamped to 1–200, default 50 (REST rejects out-of-range values with 400) | none |
+| `ListRebalancePolicies` / `ListTransferLanes` | `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes` | none | ordered by key | none |
+
+## Catalogue management (ADR 0015)
+
+| Use case | Trigger | Inputs | Invariants checked | Events raised |
+| --- | --- | --- | --- | --- |
+| `PutRebalancePolicy` | `PUT /v1/rebalance-policies` | `Policy` body, optional `If-Match` revision | `Policy.Validate` (key present, no negative value, `TargetStock ≥ SafetyStock`); `If-Match` equals the stored revision; the key never changes; an identical PUT writes nothing; the write is guarded by the revision read | none (the catalogue is NIP-internal) |
+| `PutTransferLane` | `PUT /v1/transfer-lanes` | `Lane` body, optional `If-Match` revision | `Lane.Validate` (both sites, origin ≠ destination, no negative lead time or cost); same revision rules | none |
 
 ## Scheduled (observe-only, ADR 0007)
 
 | Use case | Trigger | Inputs | Invariants checked | Events raised |
 | --- | --- | --- | --- | --- |
 | `CheckStuckTransfers` | `PeriodicRunner` every `NIP_HEALTH_CHECK_INTERVAL` (default 5m) | up to 500 non-terminal transfers (id, state, `updated_at`) | age in state > the state's threshold (`NIP_STUCK_THRESHOLDS`); never mutates a transfer | outbox: one `TransferStuckDetected` per stuck transfer, every tick |
-| `RunScheduledRebalance` | `PeriodicRunner` every `NIP_REBALANCE_SCHEDULE` (off by default) | the three read models | same fail-closed snapshot as the simulation; a refusal is recorded as a `FAILED` run, not an error; never approves or allocates | `rebalance_runs` row; outbox: `RebalanceRunCompleted` (`run_id = rebal-<id>-<startedAt>`) after a completed run |
+| `RunScheduledRebalance` | `PeriodicRunner` every `NIP_REBALANCE_SCHEDULE` (off by default) | the three read models, the policy and lane catalogues | same fail-closed snapshot as the simulation; plans with `Planner.PlanFromSnapshot` (a lane only when enabled and both ends are capable; need ≤ target; donor keeps safety stock; ADR 0015); a refusal or an unreadable catalogue is recorded as a `FAILED` run, not an error; never approves or allocates | `rebalance_runs` row; outbox: `RebalanceRunCompleted` (`run_id = rebal-<id>-<startedAt>`) after a completed run |
 
 `PeriodicRunner` (`periodic.go`) is the ticker loop both run in: it logs a
 failed tick and keeps going.

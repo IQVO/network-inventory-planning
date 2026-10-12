@@ -25,6 +25,10 @@ Source: `internal/adapters/inbound/http/handler.go` (`Handler.Routes`).
 | `GET` | `/v1/transfers` | list transfers, newest first; `state`, `originSiteId`, `destinationSiteId`, `limit` (1–200, default 50), `offset` | `DATABASE_URL` |
 | `GET` | `/v1/transfers/{id}` | one transfer with its audit trail | `DATABASE_URL` |
 | `GET` | `/v1/rebalance-runs` | scheduled-rebalance history, newest first; `limit` 1–200, default 50 | `DATABASE_URL` |
+| `GET` | `/v1/rebalance-policies` | the Rebalance Policy catalogue (`{policies:[{policy, revision, updatedAt}]}`) | `DATABASE_URL` |
+| `PUT` | `/v1/rebalance-policies` | idempotent upsert of one `Policy` (keyed by `Site` + `SKU`); optional `If-Match` revision; `ETag` on the response; 201/200/400/409/412/422/503 (ADR 0015) | `DATABASE_URL` |
+| `GET` | `/v1/transfer-lanes` | the Transfer Lane catalogue (`{lanes:[{lane, revision, updatedAt}]}`) | `DATABASE_URL` |
+| `PUT` | `/v1/transfer-lanes` | idempotent upsert of one directed `Lane` (keyed by `Origin` → `Destination`); same rules | `DATABASE_URL` |
 
 The two colon routes (`/v1/transfer-proposals:generate`,
 `/v1/transfers:approve`) are Google-style custom methods; they are in the
