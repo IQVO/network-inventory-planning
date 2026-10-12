@@ -11,7 +11,7 @@ description: Deploying and operating network-inventory-planning - Deployments, p
 
 The service ships as one Helm chart, `charts/network-inventory-planning`
 (chart name `network-inventory-planning`), and one image,
-`claudioed/network-inventory-planning` (all four binaries in `/app`). Edge
+`ghcr.io/iqvo/network-inventory-planning` (all four binaries in `/app`). Edge
 routing is owned by warehouse-infra: Kong `:8000` serves the REST API under
 `/api/network-inventory-planning` through the chart's disabled-by-default
 `gatewayApi` / `ingress` values; the Nginx web gateway `:80` serves the console
