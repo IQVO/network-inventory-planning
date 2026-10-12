@@ -137,6 +137,10 @@ What the columns do not show:
   `rebalance_runs_started_at_idx (started_at DESC)`.
 - `outbox_events.topic` is per row, so one approval writes rows for both the
   integration and the analytics topic.
+- `site_sku_demand.as_of` is the applied event's CloudEvents `time` and is
+  also the row's ordering watermark: the upsert only writes when the incoming
+  event is not older (ADR 0014). `site_capability` orders on
+  `capability_revision`, `published_capacity_plan` on `published_at`.
 
 ## Analytical database
 

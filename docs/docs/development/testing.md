@@ -42,6 +42,7 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | `internal/adapters/outbound/postgres/transfer_query_integration_test.go` | the query side (filters, ordering, audit) | `postgres:16-alpine` |
 | `internal/adapters/outbound/postgres/transfer_repo_rejection_integration_test.go` | the rejection path persists | Postgres |
 | `internal/adapters/outbound/postgres/postgres_integration/rebalance_integration_test.go` | `rebalance_runs` repository | Postgres |
+| `internal/adapters/outbound/postgres/postgres_integration/site_sku_demand_ordering_integration_test.go` | an older demand fact (ACTIVE or REMOVED) never overwrites newer demand (ADR 0014) | Postgres |
 | `internal/adapters/outbound/analyticsstore/postgres_integration_test.go` | analytical projection and report queries | `postgres:16-alpine` |
 | `internal/adapters/inbound/kafka/kafka_integration/planning_read_models_integration_test.go` | the three read-model consumers end to end | `confluentinc/confluent-local:7.6.1` + Postgres |
 | `internal/adapters/inbound/kafka/kafka_integration/transfer_saga_integration_test.go` | approval → outbox → relay → replies and facts → `RECEIVED` | Kafka + Postgres |

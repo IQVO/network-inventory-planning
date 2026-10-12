@@ -107,6 +107,7 @@ The API logs with Go's default `slog` logger (text to stderr). `mcp`,
 | `scheduled rebalance running` / `disabled` | INFO / WARN / ERROR | `interval`, `enable_with` | Ticker state at boot. |
 | `<consumer> handling failed; retrying the same message` | ERROR | `error`, `partition`, `offset`, `attempt`, `retry_in` | A transient failure blocking a partition. |
 | `skipping ...` (for example `skipping deterministic allocation-reply failure`) | WARN | `error`, `event_id`, `transfer_id` | A message committed past without effect. |
+| `skipping SiteSkuDemandChanged older than the stored demand` | INFO | `event_id`, `source_order_id`, `line_no`, `occurred_at` | An older demand fact was a no-op (ADR 0014). |
 | `analytics: dead-lettering a message that can never be projected` | ERROR | `error`, `dlq_topic`, `partition`, `offset` | Projector DLQ write. |
 | `transfer-reply-consumer: dead-lettering a message that can never be applied` / `transfer-fact-consumer: ...` | ERROR | `error`, `dlq_topic`, `source_topic`, `partition`, `offset` | A poison reply or fact written to `<topic>.dlq` and committed past (ADR 0013). |
 | `analytics: skipping message that is not a CloudEvents 1.0 event` | WARN | `topic`, `partition`, `offset`, `suppressed_since_last_warning` | Sampled once per minute. |

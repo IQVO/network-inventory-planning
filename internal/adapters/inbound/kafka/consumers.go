@@ -239,8 +239,15 @@ func (c *SiteSkuDemandConsumer) HandleMessage(ctx context.Context, value []byte)
 			c.Logger.InfoContext(ctx, "skipping already-processed SiteSkuDemandChanged event", "event_id", e.ID())
 			return nil
 		}
-		if _, err := c.Demands.Upsert(ctx, demand); err != nil {
+		applied, err := c.Demands.Upsert(ctx, demand)
+		if err != nil {
 			return fmt.Errorf("upsert site sku demand: %w", err)
+		}
+		if !applied {
+			// ADR 0014: an event older than the stored row is a stale
+			// redelivery; the claim commits, the newer demand stays.
+			c.Logger.InfoContext(ctx, "skipping SiteSkuDemandChanged older than the stored demand",
+				"event_id", e.ID(), "source_order_id", demand.SourceOrderID, "line_no", demand.LineNo, "occurred_at", occurredAt)
 		}
 		return nil
 	})

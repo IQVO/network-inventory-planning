@@ -26,6 +26,7 @@ the `Status:` line of each ADR body.
 | [0011](./0011-godog-bdd-acceptance-tests.md) | godog/Gherkin acceptance tests as executable specification | Accepted |
 | [0012](./0012-otlp-telemetry-export.md) | OTLP trace and metric export for the API process | Accepted |
 | [0013](./0013-poison-replies-dead-lettered.md) | Poison transfer replies and facts are dead-lettered, never retried | Accepted |
+| [0014](./0014-site-sku-demand-ordering-guard.md) | Ordering guard on the site_sku_demand read model | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -44,3 +45,4 @@ the `Status:` line of each ADR body.
 | 0011 | `features/*.feature`, `features_*_test.go` |
 | 0012 | `internal/adapters/outbound/telemetry`, `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | 0013 | `transfer.ErrReplyRefused`, `usecases.IsRefusedReply`, `internal/adapters/inbound/kafka/deadletter.go`, `warehouse.inventory.events.dlq`, `warehouse.fulfillment.events.dlq` |
+| 0014 | `SiteSkuDemandRepo.Upsert` (`WHERE EXCLUDED.as_of >= site_sku_demand.as_of`), the demand consumer's stale-event INFO line |
