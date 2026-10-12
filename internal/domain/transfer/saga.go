@@ -80,6 +80,23 @@ var ErrTransferNotFound = errors.New("transfer: not found")
 // retry — the same payload always refuses the same way.
 var ErrFactRefused = errors.New("transfer: fact refused")
 
+// ErrReplyRefused marks an inventory-storage allocation reply
+// (TransferStockAllocated / TransferStockAllocationRejected) whose payload
+// fails the aggregate's consistency checks. Deterministic: the same bytes
+// always refuse the same way, so the reply consumer dead-letters the
+// message and commits past it instead of retrying it forever on its
+// partition (ADR 0013).
+var ErrReplyRefused = errors.New("transfer: allocation reply refused")
+
+// ErrReplyLineMismatch marks a reply addressed to a transfer line other
+// than this transfer's single line ("<transfer_id>:1"). It wraps
+// ErrReplyRefused.
+var ErrReplyLineMismatch = fmt.Errorf("%w: line id mismatch", ErrReplyRefused)
+
+// ErrUnknownRejectionReason marks a rejection reply whose reason is outside
+// inventory-storage's closed vocabulary. It wraps ErrReplyRefused.
+var ErrUnknownRejectionReason = fmt.Errorf("%w: unknown rejection reason", ErrReplyRefused)
+
 // ErrProposalExpired marks an approval attempted at or after expires_at.
 var ErrProposalExpired = errors.New("transfer: proposal expired")
 
@@ -329,10 +346,10 @@ func (t *InterWarehouseTransfer) MarkUnfulfillable(lineID string, reason Rejecti
 		return &IllegalTransitionError{ID: t.id, From: t.state, Action: "mark unfulfillable"}
 	}
 	if !reason.Valid() {
-		return fmt.Errorf("transfer %s: unknown allocation rejection reason %q", t.id, reason)
+		return fmt.Errorf("%w: transfer %s: reason %q", ErrUnknownRejectionReason, t.id, reason)
 	}
 	if lineID != t.id.LineID() {
-		return fmt.Errorf("transfer %s: rejection reply is for line %q, want %q", t.id, lineID, t.id.LineID())
+		return fmt.Errorf("%w: transfer %s: rejection reply is for line %q, want %q", ErrReplyLineMismatch, t.id, lineID, t.id.LineID())
 	}
 	t.rejectionReason = reason
 	t.transition(StateUnfulfillable, "TransferStockAllocationRejected", string(reason), now.UTC())
@@ -373,38 +390,38 @@ func (t *InterWarehouseTransfer) transition(to TransferState, event, reason stri
 // with a complete reservation.
 func (t *InterWarehouseTransfer) checkAllocationReply(a StockAllocation) error {
 	if a.TransferLineID != t.id.LineID() {
-		return fmt.Errorf("transfer %s: allocation reply is for line %q, want %q", t.id, a.TransferLineID, t.id.LineID())
+		return fmt.Errorf("%w: transfer %s: allocation reply is for line %q, want %q", ErrReplyLineMismatch, t.id, a.TransferLineID, t.id.LineID())
 	}
 	if a.OriginSiteID != t.originSiteID {
-		return fmt.Errorf("transfer %s: allocation reply origin %q, want %q", t.id, a.OriginSiteID, t.originSiteID)
+		return fmt.Errorf("%w: transfer %s: allocation reply origin %q, want %q", ErrReplyRefused, t.id, a.OriginSiteID, t.originSiteID)
 	}
 	if a.SKU != t.sku {
-		return fmt.Errorf("transfer %s: allocation reply sku %q, want %q", t.id, a.SKU, t.sku)
+		return fmt.Errorf("%w: transfer %s: allocation reply sku %q, want %q", ErrReplyRefused, t.id, a.SKU, t.sku)
 	}
 	if strings.TrimSpace(a.ReservationID) == "" {
-		return fmt.Errorf("transfer %s: allocation reply carries no reservation id", t.id)
+		return fmt.Errorf("%w: transfer %s: allocation reply carries no reservation id", ErrReplyRefused, t.id)
 	}
 	if len(a.Allocations) == 0 {
-		return fmt.Errorf("transfer %s: allocation reply carries no stock allocations", t.id)
+		return fmt.Errorf("%w: transfer %s: allocation reply carries no stock allocations", ErrReplyRefused, t.id)
 	}
 	total := 0
 	for _, alloc := range a.Allocations {
 		if strings.TrimSpace(alloc.StockUnitID) == "" {
-			return fmt.Errorf("transfer %s: allocation for reservation %s has no stock unit id", t.id, a.ReservationID)
+			return fmt.Errorf("%w: transfer %s: allocation for reservation %s has no stock unit id", ErrReplyRefused, t.id, a.ReservationID)
 		}
 		if strings.TrimSpace(alloc.BinID) == "" {
-			return fmt.Errorf("transfer %s: allocation for stock unit %s has no bin id", t.id, alloc.StockUnitID)
+			return fmt.Errorf("%w: transfer %s: allocation for stock unit %s has no bin id", ErrReplyRefused, t.id, alloc.StockUnitID)
 		}
 		if alloc.Quantity <= 0 {
-			return fmt.Errorf("transfer %s: allocation for stock unit %s must be positive, got %d", t.id, alloc.StockUnitID, alloc.Quantity)
+			return fmt.Errorf("%w: transfer %s: allocation for stock unit %s must be positive, got %d", ErrReplyRefused, t.id, alloc.StockUnitID, alloc.Quantity)
 		}
 		total += alloc.Quantity
 	}
 	if total != t.quantity {
-		return fmt.Errorf("transfer %s: allocation reply totals %d, want the requested %d", t.id, total, t.quantity)
+		return fmt.Errorf("%w: transfer %s: allocation reply totals %d, want the requested %d", ErrReplyRefused, t.id, total, t.quantity)
 	}
 	if a.ExpiresAt.IsZero() {
-		return fmt.Errorf("transfer %s: allocation reply carries no reservation expiry", t.id)
+		return fmt.Errorf("%w: transfer %s: allocation reply carries no reservation expiry", ErrReplyRefused, t.id)
 	}
 	return nil
 }

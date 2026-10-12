@@ -92,6 +92,7 @@ const sidebars: SidebarsConfig = {
         'adr/0010-console-remote-nip-mfe',
         'adr/0011-godog-bdd-acceptance-tests',
         'adr/0012-otlp-telemetry-export',
+        'adr/0013-poison-replies-dead-lettered',
       ],
     },
   ],

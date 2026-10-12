@@ -25,6 +25,7 @@ the `Status:` line of each ADR body.
 | [0010](./0010-console-remote-nip-mfe.md) | Console remote `nip_mfe` (Module Federation) | Accepted |
 | [0011](./0011-godog-bdd-acceptance-tests.md) | godog/Gherkin acceptance tests as executable specification | Accepted |
 | [0012](./0012-otlp-telemetry-export.md) | OTLP trace and metric export for the API process | Accepted |
+| [0013](./0013-poison-replies-dead-lettered.md) | Poison transfer replies and facts are dead-lettered, never retried | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -42,3 +43,4 @@ the `Status:` line of each ADR body.
 | 0010 | `web/` and the chart's `frontend` component |
 | 0011 | `features/*.feature`, `features_*_test.go` |
 | 0012 | `internal/adapters/outbound/telemetry`, `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| 0013 | `transfer.ErrReplyRefused`, `usecases.IsRefusedReply`, `internal/adapters/inbound/kafka/deadletter.go`, `warehouse.inventory.events.dlq`, `warehouse.fulfillment.events.dlq` |

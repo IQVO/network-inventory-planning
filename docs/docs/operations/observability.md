@@ -108,6 +108,7 @@ The API logs with Go's default `slog` logger (text to stderr). `mcp`,
 | `<consumer> handling failed; retrying the same message` | ERROR | `error`, `partition`, `offset`, `attempt`, `retry_in` | A transient failure blocking a partition. |
 | `skipping ...` (for example `skipping deterministic allocation-reply failure`) | WARN | `error`, `event_id`, `transfer_id` | A message committed past without effect. |
 | `analytics: dead-lettering a message that can never be projected` | ERROR | `error`, `dlq_topic`, `partition`, `offset` | Projector DLQ write. |
+| `transfer-reply-consumer: dead-lettering a message that can never be applied` / `transfer-fact-consumer: ...` | ERROR | `error`, `dlq_topic`, `source_topic`, `partition`, `offset` | A poison reply or fact written to `<topic>.dlq` and committed past (ADR 0013). |
 | `analytics: skipping message that is not a CloudEvents 1.0 event` | WARN | `topic`, `partition`, `offset`, `suppressed_since_last_warning` | Sampled once per minute. |
 | `retrying` / `succeeded after retry` | WARN / INFO | `op`, `attempt`, `in`, `err` | Boot retry of the analytics binaries. |
 | `mcp tool failed with an unexpected error` | ERROR | `error` | An untyped error behind an `internal-error` tool result. |
@@ -133,6 +134,7 @@ reports and MCP processes too, but only the API exports metrics today.
 | Outbox backlog | unpublished `outbox_events` older than 5 minutes | Relay off, broker down, or a head-of-line row failing. |
 | Consumer lag | lag of the five NIP groups and `network-inventory-planning-analytics` (Kafka exporter) | A transient error retries the same message forever. |
 | Analytics DLQ | any message on `warehouse.network-inventory-planning.analytics.dlq` | A poison saga-health event. |
+| Transfer DLQs | any message with `x-dlq-consumer` = `transfer-reply-consumer` / `transfer-fact-consumer` on `warehouse.inventory.events.dlq` / `warehouse.fulfillment.events.dlq`, or the ERROR log line above | A producer and NIP disagree about a transfer; that transfer will not advance on its own. |
 | Projection freshness | `lag_seconds` from `/reports/freshness` above 15 minutes | Projector down or lagging. |
 | Stuck transfers | new rows in `transfer_stuck_detections` (or `/reports/stuck-transfers`) | Allocation reply or a fulfillment fact never arrived. |
 | Rebalance failing closed | consecutive `FAILED` rows in `rebalance_runs` | Chronically stale read models. |

@@ -71,9 +71,15 @@ host). Every message is a CloudEvents 1.0 event in structured mode.
 | `warehouse.network-inventory-planning.events` | `transfer.TransferPlanApproved`, `transfer.TransferAllocationRequested`, `workdemand.WorkDemandReleased` | transfer id, `transfer_line_id`, `demand_id` | outbox relay in the API |
 | `warehouse.network-inventory-planning.analytics` | `saga.TransferStateAdvanced`, `saga.TransferStuckDetected`, `saga.RebalanceRunCompleted` | transfer id / run id | outbox relay in the API |
 | `warehouse.network-inventory-planning.analytics.dlq` | raw poison messages from the analytics topic | original key | `nip-projector` |
+| `warehouse.inventory.events.dlq` | raw poison replies/facts consumed by `transfer-reply-consumer` (header `x-dlq-consumer: transfer-reply-consumer`) | original key | API (ADR 0013) |
+| `warehouse.fulfillment.events.dlq` | raw poison facts consumed by `transfer-fact-consumer` (header `x-dlq-consumer: transfer-fact-consumer`) | original key | API (ADR 0013) |
 
 The relay writer sets `AllowAutoTopicCreation` (the relay is the first writer
-of both own topics), `RequiredAcks: all` and `BatchSize: 1`.
+of both own topics), `RequiredAcks: all` and `BatchSize: 1`. The DLQ writers
+also auto-create their topic; it only exists after the first poison message.
+The two consumed-topic DLQs follow the fleet `<topic>.dlq` convention, so a
+sibling consumer of the same topic may write there too: filter on
+`x-dlq-consumer`.
 
 ### Consumed
 
@@ -95,11 +101,19 @@ Other types on a consumed topic are ignored.
 - **API consumers** (`internal/adapters/inbound/kafka/kafka.go`): at-least-once
   with an atomic effect. The `processed_events` claim and the side effect
   commit in one transaction; the offset is committed only after that. A
-  deterministic problem (not a CloudEvent, malformed payload, failed domain
-  validation, unknown transfer, illegal transition, refused fact) is logged
-  at WARN and committed past. A transient error retries **the same message
-  forever** with backoff 200ms → 5s, logging at ERROR, and blocks its
-  partition. There is no DLQ for these consumers.
+  benign deterministic problem (not a CloudEvent, unknown type, unknown
+  transfer, illegal transition such as a replay or an out-of-order fact, a
+  site-capability or demand domain validation failure) is logged at WARN and
+  committed past. A transfer reply or fact that can never apply — a malformed
+  payload, or one the aggregate refuses (`transfer.ErrReplyRefused`: line-id
+  mismatch, unknown rejection reason, any other allocation-reply mismatch;
+  `transfer.ErrFactRefused`: impossible quantity, foreign line, wrong
+  site/SKU) — is written raw to `<topic>.dlq` with the headers
+  `x-dlq-source-topic`, `x-dlq-consumer`, `x-dlq-error`, `x-dlq-failed-at`
+  inside the claim's transaction and committed past (ADR 0013); a failed DLQ
+  write rolls the claim back and retries. A transient error retries **the
+  same message forever** with backoff 200ms → 5s, logging at ERROR, and blocks
+  its partition.
 - **Analytics consumer**: non-CloudEvents messages are skipped (one WARN per
   minute with a suppressed count); unknown types are skipped at INFO; a known
   type with an unusable payload, or one the store deterministically rejects,
@@ -177,6 +191,7 @@ not exceed 366 days; a bad range is a 400 `invalid-report-range`, a bad limit a
 | Replay a read-model topic | Reset the group's offsets with the Kafka tools while the API is scaled to 0. Events already in `processed_events` for that consumer are skipped; delete those rows first if they must be re-applied. |
 | Rebuild the analytics model | The projection can be dropped and rebuilt from the topic: point `ANALYTICS_CONSUMER_GROUP` at a new group id (it starts from the earliest offset) on an emptied analytical database, or reset the existing group's offsets. |
 | Drain the analytics DLQ | Read `warehouse.network-inventory-planning.analytics.dlq`, inspect `x-dlq-error`, fix the producer or projection, and re-produce the raw value to the analytics topic. |
+| Drain a transfer DLQ | Read `warehouse.inventory.events.dlq` / `warehouse.fulfillment.events.dlq`, keep the rows whose `x-dlq-consumer` is `transfer-reply-consumer` / `transfer-fact-consumer`, inspect `x-dlq-error`. A refused reply means the producer and NIP disagree about the transfer (line, origin, SKU, quantity): fix the producer. Re-producing the raw value only helps once the cause is fixed, and needs the `processed_events` row for that CloudEvents id deleted first (the claim committed with the dead letter). |
 | Rotate database credentials | Update the Secret (`database.existingSecret` / `analytics.database.existingSecret`) and restart the Deployments: DSNs are read only at start. |
 | Enable approval in a new environment | Set `kafka.enabled`, the five group ids, `config.transferPickPathId` and `config.transferDispatchPathId`; keep `config.outboxRelayEnabled: "true"`. |
 | Investigate a stuck transfer | `GET /v1/transfers/{id}` (audit trail), the MCP tool `find_stuck_transfers`, or `GET /reports/stuck-transfers`. See [Troubleshooting](./troubleshooting.md). |

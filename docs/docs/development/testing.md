@@ -46,6 +46,9 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | `internal/adapters/inbound/kafka/kafka_integration/planning_read_models_integration_test.go` | the three read-model consumers end to end | `confluentinc/confluent-local:7.6.1` + Postgres |
 | `internal/adapters/inbound/kafka/kafka_integration/transfer_saga_integration_test.go` | approval → outbox → relay → replies and facts → `RECEIVED` | Kafka + Postgres |
 | `internal/adapters/inbound/kafka/kafka_integration/analytics_integration_test.go` | projector consumer and DLQ | Kafka + Postgres |
+| `internal/adapters/inbound/kafka/kafka_integration/transfer_reply_dlq_integration_test.go` | poison replies ahead of a good one on one partition are dead-lettered to `warehouse.inventory.events.dlq`; the good reply applies (ADR 0013) | Kafka + Postgres |
+| `internal/application/usecases/usecases_wiring_integration_test.go` | approval idempotency and the allocation reply over the real repos and unit of work | Postgres |
+| `internal/application/usecases/state_advanced_outbox_integration_test.go` | every saga transition (approval trail → `RECEIVED`, and `UNFULFILLABLE`) writes one `TransferStateAdvanced` row through the real outbox writer (ADR 0007) | Postgres |
 | `cmd/mcp/main_integration_test.go` | the MCP binary against a real database | `postgres:16-alpine` |
 
 Kafka tests must start a broker through testcontainers: the fitness test
