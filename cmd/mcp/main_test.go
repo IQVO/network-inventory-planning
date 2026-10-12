@@ -26,7 +26,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("buildDeps: %v", err)
 	}
 	t.Cleanup(closeFn)
-	srv := httptest.NewServer(newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps))))
+	srv := httptest.NewServer(newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps)), "test-mcp"))
 	t.Cleanup(srv.Close)
 	return srv
 }

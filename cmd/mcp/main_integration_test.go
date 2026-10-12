@@ -69,7 +69,7 @@ func TestMCPOverRealPostgres(t *testing.T) {
 		t.Fatalf("create: %v (existing %v)", err, existing)
 	}
 
-	srv := httptest.NewServer(newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps))))
+	srv := httptest.NewServer(newRouter(inboundmcp.Handler(inboundmcp.NewServer(deps)), "test-mcp"))
 	t.Cleanup(srv.Close)
 	client := sdk.NewClient(&sdk.Implementation{Name: "t", Version: "0"}, nil)
 	session, err := client.Connect(ctx, &sdk.StreamableClientTransport{Endpoint: srv.URL + "/mcp"}, nil)

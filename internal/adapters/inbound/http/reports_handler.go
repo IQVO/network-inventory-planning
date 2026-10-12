@@ -2,8 +2,14 @@ package http
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
+	otelchimetric "github.com/riandyrn/otelchi/metric"
 
 	"github.com/claudioed/network-inventory-planning/internal/analytics/report"
 )
@@ -89,20 +95,37 @@ type rebalanceReportDTO struct {
 	Days []rebalanceDayDTO `json:"days"`
 }
 
+// DefaultReportsServiceName labels cmd/nip-reports' spans and metrics
+// (distinct from DefaultServiceName, the OLTP API's): the OTel
+// service.name resource attribute is set by telemetry.Setup from the same
+// string at that binary's composition root.
+const DefaultReportsServiceName = "network-inventory-planning-reports"
+
 // Routes builds the router of cmd/nip-reports: /healthz and GET
 // /reports/{transfer-funnel,state-dwell,stuck-transfers,rebalance-runs,freshness}.
 // No auth middleware (fleet rule), no CORS: the service is cluster-internal.
+// Carries the same Tier-1 HTTP RED middleware stack as the OLTP API's
+// Routes (ADR-0013): request ID, otelchi tracing, otelchi's RED duration
+// metric, the request logger, then panic recovery.
 func (s *ReportsServer) Routes() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	r := chi.NewRouter()
+	metricCfg := otelchimetric.NewBaseConfig(DefaultReportsServiceName)
+
+	r.Use(middleware.RequestID)
+	r.Use(otelchi.Middleware(DefaultReportsServiceName, otelchi.WithChiRoutes(r)))
+	r.Use(otelchimetric.NewServerRequestDuration(metricCfg))
+	r.Use(RequestLogger(slog.Default()))
+	r.Use(middleware.Recoverer)
+
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeReportJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /reports/transfer-funnel", s.handleTransferFunnel)
-	mux.HandleFunc("GET /reports/state-dwell", s.handleStateDwell)
-	mux.HandleFunc("GET /reports/stuck-transfers", s.handleStuckTransfers)
-	mux.HandleFunc("GET /reports/rebalance-runs", s.handleRebalanceRuns)
-	mux.HandleFunc("GET /reports/freshness", s.handleFreshness)
-	return mux
+	r.Get("/reports/transfer-funnel", s.handleTransferFunnel)
+	r.Get("/reports/state-dwell", s.handleStateDwell)
+	r.Get("/reports/stuck-transfers", s.handleStuckTransfers)
+	r.Get("/reports/rebalance-runs", s.handleRebalanceRuns)
+	r.Get("/reports/freshness", s.handleFreshness)
+	return r
 }
 
 func writeReportJSON(w http.ResponseWriter, status int, v any) {
