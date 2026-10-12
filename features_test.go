@@ -67,6 +67,8 @@ type world struct {
 	facts     *memory.PlanningFacts
 	transfers *memory.TransferStore
 	runs      *memory.RebalanceRuns
+	policies  *memory.RebalancePolicies
+	lanes     *memory.TransferLanes
 	bus       *eventBus
 	analytics *analyticsstore.Memory
 	release   usecases.WorkReleaseConfig
@@ -99,6 +101,8 @@ func (w *world) start() {
 	w.facts = memory.NewPlanningFacts()
 	w.transfers = memory.NewTransferStore()
 	w.runs = memory.NewRebalanceRuns()
+	w.policies = memory.NewRebalancePolicies()
+	w.lanes = memory.NewTransferLanes()
 	w.bus = newEventBus()
 	w.analytics = analyticsstore.NewMemory()
 	w.release = usecases.WorkReleaseConfig{
@@ -144,6 +148,10 @@ func (w *world) fullHandler() inboundhttp.Handler {
 		ListRebalanceRuns: &usecases.ListRebalanceRuns{Runs: w.runs},
 		GetTransfer:       &usecases.GetTransfer{Query: w.transfers},
 		ListTransfers:     &usecases.ListTransfers{Query: w.transfers},
+		PutPolicy:         &usecases.PutRebalancePolicy{Policies: w.policies, Now: w.clock.Now},
+		ListPolicies:      &usecases.ListRebalancePolicies{Policies: w.policies},
+		PutLane:           &usecases.PutTransferLane{Lanes: w.lanes, Now: w.clock.Now},
+		ListLanes:         &usecases.ListTransferLanes{Lanes: w.lanes},
 	}
 }
 
@@ -458,6 +466,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	w.registerFactSteps(sc)
 	w.registerSagaSteps(sc)
 	w.registerReportSteps(sc)
+	w.registerCatalogueSteps(sc)
 }
 
 func (w *world) registerHTTPSteps(sc *godog.ScenarioContext) {

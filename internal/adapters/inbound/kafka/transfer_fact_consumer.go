@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -97,6 +98,11 @@ type TransferFactConsumer struct {
 	UoW             ReplyUnitOfWork
 	Logger          *slog.Logger
 	Retry           RetryPolicy
+	// DLQ receives poison facts (ADR 0013); nil only logs them.
+	DLQ DeadLetterWriter
+	// DLQTopic names the dead-letter topic in logs (FulfillmentTopic +
+	// DLQSuffix).
+	DLQTopic string
 
 	sleep sleepFunc // test hook
 }
@@ -118,6 +124,8 @@ func NewTransferFactConsumer(
 		ProcessedEvents: processedEvents,
 		UoW:             uow,
 		Logger:          defaultLogger(logger),
+		DLQ:             newDLQWriter(brokers, FulfillmentTopic+DLQSuffix),
+		DLQTopic:        FulfillmentTopic + DLQSuffix,
 	}
 }
 
@@ -125,7 +133,7 @@ func NewTransferFactConsumer(
 func (c *TransferFactConsumer) Run(ctx context.Context) error {
 	loop := consumeLoop{
 		reader: c.Reader,
-		handle: func(ctx context.Context, msg kafkago.Message) error { return c.HandleMessage(ctx, msg.Value) },
+		handle: c.HandleKafkaMessage,
 		logger: c.Logger,
 		name:   "transfer fact consumer",
 		retry:  c.Retry,
@@ -134,12 +142,20 @@ func (c *TransferFactConsumer) Run(ctx context.Context) error {
 	return loop.run(ctx)
 }
 
-// HandleMessage decodes one CloudEvents 1.0 fact and applies it. Non-nil
-// ONLY for transient/infrastructure failures; every deterministic
-// outcome — unknown type, malformed payload, unknown transfer_ref,
-// out-of-order fact, duplicate id — returns nil after logging.
+// HandleMessage handles one raw fact value as if read from
+// FulfillmentTopic (kept for callers that hold only the bytes).
 func (c *TransferFactConsumer) HandleMessage(ctx context.Context, value []byte) error {
-	e, err := cloudevents.Decode(value)
+	return c.HandleKafkaMessage(ctx, kafkago.Message{Topic: FulfillmentTopic, Value: value})
+}
+
+// HandleKafkaMessage decodes one CloudEvents 1.0 fact and applies it.
+// Non-nil ONLY for transient/infrastructure failures (including a failed
+// dead-letter write); every deterministic outcome — unknown type,
+// malformed payload, unknown transfer_ref, out-of-order fact, duplicate
+// id — returns nil after logging, and a fact the aggregate refuses
+// (transfer.ErrFactRefused) is dead-lettered first (ADR 0013).
+func (c *TransferFactConsumer) HandleKafkaMessage(ctx context.Context, msg kafkago.Message) error {
+	e, err := cloudevents.Decode(msg.Value)
 	if err != nil {
 		c.Logger.WarnContext(ctx, "skipping non-CloudEvents fulfillment fact", "error", err)
 		return nil
@@ -147,74 +163,73 @@ func (c *TransferFactConsumer) HandleMessage(ctx context.Context, value []byte) 
 
 	switch e.Type() {
 	case typeTransferPicked:
-		return c.handlePicked(ctx, e)
+		return c.handlePicked(ctx, msg, e)
 	case typeTransferDispatched:
-		return c.handleDispatched(ctx, e)
+		return c.handleDispatched(ctx, msg, e)
 	case typeTransferArrived:
-		return c.handleArrival(ctx, e)
+		return c.handleArrival(ctx, msg, e)
 	default:
 		return nil // unknown type: ignore (full-type dispatch)
 	}
 }
 
-func (c *TransferFactConsumer) handlePicked(ctx context.Context, e ce.Event) error {
+func (c *TransferFactConsumer) handlePicked(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferFactData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferPicked payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferPicked payload %s: %w", e.ID(), err))
 	}
 	if data.Quantity <= 0 {
 		// quantity is OPTIONAL on the wire; a pick fact without one
-		// cannot drive the short-pick logic — deterministic skip.
-		c.Logger.WarnContext(ctx, "skipping TransferPicked without a positive quantity", "event_id", e.ID(), "transfer_ref", data.TransferRef)
-		return nil
+		// cannot drive the short-pick logic — a refused fact, dead-lettered
+		// like every other refusal (ADR 0013).
+		return c.dlq().send(ctx, msg, fmt.Errorf("%w: TransferPicked %s for %s carries no positive quantity", transfer.ErrFactRefused, e.ID(), data.TransferRef))
 	}
 	in := usecases.ApplyPickInput{
 		TransferID: transfer.TransferID(data.TransferRef),
 		Picked:     transfer.Picked{PickedQuantity: data.Quantity},
 		OccurredAt: e.Time().UTC(),
 	}
-	return c.apply(ctx, e, "TransferPicked", in.TransferID, func(ctx context.Context) error {
+	return c.apply(ctx, msg, e, "TransferPicked", in.TransferID, func(ctx context.Context) error {
 		return c.Applier.ApplyPick(ctx, in)
 	})
 }
 
-func (c *TransferFactConsumer) handleDispatched(ctx context.Context, e ce.Event) error {
+func (c *TransferFactConsumer) handleDispatched(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferFactData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferDispatched payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferDispatched payload %s: %w", e.ID(), err))
 	}
 	in := usecases.FactInput{
 		TransferID: transfer.TransferID(data.TransferRef),
 		OccurredAt: e.Time().UTC(),
 	}
-	return c.apply(ctx, e, "TransferDispatched", in.TransferID, func(ctx context.Context) error {
+	return c.apply(ctx, msg, e, "TransferDispatched", in.TransferID, func(ctx context.Context) error {
 		return c.Applier.ApplyDispatched(ctx, in)
 	})
 }
 
-func (c *TransferFactConsumer) handleArrival(ctx context.Context, e ce.Event) error {
+func (c *TransferFactConsumer) handleArrival(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferFactData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferArrived payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferArrived payload %s: %w", e.ID(), err))
 	}
 	in := usecases.FactInput{
 		TransferID: transfer.TransferID(data.TransferRef),
 		OccurredAt: e.Time().UTC(),
 	}
-	return c.apply(ctx, e, "TransferArrived", in.TransferID, func(ctx context.Context) error {
+	return c.apply(ctx, msg, e, "TransferArrived", in.TransferID, func(ctx context.Context) error {
 		return c.Applier.ApplyArrival(ctx, in)
 	})
 }
 
-// apply runs claim + applier in ONE transaction. A deterministic apply
-// failure — unknown transfer (WARN), out-of-order/replayed fact, refused
-// payload — is logged and SKIPPED (the claim stays committed so the
-// offset moves on); anything else is transient and retried with the
-// claim rolled back.
-func (c *TransferFactConsumer) apply(ctx context.Context, e ce.Event, what string, id transfer.TransferID, op func(ctx context.Context) error) error {
+// apply runs claim + applier in ONE transaction. A refused payload
+// (transfer.ErrFactRefused) is dead-lettered inside the transaction (a
+// failed DLQ write rolls the claim back and is retried); any other
+// deterministic apply failure — unknown transfer (WARN), out-of-order or
+// replayed fact, an unconfigured release leg — is logged and SKIPPED (the
+// claim stays committed so the offset moves on); anything else is
+// transient and retried with the claim rolled back.
+func (c *TransferFactConsumer) apply(ctx context.Context, msg kafkago.Message, e ce.Event, what string, id transfer.TransferID, op func(ctx context.Context) error) error {
 	return c.UoW.Do(ctx, func(ctx context.Context) error {
 		claimed, err := c.ProcessedEvents.Claim(ctx, transferFactConsumerName, e.ID())
 		if err != nil {
@@ -225,6 +240,9 @@ func (c *TransferFactConsumer) apply(ctx context.Context, e ce.Event, what strin
 			return nil
 		}
 		if err := op(ctx); err != nil {
+			if usecases.IsRefusedReply(err) {
+				return c.dlq().send(ctx, msg, fmt.Errorf("%s %s refused: %w", what, e.ID(), err))
+			}
 			if usecases.IsDeterministicFact(err) {
 				c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown or out-of-order transfer_ref)", "error", err, "event_id", e.ID(), "transfer_ref", string(id))
 				return nil
@@ -236,7 +254,15 @@ func (c *TransferFactConsumer) apply(ctx context.Context, e ce.Event, what strin
 	})
 }
 
-// Close releases the underlying Kafka reader.
+func (c *TransferFactConsumer) dlq() deadLetterSink {
+	return deadLetterSink{writer: c.DLQ, topic: c.DLQTopic, consumer: transferFactConsumerName, logger: c.Logger}
+}
+
+// Close releases the underlying Kafka reader and the dead-letter writer.
 func (c *TransferFactConsumer) Close() error {
-	return c.Reader.Close()
+	err := c.Reader.Close()
+	if c.DLQ != nil {
+		err = errors.Join(err, c.DLQ.Close())
+	}
+	return err
 }

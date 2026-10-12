@@ -18,11 +18,14 @@ import (
 // ----------------------------------------------- scheduled and ticked work --
 
 // theScheduledRebalanceRuns runs one NIP_REBALANCE_SCHEDULE tick: the same
-// use case cmd's ticker calls, over the declared read models.
+// use case cmd's ticker calls, over the declared read models and the
+// policy/lane catalogues filled through the REST API (ADR 0015).
 func (w *world) theScheduledRebalanceRuns(ctx context.Context) error {
 	run := usecases.RunScheduledRebalance{
 		Snapshot:     w.facts,
 		Planner:      transfer.Planner{},
+		Policies:     w.policies,
+		Lanes:        w.lanes,
 		Runs:         w.runs,
 		Events:       w.bus,
 		MaxStaleness: maxStaleness,

@@ -50,7 +50,7 @@ inventory ledger and never moves stock itself (ADR 0001).
 | inventory-storage | `TransferReceiptStaged`, `TransferStockStowed` | fact | `ApplyTransferReceiptStaged`, `ApplyTransferStow` |
 | fulfillment-execution | `TransferPicked`, `TransferDispatched`, `TransferArrived` | fact | `ApplyTransferPick`, `ApplyTransferDispatched`, `ApplyTransferArrival` |
 | operator / console | `POST /v1/transfers:approve` | command | `ApproveTransfer` |
-| operator / console / tools | `POST /v1/transfer-proposals:generate`, `GET /v1/transfer-simulations`, `GET /v1/transfers`, `GET /v1/transfers/{id}`, `GET /v1/rebalance-runs` | query | planner, read models, saga store |
+| operator / console / tools | `POST /v1/transfer-proposals:generate`, `GET /v1/transfer-simulations`, `GET /v1/transfers`, `GET /v1/transfers/{id}`, `GET /v1/rebalance-runs`, `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes` | query | planner, read models, saga store |
 | warehouse-ops-agent | `get_transfer`, `list_transfers`, `find_stuck_transfers`, `simulate_transfer_options` | query (MCP) | read side |
 
 ## Outbound communication
@@ -114,9 +114,10 @@ PublishedCapacityPlan, WorkDemand, StuckTransfer, RebalanceRun.
 
 ## Open questions
 
-- **Where do proposals come from on the read-model path?** The planner needs
-  positions, policies and lanes; none is projected, so scheduled runs record
-  zero proposals.
+- **Stock positions on the read-model path.** Scheduled runs plan from the
+  operator-managed policy and lane catalogues (ADR 0015) on a site-level
+  approximation (capacity headroom and demand), because no sibling publishes
+  per-site stock positions.
 - **Cancellation after allocation** needs an explicit reservation revocation
   that is not designed.
 - **Analytics coverage of the physical tail.** `TransferStateAdvanced` is not

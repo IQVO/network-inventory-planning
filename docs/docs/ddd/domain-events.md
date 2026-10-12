@@ -73,7 +73,7 @@ work, and committed only after that transaction settles.
 | Type | Topic | Producer | Effect |
 | --- | --- | --- | --- |
 | `com.warehouse.wms.facility-layout.site.SiteCapabilityChanged` | `warehouse.facility.events` | facility-layout | upsert `site_capability`; a greater `capability_revision` wins |
-| `com.warehouse.wes.order-management.siteskudemand.SiteSkuDemandChanged` | `warehouse.order-management.events` | order-management | upsert `site_sku_demand` per `(source_order_id, line_no)`, last write wins; `REMOVED` contributes no units |
+| `com.warehouse.wes.order-management.siteskudemand.SiteSkuDemandChanged` | `warehouse.order-management.events` | order-management | upsert `site_sku_demand` per `(source_order_id, line_no)`, newest CloudEvents `time` wins (an older event is a no-op, ADR 0014); `REMOVED` contributes no units |
 | `com.warehouse.wes.warehouse-planning.capacityplan.CapacityPlanPublished` | `warehouse.warehouse-planning.events` | warehouse-planning | upsert `published_capacity_plan` per `plan_id`, newer `published_at` wins; no `site_id` → excluded |
 | `com.warehouse.wms.inventory-storage.reservation.TransferStockAllocated` | `warehouse.inventory.events` | inventory-storage | `ALLOCATING → ALLOCATED`; reservation, allocations, expiry; releases the pick demand |
 | `com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationRejected` | `warehouse.inventory.events` | inventory-storage | `ALLOCATING → UNFULFILLABLE` with a closed reason; an unknown reason is logged and skipped |
