@@ -193,9 +193,10 @@ func ProposeTransfer(in ProposalInput) (*InterWarehouseTransfer, error) {
 		operatorReason:    in.OperatorReason,
 		proposalAsOf:      in.ProposalAsOf.UTC(),
 		expiresAt:         in.ExpiresAt.UTC(),
-		state:             StateDraft,
-		createdAt:         now,
-		updatedAt:         now,
+		// No state yet: the first transition is the creation entry, whose
+		// From is "" (see AuditEntry).
+		createdAt: now,
+		updatedAt: now,
 	}
 	t.transition(StateDraft, "TransferDrafted", "drafted from advisory proposal snapshot", now)
 	t.transition(StateProposed, "TransferProposed", in.OperatorReason, now)

@@ -216,7 +216,7 @@ type ApplyTransferDispatched struct {
 	UoW       ports.UnitOfWork
 	// events publishes the TransferStateAdvanced analytics occurrences
 	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
-	events ports.TransferEventPublisher
+	Events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -233,7 +233,7 @@ func (u ApplyTransferDispatched) Execute(ctx context.Context, in FactInput) erro
 		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
 			return err
 		}
-		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
+		return publishStateAdvanced(ctx, u.Events, trf, loadedVersion)
 	})
 	return ierr
 }
@@ -255,7 +255,7 @@ type ApplyTransferArrival struct {
 	UoW       ports.UnitOfWork
 	// events publishes the TransferStateAdvanced analytics occurrences
 	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
-	events ports.TransferEventPublisher
+	Events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -272,7 +272,7 @@ func (u ApplyTransferArrival) Execute(ctx context.Context, in FactInput) error {
 		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
 			return err
 		}
-		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
+		return publishStateAdvanced(ctx, u.Events, trf, loadedVersion)
 	})
 	return ierr
 }
@@ -293,7 +293,7 @@ type ApplyTransferReceiptStaged struct {
 	UoW       ports.UnitOfWork
 	// events publishes the TransferStateAdvanced analytics occurrences
 	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
-	events ports.TransferEventPublisher
+	Events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -310,7 +310,7 @@ func (u ApplyTransferReceiptStaged) Execute(ctx context.Context, in ApplyReceipt
 		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
 			return err
 		}
-		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
+		return publishStateAdvanced(ctx, u.Events, trf, loadedVersion)
 	})
 	return ierr
 }
@@ -330,7 +330,7 @@ type ApplyTransferStow struct {
 	UoW       ports.UnitOfWork
 	// events publishes the TransferStateAdvanced analytics occurrences
 	// (ADR 0007). OPTIONAL: nil skips analytics (never fails a fact).
-	events ports.TransferEventPublisher
+	Events ports.TransferEventPublisher
 }
 
 // Execute applies the fact.
@@ -347,7 +347,7 @@ func (u ApplyTransferStow) Execute(ctx context.Context, in ApplyStowInput) error
 		if err := u.Transfers.UpdateState(ctx, trf); err != nil {
 			return err
 		}
-		return publishStateAdvanced(ctx, u.events, trf, loadedVersion)
+		return publishStateAdvanced(ctx, u.Events, trf, loadedVersion)
 	})
 	return ierr
 }

@@ -386,7 +386,7 @@ func TestApplyTransferPickPublishesStateAdvanced(t *testing.T) {
 func TestFactTransitionsPublishStateAdvanced(t *testing.T) {
 	repo := newFakeTransferRepo()
 	pub := &fakeEventPublisher{}
-	dispatched := ApplyTransferDispatched{Transfers: repo, UoW: passThroughUoW{}, events: pub}
+	dispatched := ApplyTransferDispatched{Transfers: repo, UoW: passThroughUoW{}, Events: pub}
 
 	id := seedPickedTransfer(t, repo)
 	if err := dispatched.Execute(context.Background(), FactInput{TransferID: id, OccurredAt: approveNow.Add(2 * time.Hour)}); err != nil {

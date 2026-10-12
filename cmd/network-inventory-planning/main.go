@@ -349,14 +349,14 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		Release:   release,
 		Now:       time.Now,
 	}
-	replyReject := &usecases.ApplyTransferRejection{Transfers: transfers, UoW: uow}
-	replyStaged := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, UoW: uow}
-	replyStow := &usecases.ApplyTransferStow{Transfers: transfers, UoW: uow}
+	replyReject := &usecases.ApplyTransferRejection{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	replyStaged := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	replyStow := &usecases.ApplyTransferStow{Transfers: transfers, Events: outboxPublisher, UoW: uow}
 	replyApplier := inboundkafka.ReplyUseCases{Allocate: *replyAllocate, Reject: *replyReject, Staged: *replyStaged, Stow: *replyStow}
 
 	factPick := &usecases.ApplyTransferPick{Transfers: transfers, Events: outboxPublisher, UoW: uow, Release: release}
-	factDispatched := &usecases.ApplyTransferDispatched{Transfers: transfers, UoW: uow}
-	factArrival := &usecases.ApplyTransferArrival{Transfers: transfers, UoW: uow}
+	factDispatched := &usecases.ApplyTransferDispatched{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	factArrival := &usecases.ApplyTransferArrival{Transfers: transfers, Events: outboxPublisher, UoW: uow}
 	factApplier := inboundkafka.FactUseCases{Pick: *factPick, Dispatched: *factDispatched, Arrival: *factArrival}
 
 	consumerRunners, consumerClosers, err := startConsumers(logger, consumerDeps{
