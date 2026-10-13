@@ -131,7 +131,7 @@ flowchart TB
 
 | Configuration | What runs |
 | --- | --- |
-| `DATABASE_URL` unset | Only `GET /healthz` and `POST /v1/transfer-proposals:generate` work. Every other route answers a 503 problem (`read-models-unavailable`, `saga-unavailable`, `rebalance-runs-unavailable`, `read-side-unavailable`). No migrations, no consumers. |
+| `DATABASE_URL` unset | Only `GET /healthz` and `POST /v1/transfer-proposals:generate` work. Every other route answers a 503 problem (`read-models-unavailable`, `saga-unavailable`, `rebalance-runs-unavailable`, `read-side-unavailable`, `catalogue-unavailable`). No migrations, no consumers. |
 | `DATABASE_URL` set | Migrations run (refuse to boot on failure), the pool is pinged, simulation and the read side are wired. |
 | + `KAFKA_BROKERS` | The outbox writer exists, so `POST /v1/transfers:approve` is wired; each consumer whose `*_CONSUMER_GROUP` is set starts; the saga-health ticker starts (default every 5 m). |
 | + `OUTBOX_RELAY_ENABLED` non-empty | The relay drains `outbox_events` onto Kafka. Without it the rows wait. |
@@ -142,7 +142,7 @@ flowchart TB
 
 | Store | Owner binary | Tables | Migrations |
 | --- | --- | --- | --- |
-| OLTP Postgres (`DATABASE_URL`) | `network-inventory-planning` (writes), `mcp` (reads) | `processed_events`, `site_capability`, `site_sku_demand`, `published_capacity_plan`, `inter_warehouse_transfer`, `transfer_audit`, `outbox_events`, `rebalance_runs` | `internal/adapters/outbound/postgres/migrations/0001`–`0004`, applied at startup by both `network-inventory-planning` and `mcp` (golang-migrate's advisory lock serialises concurrent starts) |
+| OLTP Postgres (`DATABASE_URL`) | `network-inventory-planning` (writes), `mcp` (reads) | `processed_events`, `site_capability`, `site_sku_demand`, `published_capacity_plan`, `inter_warehouse_transfer`, `transfer_audit`, `outbox_events`, `rebalance_runs`, `rebalance_policies`, `transfer_lanes` | `internal/adapters/outbound/postgres/migrations/0001`–`0005`, applied at startup by both `network-inventory-planning` and `mcp` (golang-migrate's advisory lock serialises concurrent starts) |
 | Analytical Postgres (`ANALYTICS_DATABASE_URL`) | `nip-projector` (only writer), `nip-reports` (read-only pool, `default_transaction_read_only=on`) | `analytics_processed_events`, `transfer_state_advances`, `transfer_stuck_detections`, `rebalance_run_facts` | `analytics/migrations/0001_saga_facts`, applied at startup by `nip-projector` only |
 
 The entity-relationship view is on [Entity relationship](../ddd/entity-relationship.md).

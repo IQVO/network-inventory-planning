@@ -49,7 +49,7 @@ func TestRetryWithDelay_StopsWhenTheContextIsCancelled(t *testing.T) {
 
 func TestRetry_UsesTheFleetBudget(t *testing.T) {
 	if Retries != 5 || Delay != time.Second {
-		t.Fatalf("budget = %d x %v, want 5 x 1s (~31s total)", Retries, Delay)
+		t.Fatalf("budget = %d x %v, want 5 attempts x 1s base (1+2+4+8 = 15s of backoff)", Retries, Delay)
 	}
 	if err := Retry(context.Background(), nil, "op", func() error { return nil }); err != nil {
 		t.Fatal(err)

@@ -244,11 +244,26 @@ func (u ApplyTransferRejection) Execute(ctx context.Context, in ApplyRejectionIn
 	return ierr
 }
 
-// IsDeterministic reports whether err must be logged-and-skipped by the
-// reply consumer rather than retried.
+// IsDeterministic reports whether err must be skipped by the reply
+// consumer rather than retried: an unknown transfer, an illegal transition
+// (a replay or an out-of-order reply), or a reply the aggregate refuses
+// (transfer.ErrReplyRefused — line-id mismatch, unknown rejection reason,
+// any other allocation-reply mismatch; transfer.ErrFactRefused for the
+// destination facts). The same bytes always fail the same way, so a retry
+// only wedges the partition. IsRefusedReply singles out the subset that
+// must also be dead-lettered.
 func IsDeterministic(err error) bool {
 	var illegal *transfer.IllegalTransitionError
-	return errors.Is(err, transfer.ErrTransferNotFound) || errors.As(err, &illegal)
+	return errors.Is(err, transfer.ErrTransferNotFound) || errors.As(err, &illegal) || IsRefusedReply(err)
+}
+
+// IsRefusedReply reports whether err is a POISON reply or fact: one whose
+// payload fails the aggregate's validation (transfer.ErrReplyRefused,
+// transfer.ErrFactRefused). The consumers dead-letter these to
+// "<topic>.dlq" and commit past them (ADR 0013); a replay or an unknown
+// transfer is a plain skip, never dead-lettered.
+func IsRefusedReply(err error) bool {
+	return errors.Is(err, transfer.ErrReplyRefused) || errors.Is(err, transfer.ErrFactRefused)
 }
 
 // classifyProposalError marks a proposal the domain refuses on its face as the

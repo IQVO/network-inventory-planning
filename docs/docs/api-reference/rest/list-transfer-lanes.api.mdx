@@ -1,0 +1,66 @@
+---
+id: list-transfer-lanes
+title: "List the Transfer Lane catalogue."
+description: "The operator-managed Transfer Lane catalogue (ADR 0015), one entry"
+sidebar_label: "List the Transfer Lane catalogue."
+hide_title: true
+hide_table_of_contents: true
+api: eJztVs1yGzcMfhUMT/Zk9eO2aTLq9OCxlMRT13Zjuz1Yng61hLWMueCGxMrZ0ejaB+gj9kk64K5+/JM0p/bSk2UsCHwAPn7EUvkKg2br6diokXI28mXQFG8xnGjCqDLFeh7V6FoFnGmnKUd1kymDMQ+2koNqpC4LhDaQD71Sk56jgXUckECQa9bOz2uEvcPxexgOD17uZ+AJAYlDM6UKAxgbMGc04IOdW4K//vgTDEa2lCBm4IPBgAZmzdqFC6Qp7Tj1YaLzoo0KWM7QRHGCi8OfJy2UWOgKk22OJKBxSkim8pYYdJ5jxTGDytURLEcIuLAxBZYyY16gqR0aqHSMUEeMoMFpwil5cg3cF0hgGWyECemZeB6ejiFaxt9zXemZdZYbcMht+K6OiGRAk5mSGHfqgYA52gX2p6QyFTBWniJGNVqqb4ZD+fNwFpMFhiYBgrY929b3VaZyT4zEck5XlbN5SjL4EOXwUkl5pZZf3FSoRsrPPmDOKfPH2gY0QgWXqHGTqSrI2Nm2eFrz9qwOQTcqU5axjF8TM5nabqtM1ZXRjOaQn8/0TwHPUmNVpsbbZqpMdUN5GrPz30aNHCzNVaZKSydIcy7U6OAx9d/oPA2053Tja4YLywi5NwjWILG9bSzNE8/vdcDC1zGNgS07ySHux2O1eojyv8Jwgtpc2nK3tZYY5xjU45ziCmzLxDLS5CPmnkyEvbc+2fvjuhUWuLehu3T7fclyRZbfaTLO0vzIR34m22o7p+3HmfcONanVaotdLrR4b2jzHPJbH0rNren779pm2rIun2nlWcW2tJFt3ss95XUISHkD7O+QYE+76NOVmlzq+f4PcACeIA/YqdOLAxAVywtNc0ylbin8zEg3sMSnJz2TI77m3D8YweYAkmC+VkfvJ4eXk7HK1NX5eP3r9Ojd4enbyfipOv9WaAa9o8DnV5dgrIG9zSH4UahSVl60AQJWTjcZkOdCmHMfLDPS/i5pjtbRzjq8u1PZfUImIsRq9bnPJzayfF1l6uXw26dy9v7NEbx6PXwFVfAzh+ULUSrAEHz4gpztOn+9rKVva5iZiqy5fkbm2hBPx/MQ+AULf6HUeWEJewG1SYYO2vpqWgyJKV1vHkddbWA8e0kMsrbumWM73T5vE6YmrzJVIhde3vo5Sv2VFklRg8XBgLux9Fz38kcMCwzy+C9VHZwaqYK5Gg0GzufaFT7y6PXw9fCpNshnMLhA56tSxrO6yZSlW5+QdrhOke99uINjWiCxDw2cO00khDs8P1aZktxtwIP+sD/spq3zNG3SckfURtB6sYnpmcl2oMbRYDC3XNSzfu7LwfEvv54NqE3bs+u0vapL2zZ0t5BDs7BRkHWHYHMI2l1IwN76kDThCRS4dYjcn9KUvlBrFbxQMUK0M1HEXqL0J4ZbLda9mMR8szhkUxJL7+KnKzBYajIZVPXM2VigSX655WYfLLGHNCcQ6kHpDbooG4ZkrHzEOCVhUuhtgMOaAbEPxwyECwxQ1qwZI1RFE62Ei+zzuxHoqgp+oV02pYDClFbsU4K1K37CvE5mZxfrfcQG8Pep9K7SKKvNKlOVj1xq2pmuiEPq7Wd2yf5j6i23gvD/UvqvLaWd9sgsB5XTNk0z3cJlpy/XanEgjg8V5iZTRXr/r9VyOdMRr4JbrcT8scbQqNH1TaYWOlhBLP+tMlWgNhiSJN1hI3c09UbkQrs6bZ2P11oRn43qvZ1cqtXqb+fdj3I=
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"List the Transfer Lane catalogue."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/v1/transfer-lanes"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+The operator-managed Transfer Lane catalogue (ADR 0015), one entry
+per directed origin → destination, ordered by origin then
+destination. Each entry embeds the SAME Lane shape the generate
+endpoint accepts, plus its revision. The scheduled pass uses a lane
+only when it is Enabled AND site_capability lets its origin send and
+its destination receive.
+
+
+<ParamsDetails>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./list-transfer-lanes.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./list-transfer-lanes.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

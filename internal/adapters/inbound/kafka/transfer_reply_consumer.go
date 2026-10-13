@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -144,6 +145,13 @@ func (r ReplyUseCases) ApplyStowed(ctx context.Context, in usecases.ApplyStowInp
 // persisted); Rejected → UNFULFILLABLE with the closed reason. Dedupe on
 // the CE id in processed_events, claim + transition commit in ONE
 // UnitOfWork, offset committed only after the transaction settles.
+//
+// Poison replies (ADR 0013): a reply whose payload cannot be decoded or
+// that the aggregate refuses (usecases.IsRefusedReply — line-id mismatch,
+// unknown rejection reason, any other allocation-reply mismatch) is
+// DETERMINISTIC. It is published raw to DLQTopic
+// (warehouse.inventory.events.dlq) and committed past, never retried: a
+// retry could only wedge the partition behind it forever.
 type TransferReplyConsumer struct {
 	Reader          Reader
 	Applier         TransferReplyApplier
@@ -151,6 +159,11 @@ type TransferReplyConsumer struct {
 	UoW             ReplyUnitOfWork
 	Logger          *slog.Logger
 	Retry           RetryPolicy
+	// DLQ receives poison replies; nil only logs them (unit tests).
+	DLQ DeadLetterWriter
+	// DLQTopic names the dead-letter topic in logs (InventoryTopic +
+	// DLQSuffix).
+	DLQTopic string
 
 	sleep sleepFunc // test hook
 }
@@ -167,6 +180,7 @@ type ReplyUnitOfWork interface {
 
 // NewTransferReplyConsumer constructs a TransferReplyConsumer reading
 // InventoryTopic under groupID (env-configured by the composition root).
+// Its dead-letter writer targets InventoryTopic + DLQSuffix.
 func NewTransferReplyConsumer(
 	brokers []string,
 	groupID string,
@@ -181,6 +195,8 @@ func NewTransferReplyConsumer(
 		ProcessedEvents: processedEvents,
 		UoW:             uow,
 		Logger:          defaultLogger(logger),
+		DLQ:             newDLQWriter(brokers, InventoryTopic+DLQSuffix),
+		DLQTopic:        InventoryTopic + DLQSuffix,
 	}
 }
 
@@ -188,7 +204,7 @@ func NewTransferReplyConsumer(
 func (c *TransferReplyConsumer) Run(ctx context.Context) error {
 	loop := consumeLoop{
 		reader: c.Reader,
-		handle: func(ctx context.Context, msg kafkago.Message) error { return c.HandleMessage(ctx, msg.Value) },
+		handle: c.HandleKafkaMessage,
 		logger: c.Logger,
 		name:   "transfer reply consumer",
 		retry:  c.Retry,
@@ -197,13 +213,21 @@ func (c *TransferReplyConsumer) Run(ctx context.Context) error {
 	return loop.run(ctx)
 }
 
-// HandleMessage decodes one CloudEvents 1.0 reply and applies it. Non-nil
-// ONLY for transient/infrastructure failures (the loop retries the same
-// message); everything deterministic — unknown type, malformed payload,
-// unknown transfer, illegal transition, duplicate id — returns nil after
-// logging.
+// HandleMessage handles one raw reply value as if read from
+// InventoryTopic (kept for callers that hold only the bytes).
 func (c *TransferReplyConsumer) HandleMessage(ctx context.Context, value []byte) error {
-	e, err := cloudevents.Decode(value)
+	return c.HandleKafkaMessage(ctx, kafkago.Message{Topic: InventoryTopic, Value: value})
+}
+
+// HandleKafkaMessage decodes one CloudEvents 1.0 reply and applies it.
+// Non-nil ONLY for transient/infrastructure failures (the loop retries the
+// same message) — including a failed dead-letter write. Everything
+// deterministic returns nil: unknown type, non-CloudEvents bytes and
+// duplicate ids are skipped; unknown transfers and illegal transitions
+// (replays, out-of-order replies) are logged and skipped; malformed or
+// refused replies are dead-lettered.
+func (c *TransferReplyConsumer) HandleKafkaMessage(ctx context.Context, msg kafkago.Message) error {
+	e, err := cloudevents.Decode(msg.Value)
 	if err != nil {
 		c.Logger.WarnContext(ctx, "skipping non-CloudEvents inventory reply", "error", err)
 		return nil
@@ -211,28 +235,30 @@ func (c *TransferReplyConsumer) HandleMessage(ctx context.Context, value []byte)
 
 	switch e.Type() {
 	case typeTransferStockAllocated:
-		return c.handleAllocated(ctx, e)
+		return c.handleAllocated(ctx, msg, e)
 	case typeTransferStockAllocationRejected:
-		return c.handleRejected(ctx, e)
+		return c.handleRejected(ctx, msg, e)
 	case typeTransferReceiptStaged:
-		return c.handleReceiptStaged(ctx, e)
+		return c.handleReceiptStaged(ctx, msg, e)
 	case typeTransferStockStowed:
-		return c.handleStowed(ctx, e)
+		return c.handleStowed(ctx, msg, e)
 	default:
 		return nil // unknown type: ignore (full-type dispatch)
 	}
 }
 
-func (c *TransferReplyConsumer) handleAllocated(ctx context.Context, e ce.Event) error {
+func (c *TransferReplyConsumer) dlq() deadLetterSink {
+	return deadLetterSink{writer: c.DLQ, topic: c.DLQTopic, consumer: transferReplyConsumerName, logger: c.Logger}
+}
+
+func (c *TransferReplyConsumer) handleAllocated(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferStockAllocatedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferStockAllocated payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockAllocated payload %s: %w", e.ID(), err))
 	}
 	expiresAt, err := time.Parse(time.RFC3339, data.ExpiresAt)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping TransferStockAllocated with unparsable expires_at", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("TransferStockAllocated %s has an unparsable expires_at: %w", e.ID(), err))
 	}
 	allocations := make([]transfer.Allocation, 0, len(data.Allocations))
 	for _, a := range data.Allocations {
@@ -251,40 +277,21 @@ func (c *TransferReplyConsumer) handleAllocated(ctx context.Context, e ce.Event)
 		},
 		OccurredAt: e.Time().UTC(),
 	}
-
-	// Claim + transition are ONE transaction: a failed apply rolls the
-	// claim back, so the redelivery is processed, not skipped.
-	return c.UoW.Do(ctx, func(ctx context.Context) error {
-		claimed, err := c.ProcessedEvents.Claim(ctx, transferReplyConsumerName, e.ID())
-		if err != nil {
-			return fmt.Errorf("claim processed event: %w", err)
-		}
-		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed TransferStockAllocated event", "event_id", e.ID())
-			return nil
-		}
-		if err := c.Applier.ApplyAllocation(ctx, in); err != nil {
-			if usecases.IsDeterministic(err) {
-				c.Logger.WarnContext(ctx, "skipping deterministic allocation-reply failure", "error", err, "event_id", e.ID(), "transfer_id", data.TransferID)
-				return nil
-			}
-			return fmt.Errorf("apply TransferStockAllocated: %w", err)
-		}
-		c.Logger.InfoContext(ctx, "transfer allocated", "event_id", e.ID(), "transfer_id", data.TransferID, "reservation_id", data.ReservationID)
-		return nil
+	return c.apply(ctx, msg, e, "TransferStockAllocated", data.TransferID, func(ctx context.Context) error {
+		return c.Applier.ApplyAllocation(ctx, in)
 	})
 }
 
-func (c *TransferReplyConsumer) handleRejected(ctx context.Context, e ce.Event) error {
+func (c *TransferReplyConsumer) handleRejected(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferStockAllocationRejectedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferStockAllocationRejected payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockAllocationRejected payload %s: %w", e.ID(), err))
 	}
 	reason := transfer.RejectionReason(data.Reason)
 	if !reason.Valid() {
-		c.Logger.WarnContext(ctx, "skipping TransferStockAllocationRejected with unknown reason", "reason", data.Reason, "event_id", e.ID())
-		return nil
+		// Same condition, same treatment as the aggregate's own
+		// ErrUnknownRejectionReason: a contract break, dead-lettered.
+		return c.dlq().send(ctx, msg, fmt.Errorf("%w: %q on event %s", transfer.ErrUnknownRejectionReason, data.Reason, e.ID()))
 	}
 	in := usecases.ApplyRejectionInput{
 		TransferID: transfer.TransferID(data.TransferID),
@@ -292,25 +299,8 @@ func (c *TransferReplyConsumer) handleRejected(ctx context.Context, e ce.Event) 
 		Reason:     reason,
 		OccurredAt: e.Time().UTC(),
 	}
-
-	return c.UoW.Do(ctx, func(ctx context.Context) error {
-		claimed, err := c.ProcessedEvents.Claim(ctx, transferReplyConsumerName, e.ID())
-		if err != nil {
-			return fmt.Errorf("claim processed event: %w", err)
-		}
-		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed TransferStockAllocationRejected event", "event_id", e.ID())
-			return nil
-		}
-		if err := c.Applier.ApplyRejection(ctx, in); err != nil {
-			if usecases.IsDeterministic(err) {
-				c.Logger.WarnContext(ctx, "skipping deterministic rejection-reply failure", "error", err, "event_id", e.ID(), "transfer_id", data.TransferID)
-				return nil
-			}
-			return fmt.Errorf("apply TransferStockAllocationRejected: %w", err)
-		}
-		c.Logger.InfoContext(ctx, "transfer unfulfillable", "event_id", e.ID(), "transfer_id", data.TransferID, "reason", data.Reason)
-		return nil
+	return c.apply(ctx, msg, e, "TransferStockAllocationRejected", data.TransferID, func(ctx context.Context) error {
+		return c.Applier.ApplyRejection(ctx, in)
 	})
 }
 
@@ -319,47 +309,28 @@ func (c *TransferReplyConsumer) handleRejected(ctx context.Context, e ce.Event) 
 // The transfer_id (not the line-keyed subject) is the Load key; the
 // variance is informational (recorded in the log, not the aggregate — v1
 // has no variance disposition workflow).
-func (c *TransferReplyConsumer) handleReceiptStaged(ctx context.Context, e ce.Event) error {
+func (c *TransferReplyConsumer) handleReceiptStaged(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferReceiptStagedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferReceiptStaged payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferReceiptStaged payload %s: %w", e.ID(), err))
 	}
 	in := usecases.ApplyReceiptStagedInput{
 		TransferID: transfer.TransferID(data.TransferID),
 		LineID:     data.TransferLineID,
 		OccurredAt: e.Time().UTC(),
 	}
-
-	return c.UoW.Do(ctx, func(ctx context.Context) error {
-		claimed, err := c.ProcessedEvents.Claim(ctx, transferReplyConsumerName, e.ID())
-		if err != nil {
-			return fmt.Errorf("claim processed event: %w", err)
-		}
-		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed TransferReceiptStaged event", "event_id", e.ID())
-			return nil
-		}
-		if err := c.Applier.ApplyReceiptStaged(ctx, in); err != nil {
-			if usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err) {
-				c.Logger.WarnContext(ctx, "skipping deterministic TransferReceiptStaged failure (unknown or out-of-order transfer)", "error", err, "event_id", e.ID(), "transfer_id", data.TransferID)
-				return nil
-			}
-			return fmt.Errorf("apply TransferReceiptStaged: %w", err)
-		}
-		c.Logger.InfoContext(ctx, "transfer receipt staged (ARRIVED)", "event_id", e.ID(), "transfer_id", data.TransferID, "variance", data.Variance)
-		return nil
+	return c.apply(ctx, msg, e, "TransferReceiptStaged", data.TransferID, func(ctx context.Context) error {
+		return c.Applier.ApplyReceiptStaged(ctx, in)
 	})
 }
 
 // handleStowed applies inventory-storage's TransferStockStowed destination
 // fact: ARRIVED → RECEIVED (terminal) with the destination stow
 // allocations persisted.
-func (c *TransferReplyConsumer) handleStowed(ctx context.Context, e ce.Event) error {
+func (c *TransferReplyConsumer) handleStowed(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferStockStowedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed TransferStockStowed payload", "error", err, "event_id", e.ID())
-		return nil
+		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockStowed payload %s: %w", e.ID(), err))
 	}
 	allocations := make([]transfer.StowAllocation, 0, len(data.Allocations))
 	for _, a := range data.Allocations {
@@ -377,29 +348,51 @@ func (c *TransferReplyConsumer) handleStowed(ctx context.Context, e ce.Event) er
 		},
 		OccurredAt: e.Time().UTC(),
 	}
+	return c.apply(ctx, msg, e, "TransferStockStowed", data.TransferID, func(ctx context.Context) error {
+		return c.Applier.ApplyStowed(ctx, in)
+	})
+}
 
+// apply runs claim + use case in ONE transaction (a failed apply rolls the
+// claim back, so a redelivery is processed, not skipped). Outcomes:
+//
+//   - refused reply (usecases.IsRefusedReply): dead-lettered INSIDE the
+//     transaction, so a failed DLQ write rolls the claim back and the loop
+//     retries; a successful one commits the claim and the offset moves on;
+//   - unknown transfer / illegal transition (replay, out-of-order): WARN
+//     and skip, claim committed;
+//   - anything else: transient, returned for the loop to retry.
+func (c *TransferReplyConsumer) apply(ctx context.Context, msg kafkago.Message, e ce.Event, what, transferID string, op func(ctx context.Context) error) error {
 	return c.UoW.Do(ctx, func(ctx context.Context) error {
 		claimed, err := c.ProcessedEvents.Claim(ctx, transferReplyConsumerName, e.ID())
 		if err != nil {
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed TransferStockStowed event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", e.ID())
 			return nil
 		}
-		if err := c.Applier.ApplyStowed(ctx, in); err != nil {
-			if usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err) {
-				c.Logger.WarnContext(ctx, "skipping deterministic TransferStockStowed failure (unknown or out-of-order transfer)", "error", err, "event_id", e.ID(), "transfer_id", data.TransferID)
-				return nil
-			}
-			return fmt.Errorf("apply TransferStockStowed: %w", err)
+		err = op(ctx)
+		switch {
+		case err == nil:
+			c.Logger.InfoContext(ctx, "transfer reply applied", "reply", what, "event_id", e.ID(), "transfer_id", transferID)
+			return nil
+		case usecases.IsRefusedReply(err):
+			return c.dlq().send(ctx, msg, fmt.Errorf("%s %s refused: %w", what, e.ID(), err))
+		case usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err):
+			c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown transfer or replayed/out-of-order reply)", "error", err, "event_id", e.ID(), "transfer_id", transferID)
+			return nil
+		default:
+			return fmt.Errorf("apply %s: %w", what, err)
 		}
-		c.Logger.InfoContext(ctx, "transfer stowed (RECEIVED, terminal)", "event_id", e.ID(), "transfer_id", data.TransferID, "stowed", data.StowedQuantity)
-		return nil
 	})
 }
 
-// Close releases the underlying Kafka reader.
+// Close releases the underlying Kafka reader and the dead-letter writer.
 func (c *TransferReplyConsumer) Close() error {
-	return c.Reader.Close()
+	err := c.Reader.Close()
+	if c.DLQ != nil {
+		err = errors.Join(err, c.DLQ.Close())
+	}
+	return err
 }
