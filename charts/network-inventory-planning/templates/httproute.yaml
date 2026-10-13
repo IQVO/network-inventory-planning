@@ -5,6 +5,10 @@ metadata:
   name: {{ include "network-inventory-planning.fullname" . }}
   labels:
     {{- include "network-inventory-planning.labels" . | nindent 4 }}
+  {{- with include "network-inventory-planning.kongPluginNames" . }}
+  annotations:
+    konghq.com/plugins: {{ . | quote }}
+  {{- end }}
 spec:
   parentRefs:
     {{- range .Values.gatewayApi.parentRefs }}
