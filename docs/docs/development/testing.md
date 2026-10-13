@@ -95,7 +95,13 @@ configured today.
 
 `charts/network-inventory-planning/tests/test_env_wiring.py` and
 `test_service_selectors.py` check the rendered chart's env names against the
-binaries and the Service selectors; no CI job runs them.
+binaries (including `OUTBOX_MAX_ATTEMPTS`, default `"20"`) and the Service
+selectors. The CI job `chart-tests` runs every `tests/test_*.py` with helm
+v3.16.4 and a hash-pinned PyYAML
+(`pip install --require-hashes -r .github/requirements/chart-tests.txt`); a
+test that prints `SKIP` fails the job. Locally:
+`python3 charts/network-inventory-planning/tests/test_env_wiring.py` (needs
+`helm` and PyYAML).
 
 ## Make targets
 
@@ -137,6 +143,7 @@ binaries and the Service selectors; no CI job runs them.
 | `api-lint` | push, PR | Spectral on `apis/openapi.yaml` and `apis/asyncapi.yaml` |
 | `vuln` | push, PR | govulncheck |
 | `helm-lint` | PR | `ct lint --charts charts/network-inventory-planning` |
+| `chart-tests` | push, PR | every `charts/network-inventory-planning/tests/test_*.py` (env wiring, Service selectors) with hash-pinned PyYAML; a `SKIP` fails the job |
 | `arch-test` | push, PR | `go test ./internal/architecture/... -v` |
 | `web` | push, PR | in `web/`: `npm ci`, lint (oxlint), `tsc -b`, vitest, build (with `warehouse-ui-kit` built first) |
 | `trivy-scan` | PR | builds the image, uploads SARIF, blocks on fixable CRITICAL/HIGH |
