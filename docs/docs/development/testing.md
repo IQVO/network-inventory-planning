@@ -74,6 +74,7 @@ Kafka tests must start a broker through testcontainers: the fitness test
 | `TestNoEventEnvelopeToggleOrFlatEnvelope` | no flat-envelope fallback |
 | `TestCloudEventsOnly` | every producer and consumer goes through the CloudEvents package |
 | `TestReplayConsumersSetCommitInterval` | a reader with a process-unique group id (full-replay cache consumer) must set `CommitInterval`; NIP has no such reader today |
+| `TestKafkaWritersSetRequiredAcks`, `TestKafkaWriterAcksSensorBites` | every kafka-go `Writer{...}` literal in a non-test file under `internal/` or `cmd/` sets `RequiredAcks` (kafka-go defaults to `RequireNone`, acks=0, which silently drops messages on a broker blip); the sensor is proven to fail |
 | `TestEventCatalogueMatchesContract`, `TestEventCatalogueDetector` | every published type appears in the event catalogue contract |
 
 ### Contract tests
