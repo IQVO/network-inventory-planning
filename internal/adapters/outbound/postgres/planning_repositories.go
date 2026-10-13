@@ -78,7 +78,14 @@ func NewSiteSkuDemandRepo(pool *pgxpool.Pool) *SiteSkuDemandRepo {
 }
 
 // Upsert replaces the row keyed by d's source order + line whatever the
-// state: a REMOVED fact tombstones the line's demand in place.
+// state (a REMOVED fact tombstones the line's demand in place) — but ONLY
+// when d is not older than the stored row (ADR 0014): as_of holds the
+// applied event's CloudEvents time, and an event whose time is strictly
+// before it is a stale redelivery (a re-published fact with a fresh
+// CloudEvents id, a replay after processed_events pruning) that must not
+// overwrite newer demand. Ties apply: one key is delivered in partition
+// order, so an equal-time later message is the newer one. Returns false
+// when the guard refused the write.
 func (r *SiteSkuDemandRepo) Upsert(ctx context.Context, d planning.SiteSkuDemand) (bool, error) {
 	tag, err := queryFor(ctx, r.pool).Exec(ctx, `
 		INSERT INTO site_sku_demand (source_order_id, line_no, site_id, sku, demanded_units, due_at, state, assignment_version, as_of)
@@ -91,6 +98,7 @@ func (r *SiteSkuDemandRepo) Upsert(ctx context.Context, d planning.SiteSkuDemand
 			state              = EXCLUDED.state,
 			assignment_version = EXCLUDED.assignment_version,
 			as_of              = EXCLUDED.as_of
+		WHERE EXCLUDED.as_of >= site_sku_demand.as_of
 	`, d.SourceOrderID, d.LineNo, d.Site, d.SKU, d.DemandedUnits, d.DueAt, string(d.State), d.AssignmentVersion, d.AsOf)
 	if err != nil {
 		return false, err

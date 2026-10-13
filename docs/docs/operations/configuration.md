@@ -42,8 +42,10 @@ Source: `cmd/network-inventory-planning/main.go`, `internal/adapters/outbound/te
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | no | OTLP/gRPC endpoint (insecure) for traces and metrics (ADR 0012). Export never blocks startup. | `otel.endpoint` (rendered when `otel.enabled`, default `otel-collector.observability.svc.cluster.local:4317`) |
 | `ENVIRONMENT` | `local` | no | `deployment.environment.name` resource attribute. | `environment` |
 
-The API process logs with Go's default `slog` logger; it does not read
-`LOG_LEVEL`.
+The API process logs with Go's default `slog` logger. `LOG_LEVEL` sets its
+level: `debug`, `info` (default), `warn`/`warning`, `error`, case-insensitive;
+anything else is `info`. The chart does not render it for the API; use
+`extraEnv`.
 
 ## `mcp`
 

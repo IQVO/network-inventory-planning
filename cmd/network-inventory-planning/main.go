@@ -65,7 +65,26 @@ func main() {
 	}
 }
 
+// logLevel maps LOG_LEVEL onto a slog level: debug, info, warn or warning
+// (case-insensitive), error; anything else is info.
+func logLevel(raw string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 func run() error {
+	// LOG_LEVEL sets the default logger's level (debug, info, warn/warning,
+	// error), like the fleet's other binaries; the handler stays the
+	// default one.
+	slog.SetLogLoggerLevel(logLevel(os.Getenv("LOG_LEVEL")))
 	logger := slog.Default()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -192,6 +211,8 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	handler.Approve = wired.approve
 	handler.ListRebalanceRuns = wired.runs
 	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)
+	handler.PutPolicy, handler.ListPolicies = wired.putPolicy, wired.listPolicies
+	handler.PutLane, handler.ListLanes = wired.putLane, wired.listLanes
 	runners = append(runners, wired.runners...)
 	closers = append(closers, wired.closers...)
 
@@ -280,8 +301,13 @@ type sagaWiring struct {
 	simulate *usecases.SimulateTransferOptions
 	approve  *usecases.ApproveTransfer
 	runs     *usecases.ListRebalanceRuns
-	runners  []func() error
-	closers  []func() error
+	// The operator-managed rebalance catalogues (ADR 0015).
+	putPolicy    *usecases.PutRebalancePolicy
+	listPolicies *usecases.ListRebalancePolicies
+	putLane      *usecases.PutTransferLane
+	listLanes    *usecases.ListTransferLanes
+	runners      []func() error
+	closers      []func() error
 }
 
 // wireSagas wires the Phase-1 simulation, the Phase-2 approval saga, the
@@ -380,8 +406,9 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	// fleet must be a deliberate deployment choice).
 	rebalanceRuns := postgres.NewRebalanceRunRepo(pool)
 	out.runs = &usecases.ListRebalanceRuns{Runs: rebalanceRuns}
+	catalogue := wireCatalogue(pool, &out)
 	wireHealthTicker(logger, pool, outboxPublisher, &out)
-	wireRebalanceTicker(logger, pool, snapshots, rebalanceRuns, outboxPublisher, maxStaleness, &out)
+	wireRebalanceTicker(logger, snapshots, rebalanceRuns, catalogue, outboxPublisher, maxStaleness, &out)
 	return out, nil
 }
 
@@ -455,16 +482,38 @@ func wireHealthTicker(logger *slog.Logger, pool *pgxpool.Pool, events ports.Tran
 		"interval", interval.String(), "thresholds_env", envStuckThresholds)
 }
 
+// rebalanceCatalogue groups the two operator-managed catalogues the
+// scheduled pass plans from (ADR 0015).
+type rebalanceCatalogue struct {
+	policies ports.RebalancePolicyRepository
+	lanes    ports.TransferLaneRepository
+}
+
+// wireCatalogue builds the Postgres-backed Rebalance Policy and Transfer
+// Lane catalogues and their REST use cases (ADR 0015).
+func wireCatalogue(pool *pgxpool.Pool, out *sagaWiring) rebalanceCatalogue {
+	catalogue := rebalanceCatalogue{
+		policies: postgres.NewRebalancePolicyRepo(pool),
+		lanes:    postgres.NewTransferLaneRepo(pool),
+	}
+	out.putPolicy = &usecases.PutRebalancePolicy{Policies: catalogue.policies, Now: time.Now}
+	out.listPolicies = &usecases.ListRebalancePolicies{Policies: catalogue.policies}
+	out.putLane = &usecases.PutTransferLane{Lanes: catalogue.lanes, Now: time.Now}
+	out.listLanes = &usecases.ListTransferLanes{Lanes: catalogue.lanes}
+	return catalogue
+}
+
 // wireRebalanceTicker starts the scheduled rebalance loop (ADR 0007):
 // every NIP_REBALANCE_SCHEDULE (NO default — unset means off) it runs the
-// SAME fail-closed snapshot build + planner as the simulation, persists a
+// SAME fail-closed snapshot build as the simulation, plans from the
+// Rebalance Policy and Transfer Lane catalogues (ADR 0015), persists a
 // rebalance_runs row and publishes a RebalanceRunCompleted occurrence.
 // Observe-only: no approval, no allocation command — ever.
 func wireRebalanceTicker(
 	logger *slog.Logger,
-	pool *pgxpool.Pool,
 	snapshots ports.PlanningSnapshotRepository,
 	runs ports.RebalanceRunRepository,
+	catalogue rebalanceCatalogue,
 	events ports.TransferEventPublisher,
 	maxStaleness time.Duration,
 	out *sagaWiring,
@@ -487,6 +536,8 @@ func wireRebalanceTicker(
 	run := usecases.RunScheduledRebalance{
 		Snapshot:     snapshots,
 		Planner:      transfer.Planner{},
+		Policies:     catalogue.policies,
+		Lanes:        catalogue.lanes,
 		Runs:         runs,
 		Events:       events,
 		MaxStaleness: maxStaleness,

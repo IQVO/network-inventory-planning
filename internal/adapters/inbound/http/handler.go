@@ -40,6 +40,13 @@ type Handler struct {
 	// others: unconfigured means 503, never a fabricated empty answer.
 	GetTransfer   *usecases.GetTransfer
 	ListTransfers *usecases.ListTransfers
+	// PutPolicy/ListPolicies and PutLane/ListLanes serve the
+	// operator-managed Rebalance Policy and Transfer Lane catalogues
+	// (ADR 0015). Nil-able: unconfigured means 503.
+	PutPolicy    *usecases.PutRebalancePolicy
+	ListPolicies *usecases.ListRebalancePolicies
+	PutLane      *usecases.PutTransferLane
+	ListLanes    *usecases.ListTransferLanes
 }
 
 // DefaultServiceName is the OTel instrumentation scope for the HTTP surface.
@@ -75,6 +82,10 @@ func (h Handler) Routes() http.Handler {
 	r.Get("/v1/rebalance-runs", h.rebalanceRuns)
 	r.Get("/v1/transfers", h.listTransfers)
 	r.Get("/v1/transfers/{id}", h.getTransfer)
+	r.Get("/v1/rebalance-policies", h.listPolicies)
+	r.Put("/v1/rebalance-policies", h.putPolicy)
+	r.Get("/v1/transfer-lanes", h.listLanes)
+	r.Put("/v1/transfer-lanes", h.putLane)
 	return r
 }
 

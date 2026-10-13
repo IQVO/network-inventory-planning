@@ -35,7 +35,10 @@ type SiteCapabilityRepository interface {
 // model (keyed source_order_id+line_no; state ACTIVE/REMOVED).
 type SiteSkuDemandRepository interface {
 	// Upsert replaces the row keyed by d's source order + line whatever
-	// the state (a REMOVED fact tombstones the line's demand).
+	// the state (a REMOVED fact tombstones the line's demand), unless d
+	// is OLDER than the stored row (its AsOf, the event's CloudEvents
+	// time, is strictly before the stored one): then nothing changes and
+	// applied is false (ADR 0014).
 	Upsert(ctx context.Context, d planning.SiteSkuDemand) (applied bool, err error)
 }
 

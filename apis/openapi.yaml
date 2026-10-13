@@ -23,7 +23,10 @@ tags:
   - name: transfers
     description: Inter-warehouse transfer saga (approval and lifecycle).
   - name: rebalance
-    description: Scheduled (observe-only) rebalance run history (ADR 0007).
+    description: >-
+      Scheduled (observe-only) rebalance run history (ADR 0007) and the
+      operator-managed Rebalance Policy and Transfer Lane catalogues the
+      scheduled pass plans from (ADR 0015).
   - name: reports
     description: >-
       Read-only saga-health analytics reports (ADR 0009) served by the separate
@@ -167,6 +170,148 @@ paths:
               schema:
                 $ref: '#/components/schemas/RebalanceRunsResponse'
         '400':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+
+  /v1/rebalance-policies:
+    get:
+      operationId: listRebalancePolicies
+      tags: [rebalance]
+      summary: List the Rebalance Policy catalogue.
+      description: |
+        The operator-managed Rebalance Policy catalogue (ADR 0015), one entry
+        per site + SKU, ordered by site then SKU. Each entry embeds the SAME
+        Policy shape POST /v1/transfer-proposals:generate accepts, plus its
+        revision (the optimistic-concurrency token). The scheduled rebalance
+        pass plans from this catalogue.
+      responses:
+        '200':
+          description: Every policy in the catalogue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebalancePolicyList'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putRebalancePolicy
+      tags: [rebalance]
+      summary: Create or revise one Rebalance Policy (idempotent).
+      description: |
+        Upserts the Policy in the body, keyed by its Site + SKU. Idempotent:
+        a PUT carrying exactly the stored policy writes nothing and answers
+        200 with outcome UNCHANGED. A changed policy bumps the revision
+        (outcome UPDATED); a new one is created at revision 1 (201,
+        outcome CREATED). Optimistic concurrency: send the entry's ETag in
+        If-Match to update only that revision (412 when it moved on);
+        without If-Match the PUT applies to the current revision. Two
+        writers racing on the same revision: one wins, the other gets 409.
+        422 for an entry refused on its face (missing key, negative
+        quantity, TargetStock below SafetyStock).
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Policy'
+      responses:
+        '200':
+          description: Updated (or unchanged, on an idempotent replay).
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebalancePolicyEntry'
+        '201':
+          description: Created at revision 1.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebalancePolicyEntry'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/transfer-lanes:
+    get:
+      operationId: listTransferLanes
+      tags: [rebalance]
+      summary: List the Transfer Lane catalogue.
+      description: |
+        The operator-managed Transfer Lane catalogue (ADR 0015), one entry
+        per directed origin → destination, ordered by origin then
+        destination. Each entry embeds the SAME Lane shape the generate
+        endpoint accepts, plus its revision. The scheduled pass uses a lane
+        only when it is Enabled AND site_capability lets its origin send and
+        its destination receive.
+      responses:
+        '200':
+          description: Every lane in the catalogue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferLaneList'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putTransferLane
+      tags: [rebalance]
+      summary: Create or revise one Transfer Lane (idempotent).
+      description: |
+        Upserts the Lane in the body, keyed by its Origin → Destination
+        (directed: WH1→WH2 and WH2→WH1 are two lanes). Same idempotency,
+        If-Match, 409 and 422 rules as PUT /v1/rebalance-policies; a lane
+        whose Origin equals its Destination, or with a negative LeadTime or
+        UnitHandlingCost, is a 422. Disable a lane with Enabled: false
+        (there is no DELETE).
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Lane'
+      responses:
+        '200':
+          description: Updated (or unchanged, on an idempotent replay).
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferLaneEntry'
+        '201':
+          description: Created at revision 1.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferLaneEntry'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
@@ -424,6 +569,25 @@ components:
         type: string
         format: date-time
       example: '2026-10-07T00:00:00Z'
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        Optimistic concurrency for a catalogue PUT (ADR 0015): the entry's
+        current revision, as its ETag ("3") or bare (3). The PUT applies only
+        while the stored revision still equals it (412 version-mismatch
+        otherwise, including when the entry does not exist). Omit it to
+        apply the PUT to whatever revision is current.
+      schema:
+        type: string
+      example: '"3"'
+  headers:
+    ETag:
+      description: The catalogue entry's revision as a strong ETag (send it back in If-Match).
+      schema:
+        type: string
+      example: '"2"'
   responses:
     Problem:
       description: RFC 7807 problem+json error.
@@ -508,6 +672,58 @@ components:
           type: integer
         Enabled:
           type: boolean
+    CatalogueOutcome:
+      type: string
+      enum: [CREATED, UPDATED, UNCHANGED]
+      description: What a catalogue PUT did (UNCHANGED = idempotent replay, nothing written).
+    RebalancePolicyEntry:
+      type: object
+      required: [policy, revision, updatedAt]
+      properties:
+        policy:
+          $ref: '#/components/schemas/Policy'
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Optimistic-concurrency token (also the ETag); 1 on creation, +1 per change.
+        updatedAt:
+          type: string
+          format: date-time
+        outcome:
+          $ref: '#/components/schemas/CatalogueOutcome'
+    RebalancePolicyList:
+      type: object
+      required: [policies]
+      properties:
+        policies:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebalancePolicyEntry'
+    TransferLaneEntry:
+      type: object
+      required: [lane, revision, updatedAt]
+      properties:
+        lane:
+          $ref: '#/components/schemas/Lane'
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Optimistic-concurrency token (also the ETag); 1 on creation, +1 per change.
+        updatedAt:
+          type: string
+          format: date-time
+        outcome:
+          $ref: '#/components/schemas/CatalogueOutcome'
+    TransferLaneList:
+      type: object
+      required: [lanes]
+      properties:
+        lanes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransferLaneEntry'
     GenerateRequest:
       type: object
       required: [asOf, positions, policies, lanes]
