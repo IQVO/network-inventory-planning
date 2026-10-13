@@ -102,7 +102,10 @@ The API logs with Go's default `slog` logger (text to stderr). `mcp`,
 | `KAFKA_BROKERS not configured; outbox disabled` | WARN | `enable_with` | Approval answers 503. |
 | `work release not configured; POST /v1/transfers:approve answers 503` | WARN | `error`, `enable_with` | Pick path or offset missing. |
 | `consumer running` / `consumer disabled` | INFO | `name`, `group_id`, `brokers` | One line per consumer at boot. |
-| `outbox relay running` | INFO | `topic`, `brokers` | Relay started. |
+| `outbox relay running` | INFO | `topic`, `brokers`, `max_attempts` | Relay started. |
+| `outbox relay: send failed, stopping this pass at the failed row` | WARN | `outbox_id`, `topic`, `attempts`, `error` | One failed send below the attempt cap; the next tick retries the row. |
+| `outbox relay: row reached the attempt cap and is excluded from future claims` | ERROR | `outbox_id`, `topic`, `event_type`, `key`, `attempts`, `max_attempts`, `error` | Logged once, for the failure that reaches `OUTBOX_MAX_ATTEMPTS`; the row is no longer claimed until re-armed ([ADR 0016](../adr/0016-outbox-relay-attempt-cap.md)). |
+| `invalid OUTBOX_MAX_ATTEMPTS; using the default` | WARN | `value`, `default`, `error` | A negative or unparsable cap; `20` is used. |
 | `saga health check running` / `disabled` | INFO / WARN / ERROR | `interval`, `thresholds_env`, `error` | Ticker state at boot. |
 | `scheduled rebalance running` / `disabled` | INFO / WARN / ERROR | `interval`, `enable_with` | Ticker state at boot. |
 | `<consumer> handling failed; retrying the same message` | ERROR | `error`, `partition`, `offset`, `attempt`, `retry_in` | A transient failure blocking a partition. |
@@ -133,6 +136,7 @@ reports and MCP processes too, but only the API exports metrics today.
 | API 5xx ratio | `sum(rate(http_server_request_duration_seconds_count{service_name="network-inventory-planning",http_response_status_code=~"5.."}[5m])) / sum(rate(http_server_request_duration_seconds_count{service_name="network-inventory-planning"}[5m])) > 0.05` | 503s mean fail-closed read models or missing configuration. |
 | Simulation refusing | 503 rate on `http_route="/v1/transfer-simulations"` above zero for 15m | Read models stale beyond `PLANNING_MAX_STALENESS`. |
 | Outbox backlog | unpublished `outbox_events` older than 5 minutes | Relay off, broker down, or a head-of-line row failing. |
+| Outbox rows excluded by the attempt cap | `SELECT count(*) FROM outbox_events WHERE published_at IS NULL AND attempts >= 20` (your `OUTBOX_MAX_ATTEMPTS`) above 0, or the Loki ERROR line `row reached the attempt cap` | A poison row (or a long broker outage) was excluded; it is never retried until an operator re-arms it ([Runbook](./runbook.md#an-outbox-row-hit-the-attempt-cap)). |
 | Consumer lag | lag of the five NIP groups and `network-inventory-planning-analytics` (Kafka exporter) | A transient error retries the same message forever. |
 | Analytics DLQ | any message on `warehouse.network-inventory-planning.analytics.dlq` | A poison saga-health event. |
 | Transfer DLQs | any message with `x-dlq-consumer` = `transfer-reply-consumer` / `transfer-fact-consumer` on `warehouse.inventory.events.dlq` / `warehouse.fulfillment.events.dlq`, or the ERROR log line above | A producer and NIP disagree about a transfer; that transfer will not advance on its own. |

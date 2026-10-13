@@ -106,19 +106,22 @@ sequenceDiagram
   participant S as RelaySink
   participant K as Kafka
   loop every relay tick
-    L->>DB: claim unpublished rows in id order, FOR UPDATE SKIP LOCKED
+    L->>DB: claim unpublished rows below OUTBOX_MAX_ATTEMPTS in id order, FOR UPDATE SKIP LOCKED
     DB-->>L: rows
     L->>S: send one row with its stored headers
     S->>K: write to the row's topic
     K-->>S: ack
     L->>DB: set published_at
     Note over L: on a send failure increment attempts, store last_error and end the pass so no later row overtakes
+    Note over L: a row reaching OUTBOX_MAX_ATTEMPTS, default 20, is logged at ERROR and no longer claimed (ADR 0016)
   end
 ```
 
 Source: `internal/adapters/outbound/postgres/outbox.go`, `internal/adapters/outbound/kafka/publisher.go`, `cmd/network-inventory-planning/main.go`
 The relay runs when `OUTBOX_RELAY_ENABLED` is true and `KAFKA_BROKERS` is set;
-production sets no attempt cap, so a failing row is retried every tick.
+a failing row is retried every tick until it reaches `OUTBOX_MAX_ATTEMPTS`
+(default 20, `0` = unlimited), after which later rows overtake it
+([ADR 0016](../adr/0016-outbox-relay-attempt-cap.md)).
 
 ## 5. Apply the allocation reply and release the pick
 

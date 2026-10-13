@@ -52,6 +52,7 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `config.transferDispatchPathId` | `""` | `TRANSFER_DISPATCH_PATH_ID` |
 | `config.transferDispatchCptOffset` | `""` | `TRANSFER_DISPATCH_CPT_OFFSET` (binary default 3h) |
 | `config.outboxRelayEnabled` | `"true"` | `OUTBOX_RELAY_ENABLED` — transactional-outbox relay drain |
+| `config.outboxMaxAttempts` | `"20"` | `OUTBOX_MAX_ATTEMPTS` — relay attempt cap: a row that failed this many sends is excluded and logged at ERROR; `"0"` = unlimited (ADR 0016) |
 | `database.url` | `""` | Inline `DATABASE_URL`; prefer `database.existingSecret` |
 | `database.existingSecret` | `""` | Existing Secret name with `DATABASE_URL` key (`secretKeyRef`) |
 | `database.existingSecretKey` | `DATABASE_URL` | Key inside that Secret |

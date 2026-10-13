@@ -67,7 +67,7 @@ erDiagram
     jsonb headers
     timestamptz created_at
     timestamptz published_at "nullable"
-    integer attempts
+    integer attempts "relay excludes the row at OUTBOX_MAX_ATTEMPTS, ADR 0016"
     text last_error "nullable"
   }
   processed_events {

@@ -1,6 +1,6 @@
 # ADR-0003: Phase-2 inter-warehouse transfer saga (approval, outbox, allocation replies)
 
-Status: Accepted
+Status: Accepted (per-key ordering consequence amended by [ADR-0016](./0016-outbox-relay-attempt-cap.md))
 
 ## Context
 

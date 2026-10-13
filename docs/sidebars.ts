@@ -95,6 +95,7 @@ const sidebars: SidebarsConfig = {
         'adr/0013-poison-replies-dead-lettered',
         'adr/0014-site-sku-demand-ordering-guard',
         'adr/0015-rebalance-policy-and-lane-catalogue',
+        'adr/0016-outbox-relay-attempt-cap',
       ],
     },
   ],

@@ -44,6 +44,7 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | `internal/adapters/outbound/postgres/transfer_repo_rejection_integration_test.go` | the rejection path persists | Postgres |
 | `internal/adapters/outbound/postgres/postgres_integration/rebalance_integration_test.go` | `rebalance_runs` repository | Postgres |
 | `internal/adapters/outbound/postgres/postgres_integration/catalogue_integration_test.go` | migration 0005; catalogue create, idempotent replay, `If-Match`, ordered listing; two concurrent writers on one revision: exactly one wins (ADR 0015) | Postgres |
+| `internal/adapters/outbound/postgres/postgres_integration/outbox_relay_cap_integration_test.go` | the relay attempt cap: a poison row is excluded after `WithMaxAttempts` failures with one ERROR log (id, topic, type, key) and the same-key good row behind it publishes; the re-arm SQL makes it claimable again; with `0` the poison row blocks forever (ADR 0016) | Postgres |
 | `internal/adapters/outbound/postgres/postgres_integration/site_sku_demand_ordering_integration_test.go` | an older demand fact (ACTIVE or REMOVED) never overwrites newer demand (ADR 0014) | Postgres |
 | `internal/adapters/outbound/analyticsstore/postgres_integration_test.go` | analytical projection and report queries | `postgres:16-alpine` |
 | `internal/adapters/inbound/kafka/kafka_integration/planning_read_models_integration_test.go` | the three read-model consumers end to end | `confluentinc/confluent-local:7.6.1` + Postgres |
@@ -65,6 +66,7 @@ Kafka tests must start a broker through testcontainers: the fitness test
 | `TestHexagonalArchitecture` | domain and application never import adapters |
 | `TestMCPAdapterDependencyRule` | the MCP adapter depends only on application and domain, and nothing depends on it |
 | `TestMCPOptionalToolInputsCarryOmitempty`, `TestMCPOptionalFieldDetector` | an MCP tool input field whose `jsonschema` description marks it optional ("optional", "omit", "defaults to", "only …") carries `omitempty`/`omitzero`, so the inferred schema does not make it required |
+| `TestOutboxRelaysPassAttemptCap`, `TestOutboxRelayCapSensorFailsOnBadFixtures` | every non-test `NewOutboxRelay` call under `cmd/` passes `WithMaxAttempts` ([ADR 0016](../adr/0016-outbox-relay-attempt-cap.md)), so one poison row cannot block the relay forever; the sensor is proven to fail |
 | `TestNoAuthMiddlewareReintroduced` | no auth middleware on REST or MCP |
 | `TestKafkaConsumerGroupNeverHardcodedInline` | group ids come from the composition root's env |
 | `TestKafkaIntegrationTestsUseTestcontainers` | see above |

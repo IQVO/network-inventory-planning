@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -100,12 +101,21 @@ type RelaySink interface {
 
 // OutboxRelay polls outbox_events for unpublished rows and sends them to
 // sink ONE AT A TIME in id order, marking each published as it succeeds —
-// the same pattern as inventory-storage's relay (per-key ordering is never
-// violated by a later row overtaking a failed earlier one). Publish only
-// ever inserts rows; this is the only path by which a row reaches Kafka.
+// the same pattern as inventory-storage's relay. A failure stops the pass at
+// the failed row, so a later row never overtakes an earlier one that is
+// still being retried. Publish only ever inserts rows; this is the only path
+// by which a row reaches Kafka.
+//
+// With WithMaxAttempts(n), n > 0 (ADR 0016; cmd/network-inventory-planning
+// passes OUTBOX_MAX_ATTEMPTS, default 20), a row that has failed n times is
+// excluded from claims and logged at ERROR: later rows, including rows with
+// the same key, then overtake it. That trade is deliberate — one poison row
+// must not stop the whole relay forever — and the excluded row stays in
+// outbox_events (attempts, last_error) until an operator re-arms it.
 type OutboxRelay struct {
 	pool        *pgxpool.Pool
 	sink        RelaySink
+	logger      *slog.Logger
 	interval    time.Duration
 	batchSize   int
 	maxAttempts int
@@ -113,6 +123,11 @@ type OutboxRelay struct {
 
 // OutboxRelayOption configures an OutboxRelay.
 type OutboxRelayOption func(*OutboxRelay)
+
+// DefaultOutboxMaxAttempts is the attempt cap the composition root uses when
+// OUTBOX_MAX_ATTEMPTS is unset (fleet convention, ADR 0016). The relay's own
+// zero value stays 0 (unlimited) so the option is always an explicit choice.
+const DefaultOutboxMaxAttempts = 20
 
 // WithRelayInterval overrides the default 1s poll interval.
 func WithRelayInterval(d time.Duration) OutboxRelayOption {
@@ -122,15 +137,23 @@ func WithRelayInterval(d time.Duration) OutboxRelayOption {
 // WithBatchSize overrides the default 100-row claim batch.
 func WithBatchSize(n int) OutboxRelayOption { return func(r *OutboxRelay) { r.batchSize = n } }
 
+// WithRelayLogger overrides the default slog.Default().
+func WithRelayLogger(l *slog.Logger) OutboxRelayOption {
+	return func(r *OutboxRelay) { r.logger = l }
+}
+
 // WithMaxAttempts overrides the default 0 (unlimited retries): a row that
 // failed this many times is excluded from future claims but stays visible
-// in outbox_events for manual inspection.
+// in outbox_events for manual inspection, and the failure that reaches the
+// cap is logged at ERROR with the row's id, topic, type and key (ADR 0016).
+// 0 keeps retrying without bound. Every cmd/* that builds a relay must pass
+// it (architecture fitness test TestOutboxRelaysPassAttemptCap).
 func WithMaxAttempts(n int) OutboxRelayOption { return func(r *OutboxRelay) { r.maxAttempts = n } }
 
 // NewOutboxRelay builds an OutboxRelay draining pool's outbox_events onto
 // sink.
 func NewOutboxRelay(pool *pgxpool.Pool, sink RelaySink, opts ...OutboxRelayOption) *OutboxRelay {
-	r := &OutboxRelay{pool: pool, sink: sink, interval: time.Second, batchSize: 100}
+	r := &OutboxRelay{pool: pool, sink: sink, logger: slog.Default(), interval: time.Second, batchSize: 100}
 	for _, opt := range opts {
 		opt(r)
 	}
@@ -174,17 +197,7 @@ func (r *OutboxRelay) RelayOnce(ctx context.Context) (int, error) {
 	published := 0
 	for _, row := range rows {
 		if sendErr := r.sink.Send(ctx, row.Encoded); sendErr != nil {
-			if _, uerr := tx.Exec(ctx, `
-				UPDATE outbox_events SET attempts = attempts + 1, last_error = $2 WHERE id = $1
-			`, row.ID, sendErr.Error()); uerr != nil {
-				return published, uerr
-			}
-			// Commit what published so far plus this row's failure
-			// record; stop the pass here so no later row overtakes it.
-			if commitErr := tx.Commit(ctx); commitErr != nil {
-				return published, commitErr
-			}
-			return published, sendErr
+			return published, r.recordFailure(ctx, tx, row, sendErr)
 		}
 		if _, uerr := tx.Exec(ctx, `UPDATE outbox_events SET published_at = now() WHERE id = $1`, row.ID); uerr != nil {
 			return published, uerr
@@ -195,6 +208,45 @@ func (r *OutboxRelay) RelayOnce(ctx context.Context) (int, error) {
 		return published, err
 	}
 	return published, nil
+}
+
+// recordFailure stages the failed row's attempts/last_error, commits the
+// pass (every row published so far in it has its UPDATE staged in the same
+// tx) and stops there, so a later row never overtakes a row that is still
+// being retried. It returns sendErr itself so RelayOnce's caller can assert
+// on the exact failure. The log is written only after the commit, so an
+// ERROR saying a row reached the attempt cap is never emitted for an
+// attempt that was rolled back.
+func (r *OutboxRelay) recordFailure(ctx context.Context, tx pgx.Tx, row OutboxMessage, sendErr error) error {
+	var attempts int
+	if err := tx.QueryRow(ctx, `
+		UPDATE outbox_events SET attempts = attempts + 1, last_error = $2
+		WHERE id = $1
+		RETURNING attempts
+	`, row.ID, sendErr.Error()).Scan(&attempts); err != nil {
+		return errors.Join(sendErr, err)
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return errors.Join(sendErr, commitErr)
+	}
+	r.logFailure(row, attempts, sendErr)
+	return sendErr
+}
+
+// logFailure logs a failed send at WARN while the row will be retried, and
+// at ERROR once the row has reached the attempt cap (ADR 0016): from then on
+// claimBatch excludes it, later rows overtake it (including rows with the
+// same key) and it stays in outbox_events until an operator re-arms it
+// (`UPDATE outbox_events SET attempts = 0 WHERE id = ...`).
+func (r *OutboxRelay) logFailure(row OutboxMessage, attempts int, sendErr error) {
+	if r.maxAttempts > 0 && attempts >= r.maxAttempts {
+		r.logger.Error("outbox relay: row reached the attempt cap and is excluded from future claims; re-arm it with attempts = 0 after fixing the cause",
+			"outbox_id", row.ID, "topic", row.Encoded.Topic, "event_type", row.Encoded.EventType,
+			"key", string(row.Encoded.Key), "attempts", attempts, "max_attempts", r.maxAttempts, "error", sendErr)
+		return
+	}
+	r.logger.Warn("outbox relay: send failed, stopping this pass at the failed row",
+		"outbox_id", row.ID, "topic", row.Encoded.Topic, "attempts", attempts, "error", sendErr)
 }
 
 // claimBatch selects and locks up to batchSize unpublished rows, oldest

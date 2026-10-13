@@ -131,8 +131,36 @@ the API process when `KAFKA_BROKERS` and `OUTBOX_RELAY_ENABLED` are set:
   `FOR UPDATE SKIP LOCKED` and sends them **one at a time**;
 - a sent row gets `published_at = now()`;
 - a failed send increments `attempts`, stores `last_error`, commits, and ends
-  the pass, so no later row overtakes it; the next tick retries it. There is
-  no attempt limit in production (`maxAttempts` 0).
+  the pass, so no later row overtakes it; the next tick retries it (WARN
+  `outbox relay: send failed, stopping this pass at the failed row`);
+- once a row has failed `OUTBOX_MAX_ATTEMPTS` sends (default 20, chart
+  `config.outboxMaxAttempts`, `0` = unlimited) the relay logs it once at ERROR
+  (`outbox relay: row reached the attempt cap and is excluded from future
+  claims`, with `outbox_id`, `topic`, `event_type`, `key`) and stops claiming
+  it ([ADR 0016](../adr/0016-outbox-relay-attempt-cap.md)). Later rows,
+  including rows with the same key, now overtake it. The row is not deleted:
+  it stays in `outbox_events` with `attempts` and `last_error`.
+
+### An outbox row hit the attempt cap
+
+```sql
+-- excluded rows (use your OUTBOX_MAX_ATTEMPTS value)
+SELECT id, topic, event_type, key, attempts, last_error
+FROM outbox_events
+WHERE published_at IS NULL AND attempts >= 20
+ORDER BY id;
+```
+
+Fix the cause in `last_error` (topic, broker, message size), then re-arm the
+row; the next relay pass claims it again and sends the stored bytes with the
+same CloudEvents `id`:
+
+```sql
+UPDATE outbox_events SET attempts = 0 WHERE id = 123;
+```
+
+A re-armed row reaches consumers after later rows with the same key; consumers
+deduplicate on the CloudEvents `id` and must tolerate that late delivery.
 
 Without the relay, approvals and fact applications still commit and their
 rows wait in `outbox_events`.
@@ -187,7 +215,7 @@ not exceed 366 days; a bad range is a 400 `invalid-report-range`, a bad limit a
 | Task | Procedure |
 | --- | --- |
 | Re-publish an event | `UPDATE outbox_events SET published_at = NULL, attempts = 0, last_error = NULL WHERE id = <id>;` The relay resends the stored bytes with the same CloudEvents `id`, so consumers deduplicate it. |
-| Unblock a relay stuck on one row | `SELECT id, topic, event_type, attempts, last_error FROM outbox_events WHERE published_at IS NULL ORDER BY id LIMIT 5;` Fix the cause (topic, broker, ACLs). Every row behind the failing one waits. |
+| Unblock a relay stuck on one row | `SELECT id, topic, event_type, attempts, last_error FROM outbox_events WHERE published_at IS NULL ORDER BY id LIMIT 5;` Fix the cause (topic, broker, ACLs). Every row behind the failing one waits until it succeeds or reaches `OUTBOX_MAX_ATTEMPTS` (then see [An outbox row hit the attempt cap](#an-outbox-row-hit-the-attempt-cap)). |
 | Replay a read-model topic | Reset the group's offsets with the Kafka tools while the API is scaled to 0. Events already in `processed_events` for that consumer are skipped; delete those rows first if they must be re-applied. |
 | Rebuild the analytics model | The projection can be dropped and rebuilt from the topic: point `ANALYTICS_CONSUMER_GROUP` at a new group id (it starts from the earliest offset) on an emptied analytical database, or reset the existing group's offsets. |
 | Drain the analytics DLQ | Read `warehouse.network-inventory-planning.analytics.dlq`, inspect `x-dlq-error`, fix the producer or projection, and re-produce the raw value to the analytics topic. |
