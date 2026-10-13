@@ -74,6 +74,8 @@ spec:
             {{- end }}
             - name: OUTBOX_RELAY_ENABLED
               value: {{ .Values.config.outboxRelayEnabled | quote }}
+            - name: OUTBOX_MAX_ATTEMPTS
+              value: {{ .Values.config.outboxMaxAttempts | quote }}
             - name: ENVIRONMENT
               value: {{ .Values.environment | quote }}
             - name: SERVICE_VERSION

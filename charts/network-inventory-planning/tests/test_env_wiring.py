@@ -40,6 +40,7 @@ EXPECTED_ENV = {
     "TRANSFER_DISPATCH_PATH_ID",
     "TRANSFER_DISPATCH_CPT_OFFSET",
     "OUTBOX_RELAY_ENABLED",
+    "OUTBOX_MAX_ATTEMPTS",
     "DATABASE_URL",
     "MIGRATIONS_DATABASE_URL",
     "KAFKA_BROKERS",
@@ -107,6 +108,7 @@ MCP_EXPECTED_ENV = {
 MCP_FORBIDDEN_ENV = {
     "KAFKA_BROKERS",
     "OUTBOX_RELAY_ENABLED",
+    "OUTBOX_MAX_ATTEMPTS",
     "SITE_CAPABILITY_CONSUMER_GROUP",
     "SITE_SKU_DEMAND_CONSUMER_GROUP",
     "CAPACITY_PLAN_CONSUMER_GROUP",
@@ -132,6 +134,7 @@ PROJECTOR_FORBIDDEN_ENV = {
     "DATABASE_URL",
     "MIGRATIONS_DATABASE_URL",
     "OUTBOX_RELAY_ENABLED",
+    "OUTBOX_MAX_ATTEMPTS",
     "SITE_CAPABILITY_CONSUMER_GROUP",
     "SITE_SKU_DEMAND_CONSUMER_GROUP",
     "CAPACITY_PLAN_CONSUMER_GROUP",
@@ -156,6 +159,7 @@ REPORTS_FORBIDDEN_ENV = {
     "KAFKA_BROKERS",
     "ANALYTICS_CONSUMER_GROUP",
     "OUTBOX_RELAY_ENABLED",
+    "OUTBOX_MAX_ATTEMPTS",
     "MCP_API_KEY",
     "API_KEY",
 }
@@ -269,6 +273,14 @@ def main() -> int:
     for dsn in ("DATABASE_URL", "MIGRATIONS_DATABASE_URL"):
         if dsn in plain or dsn not in from_ref:
             failures.append(f"{dsn} must be wired via secretKeyRef, not a plain value")
+
+    # OUTBOX_MAX_ATTEMPTS (ADR 0016): the relay attempt cap defaults to the
+    # fleet's 20 and 0 (unlimited) renders as is, never dropped as empty.
+    if plain.get("OUTBOX_MAX_ATTEMPTS") != "20":
+        failures.append(f"OUTBOX_MAX_ATTEMPTS = {plain.get('OUTBOX_MAX_ATTEMPTS')!r}, want '20' by default (ADR 0016)")
+    tuned, _ = deployment_env(render(ENABLE_EVERYTHING + ["--set-string", "config.outboxMaxAttempts=0"]))
+    if tuned.get("OUTBOX_MAX_ATTEMPTS") != "0":
+        failures.append(f"config.outboxMaxAttempts=0 rendered {tuned.get('OUTBOX_MAX_ATTEMPTS')!r}, want '0' (unlimited)")
 
     # Default values: no kafka env at all (groups are off switches), no
     # DATABASE_URL (no secret set), no transfer_* release config.

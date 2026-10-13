@@ -137,6 +137,12 @@ config:
   # background relay draining outbox_events onto Kafka; empty leaves rows
   # durably parked for a later relay (approval still writes them).
   outboxRelayEnabled: "true"
+  # OUTBOX_MAX_ATTEMPTS (gap fix D12, docs ADR 0016): how many times one
+  # outbox row may fail to send before the relay excludes it from claims.
+  # The row stays in outbox_events (attempts, last_error) and is logged at
+  # ERROR; re-arm it after fixing the cause with
+  # `UPDATE outbox_events SET attempts = 0 WHERE id = ...`. "0" = unlimited.
+  outboxMaxAttempts: "20"
 
 database:
   url: ""
