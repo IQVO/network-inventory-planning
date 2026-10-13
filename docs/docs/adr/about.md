@@ -15,7 +15,7 @@ the `Status:` line of each ADR body.
 | --- | --- | --- |
 | [0001](./0001-network-inventory-planning-boundary.md) | Network Inventory Planning Boundary | Accepted |
 | [0002](./0002-phase1-read-models-and-simulation.md) | Phase-1 local read models, fail-closed planning snapshot and advisory simulation | Accepted |
-| [0003](./0003-transfer-saga.md) | Phase-2 inter-warehouse transfer saga (approval, outbox, allocation replies) | Accepted |
+| [0003](./0003-transfer-saga.md) | Phase-2 inter-warehouse transfer saga (approval, outbox, allocation replies) | Accepted (per-key ordering amended by 0016) |
 | [0004](./0004-cloudevents-type-catalogue.md) | CloudEvents type catalogue for network-inventory-planning | Accepted |
 | [0005](./0005-work-demand-release-and-fact-transitions.md) | Work-demand release and fact-driven saga transitions | Accepted |
 | [0006](./0006-migrations-over-a-direct-connection.md) | Migrations over a direct connection; chart routing | Accepted |
@@ -28,6 +28,7 @@ the `Status:` line of each ADR body.
 | [0013](./0013-poison-replies-dead-lettered.md) | Poison transfer replies and facts are dead-lettered, never retried | Accepted |
 | [0014](./0014-site-sku-demand-ordering-guard.md) | Ordering guard on the site_sku_demand read model | Accepted |
 | [0015](./0015-rebalance-policy-and-lane-catalogue.md) | Rebalance Policy and Transfer Lane catalogues | Accepted |
+| [0016](./0016-outbox-relay-attempt-cap.md) | Outbox relay attempt cap: `OUTBOX_MAX_ATTEMPTS` (default 20) excludes a poison row and logs it at ERROR | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -35,7 +36,7 @@ the `Status:` line of each ADR body.
 | --- | --- |
 | 0001 | `internal/domain/transfer` (advisory planner), no inventory ledger anywhere |
 | 0002 | `internal/domain/planning`, the three read-model consumers, `GET /v1/transfer-simulations` |
-| 0003 | `InterWarehouseTransfer`, `ApproveTransfer`, `outbox_events` and the relay, the transfer-reply consumer |
+| 0003 | `InterWarehouseTransfer`, `ApproveTransfer`, `outbox_events` and the relay, the transfer-reply consumer (per-key ordering amended by 0016) |
 | 0004 | `internal/adapters/kafka/cloudevents`, `internal/architecture/catalogue_fitness_test.go` |
 | 0005 | `WorkDemandReleased`, `TRANSFER_*_PATH_ID` / `_CPT_OFFSET`, the transfer-fact consumer |
 | 0006 | `MIGRATIONS_DATABASE_URL`, the chart's `gatewayApi` / `ingress` values |
@@ -48,3 +49,4 @@ the `Status:` line of each ADR body.
 | 0013 | `transfer.ErrReplyRefused`, `usecases.IsRefusedReply`, `internal/adapters/inbound/kafka/deadletter.go`, `warehouse.inventory.events.dlq`, `warehouse.fulfillment.events.dlq` |
 | 0014 | `SiteSkuDemandRepo.Upsert` (`WHERE EXCLUDED.as_of >= site_sku_demand.as_of`), the demand consumer's stale-event INFO line |
 | 0015 | `transfer.RebalancePolicy` / `transfer.TransferLane` (`catalogue.go`), `Planner.PlanFromSnapshot` (`scheduled_planner.go`), `usecases.PutRebalancePolicy` / `PutTransferLane`, `RunScheduledRebalance.loadCatalogue`, `postgres.RebalancePolicyRepo` / `TransferLaneRepo` (migration `0005_rebalance_catalogue`), `PUT/GET /v1/rebalance-policies` and `/v1/transfer-lanes` |
+| 0016 | `postgres.WithMaxAttempts` / `WithRelayLogger` / `DefaultOutboxMaxAttempts` (`outbox.go`), `outboxMaxAttemptsFromEnv` (`cmd/network-inventory-planning/main.go`), `OUTBOX_MAX_ATTEMPTS`, chart `config.outboxMaxAttempts`, `internal/architecture/outbox_relay_cap_fitness_test.go` |

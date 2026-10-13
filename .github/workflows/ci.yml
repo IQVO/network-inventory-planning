@@ -332,6 +332,47 @@ jobs:
       - name: Run chart-testing (lint)
         run: ct lint --charts charts/network-inventory-planning --validate-maintainers=false --check-version-increment=false
 
+  # Chart tests (gap fix D25): every charts/network-inventory-planning/tests/test_*.py
+  # renders the chart with helm and asserts the env wiring (including
+  # OUTBOX_MAX_ATTEMPTS, ADR 0016) and the Service selectors. Runs on every
+  # push and PR so a broken selector or a missing env var is caught before
+  # release. The scripts exit 0 with "SKIP" when PyYAML is missing, so it is
+  # installed explicitly (hash-pinned): the checks must never pass vacuously.
+  # ============================================================
+  # CLASSIFICATION: PACKAGING (Helm chart tests)
+  # ============================================================
+  chart-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+      - name: Install PyYAML
+        run: python3 -m pip install --require-hashes -r .github/requirements/chart-tests.txt
+      - name: Chart tests
+        run: |
+          set -euo pipefail
+          for t in charts/network-inventory-planning/tests/test_*.py; do
+            echo "::group::$t"
+            status=0
+            out=$(python3 "$t" 2>&1) || status=$?
+            echo "$out"
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              echo "::error::$t failed"
+              exit "$status"
+            fi
+            if grep -q '^SKIP' <<<"$out"; then
+              echo "::error::$t skipped; the chart test must never pass vacuously"
+              exit 1
+            fi
+          done
+
   # ============================================================
   # CLASSIFICATION: LINTERS & STATIC ANALYSIS (architecture fitness)
   # ============================================================

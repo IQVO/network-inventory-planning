@@ -128,3 +128,20 @@ instead of crash-looping.
 {{- fail "analytics.enabled is true but kafka.enabled is false — the projector consumes warehouse.network-inventory-planning.analytics and needs kafka.brokers. Set kafka.enabled=true." -}}
 {{- end -}}
 {{- end -}}
+
+
+{{/*
+Comma-joined names of this chart's enabled KongPlugins, for the
+konghq.com/plugins annotation on every HTTPRoute this chart renders.
+Empty string (annotation omitted) when none are enabled — standalone
+installs without Kong are unaffected.
+*/}}
+{{- define "network-inventory-planning.kongPluginNames" -}}
+{{- $names := list -}}
+{{- range $name, $cfg := .Values.kongPlugins -}}
+{{- if $cfg.enabled -}}
+{{- $names = append $names (printf "%s-%s" (include "network-inventory-planning.fullname" $) $name) -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $names -}}
+{{- end -}}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -28,21 +29,22 @@ import (
 // default: an unset variable means that consumer does not exist (a default
 // would let a locally run process join the live cluster's group).
 const (
-	envDatabaseURL     = "DATABASE_URL"
-	envMigrationsPath  = "MIGRATIONS_PATH"
-	envMigrationsDBURL = "MIGRATIONS_DATABASE_URL"
-	envKafkaBrokers    = "KAFKA_BROKERS"
-	envCapabilityGroup = "SITE_CAPABILITY_CONSUMER_GROUP"
-	envDemandGroup     = "SITE_SKU_DEMAND_CONSUMER_GROUP"
-	envCapacityGroup   = "CAPACITY_PLAN_CONSUMER_GROUP"
-	envTransferGroup   = "TRANSFER_REPLY_CONSUMER_GROUP"
-	envTransferFactGrp = "TRANSFER_FACT_CONSUMER_GROUP"
-	envOutboxRelay     = "OUTBOX_RELAY_ENABLED"
-	envMaxStaleness    = "PLANNING_MAX_STALENESS"
-	envPickPathID      = "TRANSFER_PICK_PATH_ID"
-	envPickCPTOffset   = "TRANSFER_PICK_CPT_OFFSET"
-	envDispatchPathID  = "TRANSFER_DISPATCH_PATH_ID"
-	envDispatchCPTOffs = "TRANSFER_DISPATCH_CPT_OFFSET"
+	envDatabaseURL       = "DATABASE_URL"
+	envMigrationsPath    = "MIGRATIONS_PATH"
+	envMigrationsDBURL   = "MIGRATIONS_DATABASE_URL"
+	envKafkaBrokers      = "KAFKA_BROKERS"
+	envCapabilityGroup   = "SITE_CAPABILITY_CONSUMER_GROUP"
+	envDemandGroup       = "SITE_SKU_DEMAND_CONSUMER_GROUP"
+	envCapacityGroup     = "CAPACITY_PLAN_CONSUMER_GROUP"
+	envTransferGroup     = "TRANSFER_REPLY_CONSUMER_GROUP"
+	envTransferFactGrp   = "TRANSFER_FACT_CONSUMER_GROUP"
+	envOutboxRelay       = "OUTBOX_RELAY_ENABLED"
+	envOutboxMaxAttempts = "OUTBOX_MAX_ATTEMPTS"
+	envMaxStaleness      = "PLANNING_MAX_STALENESS"
+	envPickPathID        = "TRANSFER_PICK_PATH_ID"
+	envPickCPTOffset     = "TRANSFER_PICK_CPT_OFFSET"
+	envDispatchPathID    = "TRANSFER_DISPATCH_PATH_ID"
+	envDispatchCPTOffs   = "TRANSFER_DISPATCH_CPT_OFFSET"
 	// Phase-4 observability + scheduled runs (ADR 0007).
 	envHealthInterval  = "NIP_HEALTH_CHECK_INTERVAL"
 	envStuckThresholds = "NIP_STUCK_THRESHOLDS"
@@ -592,15 +594,35 @@ func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPub
 		return publisher, nil
 	}
 	sink := outboundkafka.NewRelaySink(brokers)
-	relay := postgres.NewOutboxRelay(pool, sink)
+	maxAttempts := outboxMaxAttemptsFromEnv(logger)
+	relay := postgres.NewOutboxRelay(pool, sink, postgres.WithMaxAttempts(maxAttempts), postgres.WithRelayLogger(logger))
 	relayCtx, relayStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	runner := func() error {
 		defer relayStop()
 		defer func() { _ = sink.Close() }()
-		logger.Info("outbox relay running", "topic", outboundkafka.TransferTopic, "brokers", brokers)
+		logger.Info("outbox relay running", "topic", outboundkafka.TransferTopic, "brokers", brokers, "max_attempts", maxAttempts)
 		return relay.Run(relayCtx)
 	}
 	return publisher, runner
+}
+
+// outboxMaxAttemptsFromEnv reads OUTBOX_MAX_ATTEMPTS (gap fix D12, ADR
+// 0016): how many failed sends one outbox row may accumulate before the relay
+// excludes it from claims. Unset means postgres.DefaultOutboxMaxAttempts (20);
+// 0 means unlimited. A negative or unparsable value logs a WARN and uses the
+// default, so a typo can never silently remove the cap.
+func outboxMaxAttemptsFromEnv(logger *slog.Logger) int {
+	raw := os.Getenv(envOutboxMaxAttempts)
+	if raw == "" {
+		return postgres.DefaultOutboxMaxAttempts
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		logger.Warn("invalid OUTBOX_MAX_ATTEMPTS; using the default",
+			"value", raw, "default", postgres.DefaultOutboxMaxAttempts, "error", err)
+		return postgres.DefaultOutboxMaxAttempts
+	}
+	return n
 }
 
 // brokersFromEnv returns the configured brokers or nil when unset.
