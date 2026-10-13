@@ -11,10 +11,10 @@ Following the ddd-crew [Bounded Context Canvas v5](https://github.com/ddd-crew/b
 
 ## Canvas at a glance
 
-One picture of the sections below, laid out like the ddd-crew canvas:
-inbound collaborators on the left, this context in the middle (purpose,
-domain roles and the business decisions it enforces), outbound
-collaborators on the right. Arrows follow the message type: **solid blue**
+Two pictures of the sections below, laid out like the ddd-crew canvas:
+first the inbound collaborators feeding this context (purpose, domain roles
+and the business decisions it enforces), then the outbound collaborators it
+calls or notifies. Arrows follow the message type: **solid blue**
 commands (`cmd`), **dotted green** queries (`qry`), **thick orange** events
 (`evt`); each arrow names its channel and the messages it carries. Box shapes
 mark the collaborator kind: rounded = people, UI or any client; blue =
@@ -25,8 +25,10 @@ abbreviated (REST, MCP, Kafka, HTTP, port); the Inbound and Outbound
 Communication tables carry the exact route, tool, topic and CloudEvents
 type for every message.
 
+### Inbound
+
 ```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 36, "padding": 8}}}%%
+%%{init: {"flowchart": {"nodeSpacing": 14, "rankSpacing": 40, "padding": 6}}}%%
 flowchart LR
     classDef bc fill:#fff3bf,stroke:#e67700,stroke-width:1.5px,color:#000
     classDef card fill:#fff9db,stroke:#f08c00,color:#000,text-align:left
@@ -47,30 +49,19 @@ flowchart LR
     end
     subgraph BC["network-inventory-planning (NIP) - Core subdomain - WES tier"]
         direction TB
-        purpose["<b>Purpose</b><br/>Recommend inter-warehouse stock<br/>transfers from fail-closed local<br/>facts, and carry an<br/>operator-approved transfer as a saga<br/>from the origin reservation to the<br/>destination stow. It recommends and<br/>coordinates; it never owns stock or<br/>moves it."]:::card
-        roles["<b>Domain roles</b><br/>- Execution context (the transfer saga)<br/>- Decision-support context (planner, simulation)<br/>- Open Host Service to callers, Anti-Corruption Layer to every producer it reads"]:::card
-        rules["<b>Business decisions it enforces</b><br/>- A proposal is advisory; only an<br/>operator approval creates a transfer<br/>- Unknown or stale data excludes a<br/>site or refuses the answer; never<br/>zero-filled<br/>- The origin keeps its safety stock;<br/>the destination gets no more than<br/>its deficit<br/>- Approval is idempotent per<br/>Idempotency-Key<br/>- Stuck detection and scheduled<br/>rebalances observe only<br/>- The MCP server has no write tool"]:::card
+        purpose["<b>Purpose</b><br/>Recommend inter-warehouse stock transfers from fail-closed<br/>local facts, and carry an operator-approved transfer as a<br/>saga from the origin reservation to the destination stow.<br/>It recommends and coordinates; it never owns stock or<br/>moves it."]:::card
+        roles["<b>Domain roles</b><br/>- Execution context (the transfer saga)<br/>- Decision-support context (planner, simulation)<br/>- Open Host Service to callers, Anti-Corruption Layer to<br/>every producer it reads"]:::card
+        rules["<b>Business decisions it enforces</b><br/>- A proposal is advisory; only an operator approval creates<br/>a transfer<br/>- Unknown or stale data excludes a site or refuses the<br/>answer; never zero-filled<br/>- The origin keeps its safety stock; the destination gets no<br/>more than its deficit<br/>- Approval is idempotent per Idempotency-Key<br/>- Stuck detection and scheduled rebalances observe only<br/>- The MCP server has no write tool"]:::card
         purpose ~~~ roles ~~~ rules
     end
-    subgraph OUT["Outbound - whom it calls or notifies"]
-        direction TB
-        out0["inventory-storage"]:::ctx
-        out1["wes-work-planning"]:::ctx
-        out2["no consumer today"]:::none
-        out3["own projector"]:::self
-    end
     in0 -->|"cmd - REST<br/>ApproveTransfer"| BC
-    in0 -.->|"qry - REST<br/>generate transfer proposals,<br/>transfer simulations, transfers,<br/>rebalance runs, rebalance<br/>policies, transfer lanes"| BC
+    in0 -.->|"qry - REST<br/>generate transfer proposals,<br/>transfer simulations,<br/>transfers, rebalance runs,<br/>rebalance policies, transfer<br/>lanes"| BC
     in1 -.->|"qry - MCP<br/>get_transfer, list_transfers,<br/>find_stuck_transfers,<br/>simulate_transfer_options"| BC
     in2 ==>|"evt - Kafka<br/>warehouse.facility.events<br/>SiteCapabilityChanged"| BC
     in3 ==>|"evt - Kafka<br/>warehouse.order-management.events<br/>SiteSkuDemandChanged"| BC
     in4 ==>|"evt - Kafka<br/>warehouse.warehouse-planning.events<br/>CapacityPlanPublished"| BC
     in5 ==>|"evt - Kafka<br/>warehouse.inventory.events<br/>TransferStockAllocated,<br/>TransferStockAllocationRejected<br/>(replies),<br/>TransferReceiptStaged,<br/>TransferStockStowed (facts)"| BC
     in6 ==>|"evt - Kafka<br/>warehouse.fulfillment.events<br/>TransferPicked,<br/>TransferDispatched,<br/>TransferArrived (facts)"| BC
-    BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferAllocationRequested"| out0
-    BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>WorkDemandReleased (pick, then<br/>dispatch)"| out1
-    BC ==>|"evt - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferPlanApproved"| out2
-    BC ==>|"evt - Kafka<br/>warehouse.network-inventory-planning.analytics<br/>TransferStateAdvanced,<br/>TransferStuckDetected,<br/>RebalanceRunCompleted"| out3
     linkStyle 0 stroke:#1971c2,stroke-width:1.5px
     linkStyle 1 stroke:#2f9e44,stroke-width:1.5px
     linkStyle 2 stroke:#2f9e44,stroke-width:1.5px
@@ -79,11 +70,37 @@ flowchart LR
     linkStyle 5 stroke:#e8590c,stroke-width:2.5px
     linkStyle 6 stroke:#e8590c,stroke-width:2.5px
     linkStyle 7 stroke:#e8590c,stroke-width:2.5px
-    linkStyle 8 stroke:#1971c2,stroke-width:1.5px
-    linkStyle 9 stroke:#1971c2,stroke-width:1.5px
-    linkStyle 10 stroke:#e8590c,stroke-width:2.5px
-    linkStyle 11 stroke:#e8590c,stroke-width:2.5px
     class BC bc
+```
+
+### Outbound
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 14, "rankSpacing": 40, "padding": 6}}}%%
+flowchart LR
+    classDef bc fill:#fff3bf,stroke:#e67700,stroke-width:1.5px,color:#000
+    classDef card fill:#fff9db,stroke:#f08c00,color:#000,text-align:left
+    classDef ctx fill:#e7f5ff,stroke:#1c7ed6,color:#000
+    classDef actor fill:#fff4e6,stroke:#e8590c,color:#000
+    classDef ext fill:#ffe3e3,stroke:#c92a2a,color:#000
+    classDef self fill:#f1f3f5,stroke:#868e96,color:#000
+    classDef none fill:#f8f9fa,stroke:#adb5bd,stroke-dasharray:5 5,color:#495057
+    BC["<b>network-inventory-planning (NIP) - Core subdomain - WES tier</b>"]:::bc
+    subgraph OUT["Outbound - whom it calls or notifies"]
+        direction TB
+        out0["inventory-storage"]:::ctx
+        out1["wes-work-planning"]:::ctx
+        out2["no consumer today"]:::none
+        out3["own projector"]:::self
+    end
+    BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferAllocationRequested"| out0
+    BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>WorkDemandReleased (pick, then<br/>dispatch)"| out1
+    BC ==>|"evt - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferPlanApproved"| out2
+    BC ==>|"evt - Kafka<br/>warehouse.network-inventory-planning.analytics<br/>TransferStateAdvanced,<br/>TransferStuckDetected,<br/>RebalanceRunCompleted"| out3
+    linkStyle 0 stroke:#1971c2,stroke-width:1.5px
+    linkStyle 1 stroke:#1971c2,stroke-width:1.5px
+    linkStyle 2 stroke:#e8590c,stroke-width:2.5px
+    linkStyle 3 stroke:#e8590c,stroke-width:2.5px
 ```
 
 Source: the Inbound Communication and Outbound Communication tables of this
