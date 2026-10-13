@@ -128,7 +128,11 @@ func TestOutboxTrace_TraceparentCrossesTheOutboxToKafka(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	brokers := startKafkaBroker(t)
-	ensureTopic(t, brokers, outboundkafka.TransferTopic)
+	// The broker is shared with the saga test, which reads
+	// warehouse.network-inventory-planning.events from the beginning and
+	// expects only its own rows: relay this row to a test-only topic.
+	topic := fmt.Sprintf("warehouse.network-inventory-planning.itest-trace-%d", time.Now().UnixNano())
+	ensureTopic(t, brokers, topic)
 
 	transferID := fmt.Sprintf("trf-trace-%d", time.Now().UnixNano())
 	outbox := postgres.NewOutboxWriter(pool, outboundkafka.NewTransferEncoder())
@@ -148,6 +152,12 @@ func TestOutboxTrace_TraceparentCrossesTheOutboxToKafka(t *testing.T) {
 		t.Fatalf("outbox row traceparent = %q, want the request span's %q", stored, wantTraceparent)
 	}
 
+	// Only the row's destination changes; its stored headers and value are
+	// exactly what OutboxWriter wrote.
+	if _, err := pool.Exec(ctx, `UPDATE outbox_events SET topic = $1 WHERE event_type = $2`, topic, approved); err != nil {
+		t.Fatalf("redirect the row to the test topic: %v", err)
+	}
+
 	sink := outboundkafka.NewRelaySink(brokers)
 	t.Cleanup(func() { _ = sink.Close() })
 	relay := postgres.NewOutboxRelay(pool, sink, postgres.WithMaxAttempts(postgres.DefaultOutboxMaxAttempts))
@@ -157,7 +167,7 @@ func TestOutboxTrace_TraceparentCrossesTheOutboxToKafka(t *testing.T) {
 		t.Fatalf("relay: n=%d err=%v", n, err)
 	}
 
-	msg := readByKey(t, ctx, brokers, outboundkafka.TransferTopic, transferID)
+	msg := readByKey(t, ctx, brokers, topic, transferID)
 	got, ok := headerValue(msg.Headers, "traceparent")
 	if !ok || got != wantTraceparent {
 		t.Fatalf("Kafka traceparent = %q (present=%v), want %q", got, ok, wantTraceparent)
