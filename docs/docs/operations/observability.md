@@ -87,7 +87,12 @@ through the analytics read side:
   trace of the HTTP request even though it is sent later. Every consumer
   extracts the headers into the handler context
   (`internal/adapters/inbound/kafka/kafka.go`), so events NIP writes while
-  handling a consumed message carry the upstream trace.
+  handling a consumed message carry the upstream trace. The integration tests
+  `TestOutboxTrace_TraceparentCrossesTheOutboxToKafka` and
+  `TestOutboxTrace_RowWithoutTraceHeadersRelaysUnchanged`
+  (`internal/adapters/inbound/kafka/kafka_integration/outbox_trace_integration_test.go`)
+  pin this across the outbox against a real Postgres and Kafka; a row without
+  stored trace headers relays with none.
 - No spans are started for Kafka produce or consume, Postgres queries or the
   tickers; ticker-written rows carry no `traceparent`.
 

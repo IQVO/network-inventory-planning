@@ -11,11 +11,11 @@ description: The test pyramid of network-inventory-planning as it exists in the 
 
 | Level | Where | How many | Runs with | Needs |
 | --- | --- | --- | --- | --- |
-| Unit | `internal/domain/**`, `internal/application/**`, `internal/analytics/report`, adapters with fakes, `cmd/*/main_test.go` | 240 `func Test...` across the module (unit, integration and fitness together) | `make test` | nothing |
+| Unit | `internal/domain/**`, `internal/application/**`, `internal/analytics/report`, adapters with fakes, `cmd/*/main_test.go` | 338 `func Test...` across the module (unit, integration and fitness together) | `make test` | nothing |
 | HTTP adapter (httptest) | `internal/adapters/inbound/http/*_test.go` | handler, approve, simulate, transfers read, rebalance runs, policy/lane catalogues, reports, OTel metric and OpenAPI-contract tests | `make test` | nothing |
 | BDD acceptance (godog/Gherkin, ADR 0011) | `features/*.feature`, steps in `features_test.go`, `features_saga_test.go`, `features_facts_test.go`, `features_reports_test.go` | **8 feature files, 107 `Scenario`/`Scenario Outline` blocks, 188 executed scenarios, 1361 steps** | `make bdd` (also part of `make test`) | nothing (in-memory world) |
-| Integration (testcontainers) | files tagged `//go:build integration` | 8 files | `make integration` | Docker |
-| Architecture fitness | `internal/architecture` | 10 tests | `make arch-test` | nothing |
+| Integration (testcontainers) | files tagged `//go:build integration` | 16 files | `make integration` | Docker |
+| Architecture fitness | `internal/architecture` | 14 tests | `make arch-test` | nothing |
 | Mutation | gremlins over `internal/domain/transfer`, `internal/analytics/report`, `internal/domain` | — | `make mutation`, `make mutation-full` | `gremlins` v0.6.0 |
 | Console remote | `web/src/**/*.test.ts(x)` (vitest + Testing Library) | — | `npm test` in `web/` | Node 22 and a sibling `warehouse-ui-kit` checkout |
 
@@ -49,6 +49,7 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | `internal/adapters/outbound/analyticsstore/postgres_integration_test.go` | analytical projection and report queries | `postgres:16-alpine` |
 | `internal/adapters/inbound/kafka/kafka_integration/planning_read_models_integration_test.go` | the three read-model consumers end to end | `confluentinc/confluent-local:7.6.1` + Postgres |
 | `internal/adapters/inbound/kafka/kafka_integration/transfer_saga_integration_test.go` | approval → outbox → relay → replies and facts → `RECEIVED` | Kafka + Postgres |
+| `internal/adapters/inbound/kafka/kafka_integration/outbox_trace_integration_test.go` | the W3C trace context crosses the outbox: a row published inside a request span stores that span's `traceparent` in `outbox_events.headers`, the relay (no span of its own) sends it as a Kafka header, and a consumer's `Extract` lands on the request's trace and span (`TestOutboxTrace_TraceparentCrossesTheOutboxToKafka`); a row without trace headers relays unchanged with none (`TestOutboxTrace_RowWithoutTraceHeadersRelaysUnchanged`) | Kafka + Postgres |
 | `internal/adapters/inbound/kafka/kafka_integration/analytics_integration_test.go` | projector consumer and DLQ | Kafka + Postgres |
 | `internal/adapters/inbound/kafka/kafka_integration/transfer_reply_dlq_integration_test.go` | poison replies ahead of a good one on one partition are dead-lettered to `warehouse.inventory.events.dlq`; the good reply applies (ADR 0013) | Kafka + Postgres |
 | `internal/application/usecases/usecases_wiring_integration_test.go` | approval idempotency and the allocation reply over the real repos and unit of work | Postgres |
