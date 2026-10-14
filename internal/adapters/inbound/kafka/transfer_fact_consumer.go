@@ -176,12 +176,14 @@ func (c *TransferFactConsumer) HandleKafkaMessage(ctx context.Context, msg kafka
 func (c *TransferFactConsumer) handlePicked(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferFactData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferPicked payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferPicked payload %s: %w", e.ID(), err))
 	}
 	if data.Quantity <= 0 {
 		// quantity is OPTIONAL on the wire; a pick fact without one
 		// cannot drive the short-pick logic — a refused fact, dead-lettered
 		// like every other refusal (ADR 0013).
+		//dlq:deterministic payload validation of the decoded bytes (no positive quantity => transfer.ErrFactRefused), no ctx, no I/O: the same bytes always fail
 		return c.dlq().send(ctx, msg, fmt.Errorf("%w: TransferPicked %s for %s carries no positive quantity", transfer.ErrFactRefused, e.ID(), data.TransferRef))
 	}
 	in := usecases.ApplyPickInput{
@@ -197,6 +199,7 @@ func (c *TransferFactConsumer) handlePicked(ctx context.Context, msg kafkago.Mes
 func (c *TransferFactConsumer) handleDispatched(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferFactData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferDispatched payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferDispatched payload %s: %w", e.ID(), err))
 	}
 	in := usecases.FactInput{
@@ -211,6 +214,7 @@ func (c *TransferFactConsumer) handleDispatched(ctx context.Context, msg kafkago
 func (c *TransferFactConsumer) handleArrival(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferFactData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferArrived payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferArrived payload %s: %w", e.ID(), err))
 	}
 	in := usecases.FactInput{
@@ -241,6 +245,7 @@ func (c *TransferFactConsumer) apply(ctx context.Context, msg kafkago.Message, e
 		}
 		if err := op(ctx); err != nil {
 			if usecases.IsRefusedReply(err) {
+				//dlq:deterministic only usecases.IsRefusedReply (transfer.ErrReplyRefused/ErrFactRefused, raised solely by the aggregate's payload validation in domain/transfer) reaches here; any other op error, cancellation included, is returned below as transient
 				return c.dlq().send(ctx, msg, fmt.Errorf("%s %s refused: %w", what, e.ID(), err))
 			}
 			if usecases.IsDeterministicFact(err) {
