@@ -145,10 +145,12 @@ func (c *AnalyticsConsumer) handle(ctx context.Context, msg kafkago.Message) err
 	}
 	event, err := toEvent(kind, evt)
 	if err != nil {
+		//dlq:deterministic toEvent is a pure decode+validation of the event bytes (DataAs, required time, fillAdvanced/fillStuck/fillRun subject and field checks; no ctx, no I/O), so cancellation cannot produce this error and the same bytes always fail
 		return c.deadLetter(ctx, msg, err)
 	}
 	if _, err := c.Projection.Apply(ctx, event); err != nil {
 		if errors.Is(err, report.ErrRejected) {
+			//dlq:deterministic only report.ErrRejected reaches here (analyticsstore.classify wraps SQLSTATE class 22/23 and errUnknownKind only); every other Apply error, cancellation included, is returned below as transient
 			return c.deadLetter(ctx, msg, err)
 		}
 		return fmt.Errorf("analytics: project %s %s: %w", kind, evt.ID(), err)
@@ -292,6 +294,7 @@ func (s *skipSampler) allow() (emit bool, suppressed int64) {
 // only ever written on the rare poison path. A short BatchTimeout keeps a
 // synchronous single-message write from waiting out kafka-go's 1s default.
 func newDLQWriter(brokers []string, dlqTopic string) DeadLetterWriter {
+	//kafka:fixed-topic-writer its DLQ writers are written only by AnalyticsConsumer.deadLetter and deadLetterSink.send (deadletter.go), both Message{Key, Value, Headers} with no Topic; the package's only Topic-setting Messages (HandleMessage in transfer_fact_consumer.go / transfer_reply_consumer.go) are synthetic INBOUND messages handed to HandleKafkaMessage, never written
 	return &kafkago.Writer{
 		Addr:                   kafkago.TCP(brokers...),
 		Topic:                  dlqTopic,
