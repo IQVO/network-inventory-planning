@@ -136,7 +136,7 @@ test that prints `SKIP` fails the job. Locally:
 | `lint` | push, PR | golangci-lint v2.14.0 |
 | `guide-lint` | push, PR (blocking: a stale guide reference or a failing hook self-test fails the run) | `scripts/harness/guide_lint.py`, `test_hook.py` |
 | `complexity` | push, PR | golangci-lint with only `gocyclo, gocognit, cyclop, funlen, nestif`, plus an informational gocyclo report |
-| `test` | push, PR | build, vet, race tests with coverage, 90% gate |
+| `test` | push, PR | build, vet, then `make coverage` (race tests with the Makefile's coverage scope and 90% gate) |
 | `bdd` | push, PR | `go test ./... -run TestFeatures -v` |
 | `integration` | push, PR | `go test -tags=integration ./... -race -count=1` (a `postgres:16` service is provisioned, but the tests start their own containers) |
 | `mutation-fast` | push, PR | gremlins on `internal/domain/transfer` and `internal/analytics/report` |

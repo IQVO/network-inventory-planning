@@ -254,10 +254,12 @@ func (c *TransferReplyConsumer) dlq() deadLetterSink {
 func (c *TransferReplyConsumer) handleAllocated(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferStockAllocatedData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferStockAllocated payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockAllocated payload %s: %w", e.ID(), err))
 	}
 	expiresAt, err := time.Parse(time.RFC3339, data.ExpiresAt)
 	if err != nil {
+		//dlq:deterministic time.Parse of the payload's expires_at string is pure: an unparsable value always fails, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("TransferStockAllocated %s has an unparsable expires_at: %w", e.ID(), err))
 	}
 	allocations := make([]transfer.Allocation, 0, len(data.Allocations))
@@ -285,12 +287,14 @@ func (c *TransferReplyConsumer) handleAllocated(ctx context.Context, msg kafkago
 func (c *TransferReplyConsumer) handleRejected(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferStockAllocationRejectedData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferStockAllocationRejected payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockAllocationRejected payload %s: %w", e.ID(), err))
 	}
 	reason := transfer.RejectionReason(data.Reason)
 	if !reason.Valid() {
 		// Same condition, same treatment as the aggregate's own
 		// ErrUnknownRejectionReason: a contract break, dead-lettered.
+		//dlq:deterministic RejectionReason.Valid() is a pure check against the closed vocabulary (transfer.ErrUnknownRejectionReason): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("%w: %q on event %s", transfer.ErrUnknownRejectionReason, data.Reason, e.ID()))
 	}
 	in := usecases.ApplyRejectionInput{
@@ -312,6 +316,7 @@ func (c *TransferReplyConsumer) handleRejected(ctx context.Context, msg kafkago.
 func (c *TransferReplyConsumer) handleReceiptStaged(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferReceiptStagedData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferReceiptStaged payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferReceiptStaged payload %s: %w", e.ID(), err))
 	}
 	in := usecases.ApplyReceiptStagedInput{
@@ -330,6 +335,7 @@ func (c *TransferReplyConsumer) handleReceiptStaged(ctx context.Context, msg kaf
 func (c *TransferReplyConsumer) handleStowed(ctx context.Context, msg kafkago.Message, e ce.Event) error {
 	var data transferStockStowedData
 	if err := e.DataAs(&data); err != nil {
+		//dlq:deterministic e.DataAs decode failure of the TransferStockStowed payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
 		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockStowed payload %s: %w", e.ID(), err))
 	}
 	allocations := make([]transfer.StowAllocation, 0, len(data.Allocations))
@@ -378,6 +384,7 @@ func (c *TransferReplyConsumer) apply(ctx context.Context, msg kafkago.Message, 
 			c.Logger.InfoContext(ctx, "transfer reply applied", "reply", what, "event_id", e.ID(), "transfer_id", transferID)
 			return nil
 		case usecases.IsRefusedReply(err):
+			//dlq:deterministic only usecases.IsRefusedReply (transfer.ErrReplyRefused/ErrFactRefused, raised solely by the aggregate's payload validation in domain/transfer) reaches this case; the default case returns every other error, cancellation included, as transient
 			return c.dlq().send(ctx, msg, fmt.Errorf("%s %s refused: %w", what, e.ID(), err))
 		case usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err):
 			c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown transfer or replayed/out-of-order reply)", "error", err, "event_id", e.ID(), "transfer_id", transferID)
