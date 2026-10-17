@@ -2,6 +2,8 @@ import { NIP_API_BASE } from "./config";
 import type {
   ApproveTransferRequest,
   ApproveTransferResponse,
+  GenerateRequestWire,
+  GenerateResponseWire,
   LaneWire,
   PolicyWire,
   RebalancePolicyEntry,
@@ -181,5 +183,25 @@ export function putRebalancePolicy(policy: PolicyWire, ifMatch?: string): Promis
   return request<RebalancePolicyEntry>("PUT", "/v1/rebalance-policies", {
     body: policy,
     ...(ifMatch !== undefined ? { headers: { "If-Match": ifMatch } } : {}),
+  });
+}
+
+/**
+ * POST /v1/transfer-proposals:generate — the DIAGNOSTIC planning boundary:
+ * deterministic, explainable proposal generation over the caller-provided
+ * snapshot (production planning consumes the local read models via the
+ * simulation endpoint instead). Advisory only — nothing is reserved or moved.
+ * 422 problem+json when the snapshot is refused (a missing asOf, or a position
+ * whose AsOf does not equal it). The Idempotency-Key follows the remote's
+ * convention: a fresh key per logical run, reused when the same snapshot is
+ * retried.
+ */
+export function generateTransferProposals(
+  input: GenerateRequestWire,
+  idempotencyKey: string,
+): Promise<GenerateResponseWire> {
+  return request<GenerateResponseWire>("POST", "/v1/transfer-proposals:generate", {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
   });
 }

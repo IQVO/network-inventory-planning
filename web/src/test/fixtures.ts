@@ -1,8 +1,11 @@
 import type {
   ApproveTransferResponse,
   AuditEntry,
+  GenerateResponseWire,
   LaneWire,
   PolicyWire,
+  ProposalWire,
+  PositionWire,
   RebalancePolicyEntry,
   RebalancePolicyList,
   RebalanceRun,
@@ -182,4 +185,51 @@ export const POLICIES: RebalancePolicyEntry[] = [
 
 export function policyList(policies: RebalancePolicyEntry[] = POLICIES): RebalancePolicyList {
   return { policies };
+}
+
+export const SNAPSHOT_AS_OF = "2026-10-07T09:50:00Z";
+
+export function position(over: Partial<PositionWire> = {}): PositionWire {
+  return {
+    Site: "DC-EAST",
+    SKU: "SKU-RED-42",
+    Available: 500,
+    CustomerReservations: 20,
+    ConfirmedInbound: 0,
+    CommittedOutbound: 30,
+    AsOf: SNAPSHOT_AS_OF,
+    ...over,
+  };
+}
+
+export function proposal(over: Partial<ProposalWire> = {}): ProposalWire {
+  return {
+    Origin: "DC-EAST",
+    Destination: "DC-WEST",
+    SKU: "SKU-RED-42",
+    Quantity: 140,
+    PolicyVersion: "v7",
+    PositionAsOf: SNAPSHOT_AS_OF,
+    Reasons: ["DESTINATION_BELOW_TARGET", "ORIGIN_ABOVE_SAFETY_STOCK", "APPROVED_LANE"],
+    ScoreBreakdown: { PriorityBenefit: 700, HandlingPenalty: 3, LeadTimePenalty: 18 },
+    ...over,
+  };
+}
+
+/** In the service's own order: highest score first, ties by SKU then origin. */
+export const PROPOSALS: ProposalWire[] = [
+  proposal(),
+  proposal({
+    Origin: "DC-NORTH",
+    Destination: "DC-WEST",
+    SKU: "SKU-BLUE-7",
+    Quantity: 40,
+    PolicyVersion: "v2",
+    Reasons: ["DESTINATION_BELOW_TARGET", "APPROVED_LANE"],
+    ScoreBreakdown: { PriorityBenefit: 120, HandlingPenalty: 0, LeadTimePenalty: 6 },
+  }),
+];
+
+export function generateResponse(proposals: ProposalWire[] = PROPOSALS): GenerateResponseWire {
+  return { proposals };
 }

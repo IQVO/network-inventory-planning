@@ -1,6 +1,14 @@
 /** Small pure helpers shared by the screens. */
 import type { ApiError } from "./api";
-import type { ApproveTransferRequest, LaneWire, PolicyWire, SimulationSite, TransferState } from "./types";
+import type {
+  ApproveTransferRequest,
+  GenerateRequestWire,
+  LaneWire,
+  PolicyWire,
+  PositionWire,
+  SimulationSite,
+  TransferState,
+} from "./types";
 
 type Tone = "neutral" | "progress" | "success" | "warning" | "danger";
 
@@ -353,6 +361,135 @@ export function catalogueLead(error: ApiError): string | undefined {
       return "The service refused the entry as invalid. Nothing was written; fix the named field and save again.";
     case 503:
       return "This instance runs without the persistence the catalogues require; nothing was written.";
+    default:
+      return undefined;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Proposal generation (POST /v1/transfer-proposals:generate): the
+ * diagnostic planning boundary over an explicit snapshot. The client
+ * mirrors the use case's own refusals (generate_transfer_proposals.go):
+ * asOf is required and every position's AsOf must equal it.
+ * ------------------------------------------------------------------ */
+
+/** One position row's raw (string) fields; AsOf comes from the form's as-of. */
+export interface PositionDraft {
+  site: string;
+  sku: string;
+  available: string;
+  /** Blank means 0. */
+  customerReservations: string;
+  /** Blank means 0. */
+  confirmedInbound: string;
+  /** Blank means 0. */
+  committedOutbound: string;
+}
+
+export type PositionField = keyof PositionDraft;
+
+export function emptyPositionDraft(): PositionDraft {
+  return { site: "", sku: "", available: "", customerReservations: "", confirmedInbound: "", committedOutbound: "" };
+}
+
+/** One snapshot position: site + SKU required, counts non-negative integers
+ *  (blank = 0). AsOf is stamped by the form, never typed per row. */
+export function buildPositionRequest(d: PositionDraft, asOf: string): {
+  request?: PositionWire;
+  errors: Partial<Record<PositionField, string>>;
+} {
+  const errors: Partial<Record<PositionField, string>> = {};
+  const site = d.site.trim();
+  const sku = d.sku.trim();
+  if (!site) errors.site = "Site is required.";
+  if (!sku) errors.sku = "SKU is required.";
+  const counts: { field: PositionField; label: string; raw: string }[] = [
+    { field: "available", label: "Available", raw: d.available },
+    { field: "customerReservations", label: "Customer reservations", raw: d.customerReservations },
+    { field: "confirmedInbound", label: "Confirmed inbound", raw: d.confirmedInbound },
+    { field: "committedOutbound", label: "Committed outbound", raw: d.committedOutbound },
+  ];
+  const parsed: Record<string, number> = {};
+  for (const { field, label, raw } of counts) {
+    const value = raw.trim() === "" ? "0" : raw.trim();
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+      errors[field] = `${label} must be zero or a positive whole number.`;
+    } else {
+      parsed[field] = Number(value);
+    }
+  }
+  if (Object.keys(errors).length > 0) return { errors };
+  return {
+    errors,
+    request: {
+      Site: site,
+      SKU: sku,
+      Available: parsed.available,
+      CustomerReservations: parsed.customerReservations,
+      ConfirmedInbound: parsed.confirmedInbound,
+      CommittedOutbound: parsed.committedOutbound,
+      AsOf: asOf,
+    },
+  };
+}
+
+/** The generate form's whole state: the as-of plus the three snapshot lists. */
+export interface GenerateDraft {
+  asOf: string;
+  positions: PositionDraft[];
+  policies: PolicyDraft[];
+  lanes: LaneDraft[];
+}
+
+/**
+ * Assembles the POST body: asOf must be RFC 3339, and every row must pass the
+ * same checks the catalogue editors apply (each position is also stamped with
+ * the as-of — the service refuses a mixed snapshot). Row errors are prefixed
+ * with their list and number, e.g. "Position 2: SKU is required.".
+ */
+export function buildGenerateRequest(d: GenerateDraft): {
+  request?: GenerateRequestWire;
+  errors: string[];
+} {
+  const errors: string[] = [];
+  const asOf = d.asOf.trim();
+  if (!RFC3339.test(asOf) || Number.isNaN(Date.parse(asOf))) {
+    errors.push("As-of must be an RFC 3339 timestamp, e.g. 2026-10-07T09:50:00Z.");
+  }
+  const positions: PositionWire[] = [];
+  d.positions.forEach((row, i) => {
+    const out = buildPositionRequest(row, asOf);
+    if (out.request) positions.push(out.request);
+    else errors.push(...Object.values(out.errors).map((e) => `Position ${i + 1}: ${e}`));
+  });
+  const policies: PolicyWire[] = [];
+  d.policies.forEach((row, i) => {
+    const out = buildPolicyRequest(row);
+    if (out.request) policies.push(out.request);
+    else errors.push(...Object.values(out.errors).map((e) => `Policy ${i + 1}: ${e}`));
+  });
+  const lanes: LaneWire[] = [];
+  d.lanes.forEach((row, i) => {
+    const out = buildLaneRequest(row);
+    if (out.request) lanes.push(out.request);
+    else errors.push(...Object.values(out.errors).map((e) => `Lane ${i + 1}: ${e}`));
+  });
+  if (errors.length > 0) return { errors };
+  return { errors, request: { asOf, positions, policies, lanes } };
+}
+
+/**
+ * Guidance for the generate endpoint's documented problems (handler.go
+ * generate): 400 the body could not be decoded, 422 the snapshot was refused
+ * — a missing asOf or a position stamped with another instant (mixed
+ * snapshot). Nothing is ever generated on a refusal.
+ */
+export function generateLead(error: ApiError): string | undefined {
+  switch (error.status) {
+    case 400:
+      return "The service could not read the request body (a field it does not know, or a malformed value). Nothing was generated.";
+    case 422:
+      return "The snapshot was refused: the as-of is required, and every position must carry that same instant — a mixed snapshot is never planned. Nothing was generated.";
     default:
       return undefined;
   }

@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildApproveRequest } from "../lib";
+import { buildApproveRequest, buildGenerateRequest } from "../lib";
 import { problem } from "./fetchMock";
-import { APPROVE_REQUEST, APPROVE_RESPONSE, AUDIT_ENTRY, GO_SOURCES, LANE, LANE_ENTRY, LANE_LIST, POLICY, POLICY_ENTRY, POLICY_LIST, PROBLEM, REBALANCE_RUN, REBALANCE_RUNS, SIMULATION, SIMULATION_SITE, TRANSFER, TRANSFER_DETAIL, TRANSFER_LIST } from "./realShapes";
+import { APPROVE_REQUEST, APPROVE_RESPONSE, AUDIT_ENTRY, GENERATE_REQUEST, GENERATE_RESPONSE, GO_SOURCES, LANE, LANE_ENTRY, LANE_LIST, POLICY, POLICY_ENTRY, POLICY_LIST, PROBLEM, PROPOSAL, REBALANCE_RUN, REBALANCE_RUNS, SCORE_BREAKDOWN, SIMULATION, SIMULATION_SITE, TRANSFER, TRANSFER_DETAIL, TRANSFER_LIST } from "./realShapes";
 import type { Shape } from "./realShapes";
-import { AUDIT, LANES, POLICIES, RECEIVED, RUNS, SITES, UNFULFILLABLE, approved, detail, laneEntry, laneList, policyEntry, policyList, simSite, simulation, transfer, transferList } from "./fixtures";
+import { AUDIT, LANES, POLICIES, PROPOSALS, RECEIVED, RUNS, SITES, SNAPSHOT_AS_OF, UNFULFILLABLE, approved, detail, generateResponse, laneEntry, laneList, lane, policyEntry, policyList, policy, position, simSite, simulation, transfer, transferList } from "./fixtures";
 
 /**
  * Contract test: every fixture the screens' tests run against must have exactly
@@ -70,6 +70,29 @@ describe("fixtures match the real API shapes", () => {
       expect(diff(entry.policy, POLICY)).toEqual([]);
     }
     expect(diff(policyEntry({ outcome: "CREATED" }), POLICY_ENTRY)).toEqual([]);
+  });
+
+  it("POST /v1/transfer-proposals:generate (request the form builds, and the answer)", () => {
+    const built = buildGenerateRequest({
+      asOf: SNAPSHOT_AS_OF,
+      positions: [
+        { site: "DC-EAST", sku: "SKU-RED-42", available: "500", customerReservations: "20", confirmedInbound: "", committedOutbound: "30" },
+      ],
+      policies: [{ site: "DC-WEST", sku: "SKU-RED-42", version: "v7", safetyStock: "60", targetStock: "200", unitPriority: "5" }],
+      lanes: [{ origin: "DC-EAST", destination: "DC-WEST", leadTimeHours: "18", unitHandlingCost: "3", enabled: "yes" }],
+    });
+    expect(built.errors).toEqual([]);
+    expect(diff(built.request, GENERATE_REQUEST)).toEqual([]);
+    expect(built.request?.positions[0]).toEqual(position());
+    expect(built.request?.policies[0]).toEqual(policy());
+    expect(built.request?.lanes[0]).toEqual(lane());
+
+    expect(diff(generateResponse(), GENERATE_RESPONSE)).toEqual([]);
+    expect(diff(generateResponse([]), GENERATE_RESPONSE)).toEqual([]);
+    for (const p of PROPOSALS) {
+      expect(diff(p, PROPOSAL)).toEqual([]);
+      expect(diff(p.ScoreBreakdown, SCORE_BREAKDOWN)).toEqual([]);
+    }
   });
 
   it("POST /v1/transfers:approve response", () => {

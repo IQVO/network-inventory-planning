@@ -8,13 +8,14 @@ import { fillApproval } from "./test/approval";
 import { approved, detail, laneList, policyList, simulation, transfer, transferList } from "./test/fixtures";
 
 const NAV = "Network inventory sections";
-const LABELS = ["Transfers", "Network simulation", "Rebalance runs", "Transfer lanes", "Rebalance policies"];
+const LABELS = ["Transfers", "Network simulation", "Rebalance runs", "Transfer lanes", "Rebalance policies", "Proposals"];
 const NAV_HREFS = [
   "/network-inventory",
   "/network-inventory/simulation",
   "/network-inventory/rebalance-runs",
   "/network-inventory/lanes",
   "/network-inventory/policies",
+  "/network-inventory/proposals",
 ];
 
 function mount(path: string) {
@@ -79,12 +80,15 @@ describe("App (the exposed ./App)", () => {
     const d = mount("/policies");
     expect(await screen.findByRole("heading", { name: "Rebalance policies" })).toBeInTheDocument();
     d.unmount();
+    const e = mount("/proposals");
+    expect(await screen.findByRole("heading", { name: "Proposal generation" })).toBeInTheDocument();
+    e.unmount();
     mount("/transfers/t-1001");
     expect(await screen.findByRole("heading", { name: "Transfer t-1001" })).toBeInTheDocument();
   });
 
   describe("mounted under the console's /network-inventory/* splat route", () => {
-    it.each(["/network-inventory", "/network-inventory/simulation", "/network-inventory/rebalance-runs", "/network-inventory/lanes", "/network-inventory/policies", "/network-inventory/transfers/t-1001"])(
+    it.each(["/network-inventory", "/network-inventory/simulation", "/network-inventory/rebalance-runs", "/network-inventory/lanes", "/network-inventory/policies", "/network-inventory/proposals", "/network-inventory/transfers/t-1001"])(
       "sub-nav links resolve against the mount point, not the current URL (%s)",
       async (start) => {
         routes();
@@ -100,6 +104,7 @@ describe("App (the exposed ./App)", () => {
       ["/network-inventory/rebalance-runs", "Rebalance runs"],
       ["/network-inventory/lanes", "Transfer lanes"],
       ["/network-inventory/policies", "Rebalance policies"],
+      ["/network-inventory/proposals", "Proposals"],
     ])("marks only the current section active (%s)", async (start, active) => {
       routes();
       mountUnderHost(start);
@@ -133,6 +138,9 @@ describe("App (the exposed ./App)", () => {
 
       await user.click(screen.getByRole("link", { name: "Rebalance policies" }));
       expect(await screen.findByRole("heading", { name: "Rebalance policies" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("link", { name: "Proposals" }));
+      expect(await screen.findByRole("heading", { name: "Proposal generation" })).toBeInTheDocument();
 
       await user.click(screen.getByRole("link", { name: "Transfers" }));
       expect(await screen.findByRole("heading", { level: 1, name: "Transfers" })).toBeInTheDocument();

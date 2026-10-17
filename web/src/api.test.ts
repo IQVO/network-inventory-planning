@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, approveTransfer, getSimulation, getTransfer, listRebalancePolicies, listRebalanceRuns, listTransfers, listTransferLanes, putRebalancePolicy, putTransferLane, toApiError } from "./api";
+import { ApiError, approveTransfer, generateTransferProposals, getSimulation, getTransfer, listRebalancePolicies, listRebalanceRuns, listTransfers, listTransferLanes, putRebalancePolicy, putTransferLane, toApiError } from "./api";
 import { json, mockApi, problem } from "./test/fetchMock";
-import { LANES, POLICIES, RUNS, lane, laneList, policy, policyList, transferList, transfer } from "./test/fixtures";
+import { LANES, POLICIES, RUNS, SNAPSHOT_AS_OF, generateResponse, lane, laneList, policy, policyList, position, transferList, transfer } from "./test/fixtures";
 
 describe("listTransfers", () => {
   it("sends only the filters that are set", async () => {
@@ -98,6 +98,32 @@ describe("listRebalancePolicies", () => {
     const list = await listRebalancePolicies();
     expect(api.calls[0].method).toBe("GET");
     expect(list.policies).toHaveLength(POLICIES.length);
+  });
+});
+
+describe("generateTransferProposals", () => {
+  it("POSTs the snapshot with an Idempotency-Key, exactly as the approve call does", async () => {
+    const api = mockApi({ "POST /v1/transfer-proposals:generate": json(generateResponse()) });
+    await generateTransferProposals(
+      {
+        asOf: SNAPSHOT_AS_OF,
+        positions: [position()],
+        policies: [policy()],
+        lanes: [lane()],
+      },
+      "key-abc",
+    );
+    const call = api.calls[0];
+    expect(call.method).toBe("POST");
+    expect(call.path).toBe("/v1/transfer-proposals:generate");
+    expect(call.headers["Idempotency-Key"]).toBe("key-abc");
+    expect(call.headers["Content-Type"]).toBe("application/json");
+    expect(call.body).toEqual({
+      asOf: SNAPSHOT_AS_OF,
+      positions: [position()],
+      policies: [policy()],
+      lanes: [lane()],
+    });
   });
 });
 

@@ -25,6 +25,11 @@ export default mergeConfig(
       setupFiles: ["./src/test/setup.ts"],
       css: false,
       include: ["src/**/*.test.{ts,tsx}"],
+      // A ceiling, not a delay: fleet dev hosts run several agent sessions at
+      // once (load averages far above core count), where jsdom + user-event
+      // keystroke tests can legitimately need more than the 5s default.
+      // Dedicated CI runners never approach it.
+      testTimeout: 20000,
     },
   }),
 );

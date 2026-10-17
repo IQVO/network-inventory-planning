@@ -176,6 +176,48 @@ export const POLICY_ENTRY: Shape = {
 /** GET /v1/rebalance-policies 200. */
 export const POLICY_LIST: Shape = { policies: "array" };
 
+/** transfer.Position (untagged Go struct); AsOf must equal the request's asOf. */
+export const POSITION: Shape = {
+  Site: "string",
+  SKU: "string",
+  Available: "number",
+  CustomerReservations: "number",
+  ConfirmedInbound: "number",
+  CommittedOutbound: "number",
+  AsOf: "string",
+};
+
+/** transfer.ScoreBreakdown (untagged Go struct): always the full triple. */
+export const SCORE_BREAKDOWN: Shape = {
+  PriorityBenefit: "number",
+  HandlingPenalty: "number",
+  LeadTimePenalty: "number",
+};
+
+/** transfer.Proposal (untagged Go struct): Reasons is an array of the three
+ *  documented codes; ScoreBreakdown is always the full triple. */
+export const PROPOSAL: Shape = {
+  Origin: "string",
+  Destination: "string",
+  SKU: "string",
+  Quantity: "number",
+  PolicyVersion: "string",
+  PositionAsOf: "string",
+  Reasons: "array",
+  ScoreBreakdown: "object",
+};
+
+/** generateRequest (handler.go): the POST /v1/transfer-proposals:generate body. */
+export const GENERATE_REQUEST: Shape = {
+  asOf: "string",
+  positions: "array",
+  policies: "array",
+  lanes: "array",
+};
+
+/** POST /v1/transfer-proposals:generate 200: ONLY the proposals (no counters). */
+export const GENERATE_RESPONSE: Shape = { proposals: "array" };
+
 /**
  * Where each shape lives in the Go source, for the drift check. `struct` is a
  * named type; `anonymousFirstField` finds an inline response envelope by its
@@ -205,4 +247,6 @@ export const GO_SOURCES: {
   { name: "transfer-lanes envelope", file: "catalogue.go", anonymousFirstField: "Lanes", shape: LANE_LIST, optionality: true },
   { name: "rebalancePolicyEntryDTO", file: "catalogue.go", struct: "rebalancePolicyEntryDTO", shape: POLICY_ENTRY, optionality: true },
   { name: "rebalance-policies envelope", file: "catalogue.go", anonymousFirstField: "Policies", shape: POLICY_LIST, optionality: true },
+  { name: "generateRequest", file: "handler.go", struct: "generateRequest", shape: GENERATE_REQUEST, optionality: false },
+  { name: "generate envelope", file: "handler.go", anonymousFirstField: "Proposals", shape: GENERATE_RESPONSE, optionality: true },
 ];

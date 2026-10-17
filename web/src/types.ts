@@ -219,3 +219,55 @@ export interface RebalancePolicyEntry {
 export interface RebalancePolicyList {
   policies: RebalancePolicyEntry[];
 }
+
+/** transfer.Position (untagged Go struct): the planner's point-in-time view of
+ *  one SKU at one site. Not an inventory ledger — inventory-storage is
+ *  authoritative for physical quantities. */
+export interface PositionWire {
+  Site: string;
+  SKU: string;
+  Available: number;
+  CustomerReservations: number;
+  ConfirmedInbound: number;
+  CommittedOutbound: number;
+  /** The use case requires this to EQUAL the request's asOf (a mixed snapshot is a 422). */
+  AsOf: string;
+}
+
+/** transfer.ScoreBreakdown (untagged): the planner's inspectable scoring; the
+ *  ordering score is PriorityBenefit − HandlingPenalty − LeadTimePenalty. */
+export interface ScoreBreakdownWire {
+  PriorityBenefit: number;
+  HandlingPenalty: number;
+  LeadTimePenalty: number;
+}
+
+/** transfer.Proposal (untagged): one advisory, explainable recommendation.
+ *  It reserves and moves nothing. */
+export interface ProposalWire {
+  Origin: string;
+  Destination: string;
+  SKU: string;
+  Quantity: number;
+  PolicyVersion: string;
+  PositionAsOf: string;
+  Reasons: string[];
+  ScoreBreakdown: ScoreBreakdownWire;
+}
+
+/** generateRequest (handler.go, camelCase json tags): the explicit, coherent
+ *  snapshot POST /v1/transfer-proposals:generate plans from. The decoder
+ *  refuses unknown fields. */
+export interface GenerateRequestWire {
+  asOf: string;
+  positions: PositionWire[];
+  policies: PolicyWire[];
+  lanes: LaneWire[];
+}
+
+/** POST /v1/transfer-proposals:generate 200: advisory proposals, highest
+ *  score first (ties by SKU, then origin). The response carries ONLY this —
+ *  no considered/rejected counters. */
+export interface GenerateResponseWire {
+  proposals: ProposalWire[];
+}
