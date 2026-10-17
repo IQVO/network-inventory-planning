@@ -41,6 +41,7 @@ export function TextField({
   hint,
   min,
   step,
+  disabled,
 }: {
   label: string;
   value: string;
@@ -52,6 +53,8 @@ export function TextField({
   hint?: string;
   min?: number;
   step?: number | "any";
+  /** Read-only (a catalogue entry's key, which a revise cannot change). */
+  disabled?: boolean;
 }) {
   const hintId = useId();
   return (
@@ -67,6 +70,7 @@ export function TextField({
           placeholder={placeholder}
           min={min}
           step={step}
+          disabled={disabled}
           aria-describedby={hint ? hintId : undefined}
           onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
           style={inputStyle}

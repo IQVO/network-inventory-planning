@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, approveTransfer, getSimulation, getTransfer, listRebalanceRuns, listTransfers, toApiError } from "./api";
+import { ApiError, approveTransfer, generateTransferProposals, getSimulation, getTransfer, listRebalancePolicies, listRebalanceRuns, listTransfers, listTransferLanes, putRebalancePolicy, putTransferLane, toApiError } from "./api";
 import { json, mockApi, problem } from "./test/fetchMock";
-import { RUNS, transferList, transfer } from "./test/fixtures";
+import { LANES, POLICIES, RUNS, SNAPSHOT_AS_OF, generateResponse, lane, laneList, policy, policyList, position, transferList, transfer } from "./test/fixtures";
 
 describe("listTransfers", () => {
   it("sends only the filters that are set", async () => {
@@ -42,6 +42,87 @@ describe("approveTransfer", () => {
       quantity: 5,
       policyVersion: "v1",
       proposalAsOf: "2026-10-07T09:00:00Z",
+    });
+  });
+});
+
+describe("putTransferLane", () => {
+  it("PUTs the PascalCase lane body with the loaded revision as a strong-ETag If-Match", async () => {
+    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().lanes[0]) });
+    await putTransferLane(lane(), '"2"');
+    const call = api.calls[0];
+    expect(call.method).toBe("PUT");
+    expect(call.path).toBe("/v1/transfer-lanes");
+    expect(call.headers["If-Match"]).toBe('"2"');
+    expect(call.headers["Content-Type"]).toBe("application/json");
+    expect(call.body).toEqual(lane());
+  });
+
+  it("omits If-Match when no revision is loaded (create, or apply to current)", async () => {
+    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().lanes[0], 201) });
+    await putTransferLane(lane({ Origin: "DC-NORTH" }));
+    expect(api.calls[0].headers["If-Match"]).toBeUndefined();
+  });
+});
+
+describe("listTransferLanes", () => {
+  it("GETs the catalogue envelope", async () => {
+    const api = mockApi({ "GET /v1/transfer-lanes": json(laneList()) });
+    const list = await listTransferLanes();
+    expect(api.calls[0].method).toBe("GET");
+    expect(list.lanes).toHaveLength(LANES.length);
+  });
+});
+
+describe("putRebalancePolicy", () => {
+  it("PUTs the PascalCase policy body with the loaded revision as a strong-ETag If-Match", async () => {
+    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().policies[0]) });
+    await putRebalancePolicy(policy(), '"4"');
+    const call = api.calls[0];
+    expect(call.method).toBe("PUT");
+    expect(call.path).toBe("/v1/rebalance-policies");
+    expect(call.headers["If-Match"]).toBe('"4"');
+    expect(call.body).toEqual(policy());
+  });
+
+  it("omits If-Match for a create", async () => {
+    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().policies[0], 201) });
+    await putRebalancePolicy(policy({ Site: "DC-NORTH", SKU: "SKU-GREEN-1" }));
+    expect(api.calls[0].headers["If-Match"]).toBeUndefined();
+  });
+});
+
+describe("listRebalancePolicies", () => {
+  it("GETs the catalogue envelope", async () => {
+    const api = mockApi({ "GET /v1/rebalance-policies": json(policyList()) });
+    const list = await listRebalancePolicies();
+    expect(api.calls[0].method).toBe("GET");
+    expect(list.policies).toHaveLength(POLICIES.length);
+  });
+});
+
+describe("generateTransferProposals", () => {
+  it("POSTs the snapshot with an Idempotency-Key, exactly as the approve call does", async () => {
+    const api = mockApi({ "POST /v1/transfer-proposals:generate": json(generateResponse()) });
+    await generateTransferProposals(
+      {
+        asOf: SNAPSHOT_AS_OF,
+        positions: [position()],
+        policies: [policy()],
+        lanes: [lane()],
+      },
+      "key-abc",
+    );
+    const call = api.calls[0];
+    expect(call.method).toBe("POST");
+    expect(call.path).toBe("/v1/transfer-proposals:generate");
+    expect(call.headers["Idempotency-Key"]).toBe("key-abc");
+    expect(call.headers["Content-Type"]).toBe("application/json");
+    expect(call.body).toEqual({
+      asOf: SNAPSHOT_AS_OF,
+      positions: [position()],
+      policies: [policy()],
+      lanes: [lane()],
     });
   });
 });

@@ -1,10 +1,19 @@
 import type {
   ApproveTransferResponse,
   AuditEntry,
+  GenerateResponseWire,
+  LaneWire,
+  PolicyWire,
+  ProposalWire,
+  PositionWire,
+  RebalancePolicyEntry,
+  RebalancePolicyList,
   RebalanceRun,
   SimulationResponse,
   SimulationSite,
   TransferDetail,
+  TransferLaneEntry,
+  TransferLaneList,
   TransferList,
   TransferView,
 } from "../types";
@@ -115,3 +124,112 @@ export const RUNS: RebalanceRun[] = [
   { id: 12, startedAt: "2026-10-07T06:00:00Z", snapshotAsOf: "2026-10-07T05:59:00Z", proposalCount: 4, rejectedCount: 1, outcome: "COMPLETED" },
   { id: 11, startedAt: "2026-10-07T05:00:00Z", proposalCount: 0, rejectedCount: 0, outcome: "FAILED", failClosedReason: "capacity facts are stale" },
 ];
+
+/** 18 h in nanoseconds (Go time.Duration, the Lane.LeadTime wire shape). */
+export const LANE_18H_NS = 64800000000000;
+
+export function lane(over: Partial<LaneWire> = {}): LaneWire {
+  return {
+    Origin: "DC-EAST",
+    Destination: "DC-WEST",
+    LeadTime: LANE_18H_NS,
+    UnitHandlingCost: 3,
+    Enabled: true,
+    ...over,
+  };
+}
+
+export function laneEntry(over: Partial<TransferLaneEntry> = {}): TransferLaneEntry {
+  return { lane: lane(), revision: 2, updatedAt: "2026-10-06T08:00:00Z", ...over };
+}
+
+/** In the service's own order (origin, then destination). */
+export const LANES: TransferLaneEntry[] = [
+  laneEntry(),
+  laneEntry({
+    lane: lane({ Origin: "DC-WEST", Destination: "DC-NORTH", LeadTime: 900000000000, UnitHandlingCost: 0, Enabled: false }),
+    revision: 1,
+    updatedAt: "2026-10-05T08:00:00Z",
+  }),
+];
+
+export function laneList(lanes: TransferLaneEntry[] = LANES): TransferLaneList {
+  return { lanes };
+}
+
+export function policy(over: Partial<PolicyWire> = {}): PolicyWire {
+  return {
+    Version: "v7",
+    Site: "DC-WEST",
+    SKU: "SKU-RED-42",
+    SafetyStock: 60,
+    TargetStock: 200,
+    UnitPriority: 5,
+    ...over,
+  };
+}
+
+export function policyEntry(over: Partial<RebalancePolicyEntry> = {}): RebalancePolicyEntry {
+  return { policy: policy(), revision: 4, updatedAt: "2026-10-06T07:00:00Z", ...over };
+}
+
+/** In the service's own order (site, then SKU). */
+export const POLICIES: RebalancePolicyEntry[] = [
+  policyEntry(),
+  policyEntry({
+    policy: policy({ Site: "DC-WEST", SKU: "SKU-BLUE-7", Version: "v2", SafetyStock: 0, TargetStock: 0, UnitPriority: 0 }),
+    revision: 1,
+    updatedAt: "2026-10-02T07:00:00Z",
+  }),
+];
+
+export function policyList(policies: RebalancePolicyEntry[] = POLICIES): RebalancePolicyList {
+  return { policies };
+}
+
+export const SNAPSHOT_AS_OF = "2026-10-07T09:50:00Z";
+
+export function position(over: Partial<PositionWire> = {}): PositionWire {
+  return {
+    Site: "DC-EAST",
+    SKU: "SKU-RED-42",
+    Available: 500,
+    CustomerReservations: 20,
+    ConfirmedInbound: 0,
+    CommittedOutbound: 30,
+    AsOf: SNAPSHOT_AS_OF,
+    ...over,
+  };
+}
+
+export function proposal(over: Partial<ProposalWire> = {}): ProposalWire {
+  return {
+    Origin: "DC-EAST",
+    Destination: "DC-WEST",
+    SKU: "SKU-RED-42",
+    Quantity: 140,
+    PolicyVersion: "v7",
+    PositionAsOf: SNAPSHOT_AS_OF,
+    Reasons: ["DESTINATION_BELOW_TARGET", "ORIGIN_ABOVE_SAFETY_STOCK", "APPROVED_LANE"],
+    ScoreBreakdown: { PriorityBenefit: 700, HandlingPenalty: 3, LeadTimePenalty: 18 },
+    ...over,
+  };
+}
+
+/** In the service's own order: highest score first, ties by SKU then origin. */
+export const PROPOSALS: ProposalWire[] = [
+  proposal(),
+  proposal({
+    Origin: "DC-NORTH",
+    Destination: "DC-WEST",
+    SKU: "SKU-BLUE-7",
+    Quantity: 40,
+    PolicyVersion: "v2",
+    Reasons: ["DESTINATION_BELOW_TARGET", "APPROVED_LANE"],
+    ScoreBreakdown: { PriorityBenefit: 120, HandlingPenalty: 0, LeadTimePenalty: 6 },
+  }),
+];
+
+export function generateResponse(proposals: ProposalWire[] = PROPOSALS): GenerateResponseWire {
+  return { proposals };
+}
