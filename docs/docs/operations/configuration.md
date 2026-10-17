@@ -60,6 +60,7 @@ Source: `cmd/mcp/main.go`.
 | `MIGRATIONS_DATABASE_URL` | value of `DATABASE_URL` | no | Direct DSN for the migration step only. | `database.migrationsExistingSecretKey` |
 | `PLANNING_MAX_STALENESS` | `10m` | no | Freshness budget used by `simulate_transfer_options`. Invalid → exit 1. | `config.maxStaleness` |
 | `LOG_LEVEL` | `info` | no | `debug`, `info`, `warn`/`warning`, `error` (JSON logs on stdout). | `mcp.logLevel` |
+| `OTEL_SERVICE_NAME` | `network-inventory-planning-mcp` | no | `service.name` of this binary's traces and metrics (OTLP export is configured by `OTEL_EXPORTER_OTLP_ENDPOINT` as for the API). | not rendered; use `extraEnv` |
 
 ## `nip-projector`
 
@@ -73,6 +74,7 @@ Source: `cmd/nip-projector/main.go` (`loadConfig`).
 | `ANALYTICS_MIGRATIONS_PATH` | `analytics/migrations` | no | Analytical migrations directory (relative to `/app` in the image). | `analytics.migrationsPath` |
 | `ADMIN_ADDR` | `:8091` | no | Admin server (`/healthz`, `/readyz`). | `analytics.projector.adminAddr` |
 | `LOG_LEVEL` | `info` | no | Log level of the JSON logger. | `analytics.logLevel` |
+| `OTEL_SERVICE_NAME` | `network-inventory-planning-projector` | no | `service.name` of this binary's traces and metrics (OTLP export is configured by `OTEL_EXPORTER_OTLP_ENDPOINT` as for the API). | not rendered; use `extraEnv` |
 
 ## `nip-reports`
 
@@ -84,6 +86,7 @@ Source: `cmd/nip-reports/main.go` (`loadConfig`).
 | `ANALYTICS_DATABASE_URL` | none | one of the two | Fallback DSN for single-role local runs. With neither set the process exits 1. | — |
 | `HTTP_ADDR` | `:8092` | no | Listen address of the reports server. | `analytics.reports.httpAddr` |
 | `LOG_LEVEL` | `info` | no | Log level. | `analytics.logLevel` |
+| `OTEL_SERVICE_NAME` | `network-inventory-planning-reports` | no | `service.name` of this binary's traces and metrics (OTLP export is configured by `OTEL_EXPORTER_OTLP_ENDPOINT` as for the API). | not rendered; use `extraEnv` |
 
 The reports pool opens every connection with
 `default_transaction_read_only = on` regardless of the role.
