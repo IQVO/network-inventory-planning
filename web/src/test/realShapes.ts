@@ -154,6 +154,28 @@ export const LANE_ENTRY: Shape = {
 /** GET /v1/transfer-lanes 200. */
 export const LANE_LIST: Shape = { lanes: "array" };
 
+/** transfer.Policy (untagged Go struct): versioned guardrails for one SKU at
+ *  one site; zero SafetyStock/TargetStock/UnitPriority are legal and present. */
+export const POLICY: Shape = {
+  Version: "string",
+  Site: "string",
+  SKU: "string",
+  SafetyStock: "number",
+  TargetStock: "number",
+  UnitPriority: "number",
+};
+
+/** rebalancePolicyEntryDTO (catalogue.go); `outcome` is set only on a PUT. */
+export const POLICY_ENTRY: Shape = {
+  policy: "object",
+  revision: "number",
+  updatedAt: "string",
+  outcome: "string?",
+};
+
+/** GET /v1/rebalance-policies 200. */
+export const POLICY_LIST: Shape = { policies: "array" };
+
 /**
  * Where each shape lives in the Go source, for the drift check. `struct` is a
  * named type; `anonymousFirstField` finds an inline response envelope by its
@@ -181,4 +203,6 @@ export const GO_SOURCES: {
   { name: "problem", file: "handler.go", struct: "problem", shape: PROBLEM, optionality: true },
   { name: "transferLaneEntryDTO", file: "catalogue.go", struct: "transferLaneEntryDTO", shape: LANE_ENTRY, optionality: true },
   { name: "transfer-lanes envelope", file: "catalogue.go", anonymousFirstField: "Lanes", shape: LANE_LIST, optionality: true },
+  { name: "rebalancePolicyEntryDTO", file: "catalogue.go", struct: "rebalancePolicyEntryDTO", shape: POLICY_ENTRY, optionality: true },
+  { name: "rebalance-policies envelope", file: "catalogue.go", anonymousFirstField: "Policies", shape: POLICY_LIST, optionality: true },
 ];

@@ -192,3 +192,30 @@ export interface TransferLaneEntry {
 export interface TransferLaneList {
   lanes: TransferLaneEntry[];
 }
+
+/** transfer.Policy (untagged Go struct): versioned guardrails for one SKU at
+ *  one destination site. A TargetStock of 0 means "do not stock this SKU
+ *  here"; zero SafetyStock/UnitPriority are legal. */
+export interface PolicyWire {
+  Version: string;
+  Site: string;
+  SKU: string;
+  SafetyStock: number;
+  TargetStock: number;
+  UnitPriority: number;
+}
+
+/** rebalancePolicyEntryDTO: GET/PUT /v1/rebalance-policies row; `outcome` is
+ *  set only on a PUT response (the ETag is `revision` in quotes). */
+export interface RebalancePolicyEntry {
+  policy: PolicyWire;
+  /** Optimistic-concurrency token; 1 on creation, +1 per accepted change. */
+  revision: number;
+  updatedAt: string;
+  outcome?: CatalogueOutcome;
+}
+
+/** GET /v1/rebalance-policies 200 (ordered by site, then SKU). */
+export interface RebalancePolicyList {
+  policies: RebalancePolicyEntry[];
+}

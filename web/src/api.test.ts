@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, approveTransfer, getSimulation, getTransfer, listRebalanceRuns, listTransfers, listTransferLanes, putTransferLane, toApiError } from "./api";
+import { ApiError, approveTransfer, getSimulation, getTransfer, listRebalancePolicies, listRebalanceRuns, listTransfers, listTransferLanes, putRebalancePolicy, putTransferLane, toApiError } from "./api";
 import { json, mockApi, problem } from "./test/fetchMock";
-import { LANES, RUNS, lane, laneList, transferList, transfer } from "./test/fixtures";
+import { LANES, POLICIES, RUNS, lane, laneList, policy, policyList, transferList, transfer } from "./test/fixtures";
 
 describe("listTransfers", () => {
   it("sends only the filters that are set", async () => {
@@ -71,6 +71,33 @@ describe("listTransferLanes", () => {
     const list = await listTransferLanes();
     expect(api.calls[0].method).toBe("GET");
     expect(list.lanes).toHaveLength(LANES.length);
+  });
+});
+
+describe("putRebalancePolicy", () => {
+  it("PUTs the PascalCase policy body with the loaded revision as a strong-ETag If-Match", async () => {
+    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().policies[0]) });
+    await putRebalancePolicy(policy(), '"4"');
+    const call = api.calls[0];
+    expect(call.method).toBe("PUT");
+    expect(call.path).toBe("/v1/rebalance-policies");
+    expect(call.headers["If-Match"]).toBe('"4"');
+    expect(call.body).toEqual(policy());
+  });
+
+  it("omits If-Match for a create", async () => {
+    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().policies[0], 201) });
+    await putRebalancePolicy(policy({ Site: "DC-NORTH", SKU: "SKU-GREEN-1" }));
+    expect(api.calls[0].headers["If-Match"]).toBeUndefined();
+  });
+});
+
+describe("listRebalancePolicies", () => {
+  it("GETs the catalogue envelope", async () => {
+    const api = mockApi({ "GET /v1/rebalance-policies": json(policyList()) });
+    const list = await listRebalancePolicies();
+    expect(api.calls[0].method).toBe("GET");
+    expect(list.policies).toHaveLength(POLICIES.length);
   });
 });
 

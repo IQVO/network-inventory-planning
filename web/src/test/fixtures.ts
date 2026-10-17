@@ -2,6 +2,9 @@ import type {
   ApproveTransferResponse,
   AuditEntry,
   LaneWire,
+  PolicyWire,
+  RebalancePolicyEntry,
+  RebalancePolicyList,
   RebalanceRun,
   SimulationResponse,
   SimulationSite,
@@ -149,4 +152,34 @@ export const LANES: TransferLaneEntry[] = [
 
 export function laneList(lanes: TransferLaneEntry[] = LANES): TransferLaneList {
   return { lanes };
+}
+
+export function policy(over: Partial<PolicyWire> = {}): PolicyWire {
+  return {
+    Version: "v7",
+    Site: "DC-WEST",
+    SKU: "SKU-RED-42",
+    SafetyStock: 60,
+    TargetStock: 200,
+    UnitPriority: 5,
+    ...over,
+  };
+}
+
+export function policyEntry(over: Partial<RebalancePolicyEntry> = {}): RebalancePolicyEntry {
+  return { policy: policy(), revision: 4, updatedAt: "2026-10-06T07:00:00Z", ...over };
+}
+
+/** In the service's own order (site, then SKU). */
+export const POLICIES: RebalancePolicyEntry[] = [
+  policyEntry(),
+  policyEntry({
+    policy: policy({ Site: "DC-WEST", SKU: "SKU-BLUE-7", Version: "v2", SafetyStock: 0, TargetStock: 0, UnitPriority: 0 }),
+    revision: 1,
+    updatedAt: "2026-10-02T07:00:00Z",
+  }),
+];
+
+export function policyList(policies: RebalancePolicyEntry[] = POLICIES): RebalancePolicyList {
+  return { policies };
 }

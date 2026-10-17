@@ -3,6 +3,9 @@ import type {
   ApproveTransferRequest,
   ApproveTransferResponse,
   LaneWire,
+  PolicyWire,
+  RebalancePolicyEntry,
+  RebalancePolicyList,
   RebalanceRun,
   RebalanceRunsResponse,
   SimulationResponse,
@@ -159,6 +162,24 @@ export function listTransferLanes(): Promise<TransferLaneList> {
 export function putTransferLane(lane: LaneWire, ifMatch?: string): Promise<TransferLaneEntry> {
   return request<TransferLaneEntry>("PUT", "/v1/transfer-lanes", {
     body: lane,
+    ...(ifMatch !== undefined ? { headers: { "If-Match": ifMatch } } : {}),
+  });
+}
+
+/** GET /v1/rebalance-policies (every entry, ordered by site then SKU). */
+export function listRebalancePolicies(): Promise<RebalancePolicyList> {
+  return request<RebalancePolicyList>("GET", "/v1/rebalance-policies");
+}
+
+/**
+ * PUT /v1/rebalance-policies: an idempotent upsert of the Policy in the body,
+ * keyed by its Site + SKU — same If-Match/409/412 rules and outcomes as
+ * putTransferLane. 422 for an entry refused on its face (missing key, a
+ * negative quantity, a TargetStock below the SafetyStock).
+ */
+export function putRebalancePolicy(policy: PolicyWire, ifMatch?: string): Promise<RebalancePolicyEntry> {
+  return request<RebalancePolicyEntry>("PUT", "/v1/rebalance-policies", {
+    body: policy,
     ...(ifMatch !== undefined ? { headers: { "If-Match": ifMatch } } : {}),
   });
 }

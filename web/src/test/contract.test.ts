@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildApproveRequest } from "../lib";
 import { problem } from "./fetchMock";
-import { APPROVE_REQUEST, APPROVE_RESPONSE, AUDIT_ENTRY, GO_SOURCES, LANE, LANE_ENTRY, LANE_LIST, PROBLEM, REBALANCE_RUN, REBALANCE_RUNS, SIMULATION, SIMULATION_SITE, TRANSFER, TRANSFER_DETAIL, TRANSFER_LIST } from "./realShapes";
+import { APPROVE_REQUEST, APPROVE_RESPONSE, AUDIT_ENTRY, GO_SOURCES, LANE, LANE_ENTRY, LANE_LIST, POLICY, POLICY_ENTRY, POLICY_LIST, PROBLEM, REBALANCE_RUN, REBALANCE_RUNS, SIMULATION, SIMULATION_SITE, TRANSFER, TRANSFER_DETAIL, TRANSFER_LIST } from "./realShapes";
 import type { Shape } from "./realShapes";
-import { AUDIT, LANES, RECEIVED, RUNS, SITES, UNFULFILLABLE, approved, detail, laneEntry, laneList, simSite, simulation, transfer, transferList } from "./fixtures";
+import { AUDIT, LANES, POLICIES, RECEIVED, RUNS, SITES, UNFULFILLABLE, approved, detail, laneEntry, laneList, policyEntry, policyList, simSite, simulation, transfer, transferList } from "./fixtures";
 
 /**
  * Contract test: every fixture the screens' tests run against must have exactly
@@ -61,6 +61,15 @@ describe("fixtures match the real API shapes", () => {
       expect(diff(entry.lane, LANE)).toEqual([]);
     }
     expect(diff(laneEntry({ outcome: "UPDATED" }), LANE_ENTRY)).toEqual([]);
+  });
+
+  it("GET /v1/rebalance-policies (and a PUT answer)", () => {
+    expect(diff(policyList(), POLICY_LIST)).toEqual([]);
+    for (const entry of POLICIES) {
+      expect(diff(entry, POLICY_ENTRY)).toEqual([]);
+      expect(diff(entry.policy, POLICY)).toEqual([]);
+    }
+    expect(diff(policyEntry({ outcome: "CREATED" }), POLICY_ENTRY)).toEqual([]);
   });
 
   it("POST /v1/transfers:approve response", () => {

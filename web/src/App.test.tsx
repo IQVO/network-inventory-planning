@@ -5,10 +5,17 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
 import { json, mockApi } from "./test/fetchMock";
 import { fillApproval } from "./test/approval";
-import { approved, detail, laneList, simulation, transfer, transferList } from "./test/fixtures";
+import { approved, detail, laneList, policyList, simulation, transfer, transferList } from "./test/fixtures";
 
 const NAV = "Network inventory sections";
-const LABELS = ["Transfers", "Network simulation", "Rebalance runs", "Transfer lanes"];
+const LABELS = ["Transfers", "Network simulation", "Rebalance runs", "Transfer lanes", "Rebalance policies"];
+const NAV_HREFS = [
+  "/network-inventory",
+  "/network-inventory/simulation",
+  "/network-inventory/rebalance-runs",
+  "/network-inventory/lanes",
+  "/network-inventory/policies",
+];
 
 function mount(path: string) {
   return render(
@@ -38,6 +45,7 @@ function routes() {
     "GET /v1/transfer-simulations": json(simulation()),
     "GET /v1/rebalance-runs": json({ runs: [] }),
     "GET /v1/transfer-lanes": json(laneList()),
+    "GET /v1/rebalance-policies": json(policyList()),
   });
 }
 
@@ -68,18 +76,21 @@ describe("App (the exposed ./App)", () => {
     const c = mount("/lanes");
     expect(await screen.findByRole("heading", { name: "Transfer lanes" })).toBeInTheDocument();
     c.unmount();
+    const d = mount("/policies");
+    expect(await screen.findByRole("heading", { name: "Rebalance policies" })).toBeInTheDocument();
+    d.unmount();
     mount("/transfers/t-1001");
     expect(await screen.findByRole("heading", { name: "Transfer t-1001" })).toBeInTheDocument();
   });
 
   describe("mounted under the console's /network-inventory/* splat route", () => {
-    it.each(["/network-inventory", "/network-inventory/simulation", "/network-inventory/rebalance-runs", "/network-inventory/lanes", "/network-inventory/transfers/t-1001"])(
+    it.each(["/network-inventory", "/network-inventory/simulation", "/network-inventory/rebalance-runs", "/network-inventory/lanes", "/network-inventory/policies", "/network-inventory/transfers/t-1001"])(
       "sub-nav links resolve against the mount point, not the current URL (%s)",
       async (start) => {
         routes();
         mountUnderHost(start);
         await screen.findByRole("navigation", { name: NAV });
-        expect(navHrefs()).toEqual(["/network-inventory", "/network-inventory/simulation", "/network-inventory/rebalance-runs", "/network-inventory/lanes"]);
+        expect(navHrefs()).toEqual(NAV_HREFS);
       },
     );
 
@@ -88,6 +99,7 @@ describe("App (the exposed ./App)", () => {
       ["/network-inventory/simulation", "Network simulation"],
       ["/network-inventory/rebalance-runs", "Rebalance runs"],
       ["/network-inventory/lanes", "Transfer lanes"],
+      ["/network-inventory/policies", "Rebalance policies"],
     ])("marks only the current section active (%s)", async (start, active) => {
       routes();
       mountUnderHost(start);
@@ -119,9 +131,12 @@ describe("App (the exposed ./App)", () => {
       await user.click(screen.getByRole("link", { name: "Transfer lanes" }));
       expect(await screen.findByRole("heading", { name: "Transfer lanes" })).toBeInTheDocument();
 
+      await user.click(screen.getByRole("link", { name: "Rebalance policies" }));
+      expect(await screen.findByRole("heading", { name: "Rebalance policies" })).toBeInTheDocument();
+
       await user.click(screen.getByRole("link", { name: "Transfers" }));
       expect(await screen.findByRole("heading", { level: 1, name: "Transfers" })).toBeInTheDocument();
-      expect(navHrefs()).toEqual(["/network-inventory", "/network-inventory/simulation", "/network-inventory/rebalance-runs", "/network-inventory/lanes"]);
+      expect(navHrefs()).toEqual(NAV_HREFS);
     });
 
     it("the approved-transfer link from the simulation resolves under the mount point", async () => {

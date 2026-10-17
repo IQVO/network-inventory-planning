@@ -1,6 +1,6 @@
 /** Small pure helpers shared by the screens. */
 import type { ApiError } from "./api";
-import type { ApproveTransferRequest, LaneWire, SimulationSite, TransferState } from "./types";
+import type { ApproveTransferRequest, LaneWire, PolicyWire, SimulationSite, TransferState } from "./types";
 
 type Tone = "neutral" | "progress" | "success" | "warning" | "danger";
 
@@ -258,6 +258,81 @@ export function catalogueOutcomeNote(key: string, entry: { revision: number; out
     default:
       return `Saved ${key} at revision ${entry.revision}.`;
   }
+}
+
+/** The policy editor's raw (string) fields. */
+export interface PolicyDraft {
+  site: string;
+  sku: string;
+  version: string;
+  /** Blank means 0. */
+  safetyStock: string;
+  /** Blank means 0 (a target of 0 means "do not stock this SKU here"). */
+  targetStock: string;
+  /** Blank means 0. */
+  unitPriority: string;
+}
+
+export type PolicyField = keyof PolicyDraft;
+
+export function emptyPolicyDraft(): PolicyDraft {
+  return { site: "", sku: "", version: "", safetyStock: "", targetStock: "", unitPriority: "" };
+}
+
+export function policyDraftFrom(policy: PolicyWire): PolicyDraft {
+  return {
+    site: policy.Site,
+    sku: policy.SKU,
+    version: policy.Version,
+    safetyStock: String(policy.SafetyStock),
+    targetStock: String(policy.TargetStock),
+    unitPriority: String(policy.UnitPriority),
+  };
+}
+
+/** Client-side mirror of transfer.Policy.Validate: key and version present,
+ *  non-negative integers, target not below the safety stock. Either
+ *  `request` or per-field `errors`. */
+export function buildPolicyRequest(d: PolicyDraft): {
+  request?: PolicyWire;
+  errors: Partial<Record<PolicyField, string>>;
+} {
+  const errors: Partial<Record<PolicyField, string>> = {};
+  const site = d.site.trim();
+  const sku = d.sku.trim();
+  const version = d.version.trim();
+  if (!site) errors.site = "Site is required.";
+  if (!sku) errors.sku = "SKU is required.";
+  if (!version) errors.version = "Policy version is required.";
+  const counts: { field: PolicyField; label: string; raw: string }[] = [
+    { field: "safetyStock", label: "Safety stock", raw: d.safetyStock },
+    { field: "targetStock", label: "Target stock", raw: d.targetStock },
+    { field: "unitPriority", label: "Unit priority", raw: d.unitPriority },
+  ];
+  const parsed: Record<string, number> = {};
+  for (const { field, label, raw } of counts) {
+    const value = raw.trim() === "" ? "0" : raw.trim();
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+      errors[field] = `${label} must be zero or a positive whole number.`;
+    } else {
+      parsed[field] = Number(value);
+    }
+  }
+  if (parsed.safetyStock !== undefined && parsed.targetStock !== undefined && parsed.targetStock < parsed.safetyStock) {
+    errors.targetStock = "Target stock must not be below the safety stock.";
+  }
+  if (Object.keys(errors).length > 0) return { errors };
+  return {
+    errors,
+    request: {
+      Version: version,
+      Site: site,
+      SKU: sku,
+      SafetyStock: parsed.safetyStock,
+      TargetStock: parsed.targetStock,
+      UnitPriority: parsed.unitPriority,
+    },
+  };
 }
 
 /**
