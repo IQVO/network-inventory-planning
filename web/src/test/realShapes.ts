@@ -16,7 +16,7 @@
  * (b) parses the Go source and fails when its json tags drift from them.
  */
 
-export type Kind = "string" | "number" | "boolean" | "array";
+export type Kind = "string" | "number" | "boolean" | "array" | "object";
 export type Shape = Record<string, Kind | `${Kind}?`>;
 
 export const SIMULATION_SITE: Shape = {
@@ -122,6 +122,38 @@ export const PROBLEM: Shape = {
   detail: "string",
 };
 
+/* ------------------------------------------------------------------ *
+ * Operator-managed catalogue + generator shapes (Phase 4.2). The four
+ * domain structs these embed (internal/domain/transfer/model.go Policy,
+ * Lane, Position, Proposal) carry NO json tags: Go marshals them keyed by
+ * their Go field names (PascalCase), every field always present, and the
+ * PUT/generate decoders run DisallowUnknownFields. There are no json tags
+ * to drift-check, so those four pins are validated against fixtures only;
+ * the envelope/entry DTOs below live in catalogue.go/handler.go WITH tags
+ * and are drift-checked like every other shape.
+ * ------------------------------------------------------------------ */
+
+/** transfer.Lane (untagged Go struct): a directed Origin → Destination route;
+ *  LeadTime is time.Duration on the wire (integer nanoseconds). */
+export const LANE: Shape = {
+  Origin: "string",
+  Destination: "string",
+  LeadTime: "number",
+  UnitHandlingCost: "number",
+  Enabled: "boolean",
+};
+
+/** transferLaneEntryDTO (catalogue.go); `outcome` is set only on a PUT. */
+export const LANE_ENTRY: Shape = {
+  lane: "object",
+  revision: "number",
+  updatedAt: "string",
+  outcome: "string?",
+};
+
+/** GET /v1/transfer-lanes 200. */
+export const LANE_LIST: Shape = { lanes: "array" };
+
 /**
  * Where each shape lives in the Go source, for the drift check. `struct` is a
  * named type; `anonymousFirstField` finds an inline response envelope by its
@@ -130,7 +162,7 @@ export const PROBLEM: Shape = {
  */
 export const GO_SOURCES: {
   name: string;
-  file: "handler.go" | "transfers_read.go";
+  file: "handler.go" | "transfers_read.go" | "catalogue.go";
   shape: Shape;
   struct?: string;
   anonymousFirstField?: string;
@@ -147,4 +179,6 @@ export const GO_SOURCES: {
   { name: "rebalanceRunDTO", file: "handler.go", struct: "rebalanceRunDTO", shape: REBALANCE_RUN, optionality: true },
   { name: "rebalance-runs envelope", file: "handler.go", anonymousFirstField: "Runs", shape: REBALANCE_RUNS, optionality: true },
   { name: "problem", file: "handler.go", struct: "problem", shape: PROBLEM, optionality: true },
+  { name: "transferLaneEntryDTO", file: "catalogue.go", struct: "transferLaneEntryDTO", shape: LANE_ENTRY, optionality: true },
+  { name: "transfer-lanes envelope", file: "catalogue.go", anonymousFirstField: "Lanes", shape: LANE_LIST, optionality: true },
 ];

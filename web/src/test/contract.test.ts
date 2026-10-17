@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildApproveRequest } from "../lib";
 import { problem } from "./fetchMock";
-import { APPROVE_REQUEST, APPROVE_RESPONSE, AUDIT_ENTRY, GO_SOURCES, PROBLEM, REBALANCE_RUN, REBALANCE_RUNS, SIMULATION, SIMULATION_SITE, TRANSFER, TRANSFER_DETAIL, TRANSFER_LIST } from "./realShapes";
+import { APPROVE_REQUEST, APPROVE_RESPONSE, AUDIT_ENTRY, GO_SOURCES, LANE, LANE_ENTRY, LANE_LIST, PROBLEM, REBALANCE_RUN, REBALANCE_RUNS, SIMULATION, SIMULATION_SITE, TRANSFER, TRANSFER_DETAIL, TRANSFER_LIST } from "./realShapes";
 import type { Shape } from "./realShapes";
-import { AUDIT, RECEIVED, RUNS, SITES, UNFULFILLABLE, approved, detail, simSite, simulation, transfer, transferList } from "./fixtures";
+import { AUDIT, LANES, RECEIVED, RUNS, SITES, UNFULFILLABLE, approved, detail, laneEntry, laneList, simSite, simulation, transfer, transferList } from "./fixtures";
 
 /**
  * Contract test: every fixture the screens' tests run against must have exactly
@@ -52,6 +52,15 @@ describe("fixtures match the real API shapes", () => {
   it("GET /v1/rebalance-runs", () => {
     expect(diff({ runs: RUNS }, REBALANCE_RUNS)).toEqual([]);
     for (const run of RUNS) expect(diff(run, REBALANCE_RUN)).toEqual([]);
+  });
+
+  it("GET /v1/transfer-lanes (and a PUT answer)", () => {
+    expect(diff(laneList(), LANE_LIST)).toEqual([]);
+    for (const entry of LANES) {
+      expect(diff(entry, LANE_ENTRY)).toEqual([]);
+      expect(diff(entry.lane, LANE)).toEqual([]);
+    }
+    expect(diff(laneEntry({ outcome: "UPDATED" }), LANE_ENTRY)).toEqual([]);
   });
 
   it("POST /v1/transfers:approve response", () => {

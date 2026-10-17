@@ -2,12 +2,14 @@ import { NavLink, Outlet, Route, Routes } from "react-router-dom";
 import { RebalanceRunsScreen } from "./screens/RebalanceRunsScreen";
 import { SimulationScreen } from "./screens/SimulationScreen";
 import { TransferDetailScreen } from "./screens/TransferDetailScreen";
+import { TransferLanesScreen } from "./screens/TransferLanesScreen";
 import { TransfersScreen } from "./screens/TransfersScreen";
 
 const SUB_NAV = [
   { to: ".", label: "Transfers", end: true },
   { to: "simulation", label: "Network simulation" },
   { to: "rebalance-runs", label: "Rebalance runs" },
+  { to: "lanes", label: "Transfer lanes" },
 ];
 
 const linkStyle = ({ isActive }: { isActive: boolean }) => ({
@@ -56,7 +58,8 @@ function NipLayout() {
  *   - Transfers (index): filterable, paged transfer list.
  *   - transfers/:id: one transfer, quantities, reservation and audit timeline.
  *   - simulation: advisory per-site capacity vs demand (no proposals), and the operator-driven Approve form.
- *   - rebalance-runs: the scheduled observe-only run history. */
+ *   - rebalance-runs: the scheduled observe-only run history.
+ *   - lanes: the operator-managed directed lane catalogue (list + edit). */
 export default function App() {
   return (
     <Routes>
@@ -65,6 +68,7 @@ export default function App() {
         <Route path="transfers/:id" element={<TransferDetailScreen />} />
         <Route path="simulation" element={<SimulationScreen />} />
         <Route path="rebalance-runs" element={<RebalanceRunsScreen />} />
+        <Route path="lanes" element={<TransferLanesScreen />} />
       </Route>
     </Routes>
   );

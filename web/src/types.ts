@@ -153,3 +153,42 @@ export interface RebalanceRun {
 export interface RebalanceRunsResponse {
   runs: RebalanceRun[];
 }
+
+/**
+ * Wire shapes of the operator-managed catalogues (ADR 0015) and the proposal
+ * generator. UNLIKE the DTOs above, the Go structs these embed
+ * (internal/domain/transfer/model.go Policy, Lane, Position, Proposal) carry
+ * NO json tags, so they marshal keyed by their Go field names (PascalCase)
+ * and every field is always present -- there is no omitempty on them. The
+ * PUT decoders and the generate decoder run with DisallowUnknownFields, so a
+ * body must carry exactly these keys and no others.
+ */
+
+/** transfer.Lane: one DIRECTED origin → destination route. LeadTime is Go's
+ *  time.Duration wire shape (integer nanoseconds). */
+export interface LaneWire {
+  Origin: string;
+  Destination: string;
+  /** Lead time in nanoseconds. */
+  LeadTime: number;
+  UnitHandlingCost: number;
+  Enabled: boolean;
+}
+
+/** What a catalogue PUT did (usecases.CatalogueOutcome); only on a PUT response. */
+export type CatalogueOutcome = "CREATED" | "UPDATED" | "UNCHANGED";
+
+/** transferLaneEntryDTO: GET/PUT /v1/transfer-lanes row. `outcome` (the ETag is
+ *  `revision` in quotes) is set only on a PUT response. */
+export interface TransferLaneEntry {
+  lane: LaneWire;
+  /** Optimistic-concurrency token; 1 on creation, +1 per accepted change. */
+  revision: number;
+  updatedAt: string;
+  outcome?: CatalogueOutcome;
+}
+
+/** GET /v1/transfer-lanes 200 (ordered by origin, then destination). */
+export interface TransferLaneList {
+  lanes: TransferLaneEntry[];
+}

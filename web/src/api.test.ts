@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, approveTransfer, getSimulation, getTransfer, listRebalanceRuns, listTransfers, toApiError } from "./api";
+import { ApiError, approveTransfer, getSimulation, getTransfer, listRebalanceRuns, listTransfers, listTransferLanes, putTransferLane, toApiError } from "./api";
 import { json, mockApi, problem } from "./test/fetchMock";
-import { RUNS, transferList, transfer } from "./test/fixtures";
+import { LANES, RUNS, lane, laneList, transferList, transfer } from "./test/fixtures";
 
 describe("listTransfers", () => {
   it("sends only the filters that are set", async () => {
@@ -43,6 +43,34 @@ describe("approveTransfer", () => {
       policyVersion: "v1",
       proposalAsOf: "2026-10-07T09:00:00Z",
     });
+  });
+});
+
+describe("putTransferLane", () => {
+  it("PUTs the PascalCase lane body with the loaded revision as a strong-ETag If-Match", async () => {
+    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().lanes[0]) });
+    await putTransferLane(lane(), '"2"');
+    const call = api.calls[0];
+    expect(call.method).toBe("PUT");
+    expect(call.path).toBe("/v1/transfer-lanes");
+    expect(call.headers["If-Match"]).toBe('"2"');
+    expect(call.headers["Content-Type"]).toBe("application/json");
+    expect(call.body).toEqual(lane());
+  });
+
+  it("omits If-Match when no revision is loaded (create, or apply to current)", async () => {
+    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().lanes[0], 201) });
+    await putTransferLane(lane({ Origin: "DC-NORTH" }));
+    expect(api.calls[0].headers["If-Match"]).toBeUndefined();
+  });
+});
+
+describe("listTransferLanes", () => {
+  it("GETs the catalogue envelope", async () => {
+    const api = mockApi({ "GET /v1/transfer-lanes": json(laneList()) });
+    const list = await listTransferLanes();
+    expect(api.calls[0].method).toBe("GET");
+    expect(list.lanes).toHaveLength(LANES.length);
   });
 });
 

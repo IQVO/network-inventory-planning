@@ -1,10 +1,13 @@
 import type {
   ApproveTransferResponse,
   AuditEntry,
+  LaneWire,
   RebalanceRun,
   SimulationResponse,
   SimulationSite,
   TransferDetail,
+  TransferLaneEntry,
+  TransferLaneList,
   TransferList,
   TransferView,
 } from "../types";
@@ -115,3 +118,35 @@ export const RUNS: RebalanceRun[] = [
   { id: 12, startedAt: "2026-10-07T06:00:00Z", snapshotAsOf: "2026-10-07T05:59:00Z", proposalCount: 4, rejectedCount: 1, outcome: "COMPLETED" },
   { id: 11, startedAt: "2026-10-07T05:00:00Z", proposalCount: 0, rejectedCount: 0, outcome: "FAILED", failClosedReason: "capacity facts are stale" },
 ];
+
+/** 18 h in nanoseconds (Go time.Duration, the Lane.LeadTime wire shape). */
+export const LANE_18H_NS = 64800000000000;
+
+export function lane(over: Partial<LaneWire> = {}): LaneWire {
+  return {
+    Origin: "DC-EAST",
+    Destination: "DC-WEST",
+    LeadTime: LANE_18H_NS,
+    UnitHandlingCost: 3,
+    Enabled: true,
+    ...over,
+  };
+}
+
+export function laneEntry(over: Partial<TransferLaneEntry> = {}): TransferLaneEntry {
+  return { lane: lane(), revision: 2, updatedAt: "2026-10-06T08:00:00Z", ...over };
+}
+
+/** In the service's own order (origin, then destination). */
+export const LANES: TransferLaneEntry[] = [
+  laneEntry(),
+  laneEntry({
+    lane: lane({ Origin: "DC-WEST", Destination: "DC-NORTH", LeadTime: 900000000000, UnitHandlingCost: 0, Enabled: false }),
+    revision: 1,
+    updatedAt: "2026-10-05T08:00:00Z",
+  }),
+];
+
+export function laneList(lanes: TransferLaneEntry[] = LANES): TransferLaneList {
+  return { lanes };
+}

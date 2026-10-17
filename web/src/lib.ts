@@ -1,6 +1,6 @@
 /** Small pure helpers shared by the screens. */
 import type { ApiError } from "./api";
-import type { ApproveTransferRequest, SimulationSite, TransferState } from "./types";
+import type { ApproveTransferRequest, LaneWire, SimulationSite, TransferState } from "./types";
 
 type Tone = "neutral" | "progress" | "success" | "warning" | "danger";
 
@@ -158,6 +158,126 @@ export function approveLead(error: ApiError): string | undefined {
       return "The approval no longer passes validation against the current facts (missing, stale or disabled). Nothing was approved; refresh the simulation and look again.";
     case 503:
       return "The service cannot approve right now (configuration incomplete or the approval could not be completed). Nothing was approved; you can retry the same approval safely.";
+    default:
+      return undefined;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Catalogue editors (ADR 0015: PUT /v1/transfer-lanes and
+ * /v1/rebalance-policies). The client-side checks mirror what the domain
+ * refuses on its face (internal/domain/transfer/catalogue.go Validate), so
+ * the operator sees the same rule before the network round-trip; the
+ * service stays authoritative and its 422 problem is still surfaced.
+ * ------------------------------------------------------------------ */
+
+/** One nanosecond per 3.6e12: the wire carries Go time.Duration (ns). */
+export const NS_PER_HOUR = 3.6e12;
+
+/** A lane's LeadTime as an input value: exact hours ("18", "0.25"). */
+export function leadTimeHoursValue(ns: number): string {
+  const hours = ns / NS_PER_HOUR;
+  return Number.isInteger(hours) ? String(hours) : String(Number(hours.toFixed(4)));
+}
+
+/** A lane's LeadTime for a table cell: 64800000000000 -> "18 h". */
+export function leadTimeLabel(ns: number): string {
+  const hours = ns / NS_PER_HOUR;
+  return `${Number.isInteger(hours) ? hours : Number(hours.toFixed(2))} h`;
+}
+
+/** The lane editor's raw (string) fields. */
+export interface LaneDraft {
+  origin: string;
+  destination: string;
+  /** Hours; blank means 0. Sent as nanoseconds. */
+  leadTimeHours: string;
+  /** Blank means 0. */
+  unitHandlingCost: string;
+  enabled: "yes" | "no";
+}
+
+export type LaneField = keyof LaneDraft;
+
+export function emptyLaneDraft(): LaneDraft {
+  return { origin: "", destination: "", leadTimeHours: "", unitHandlingCost: "", enabled: "yes" };
+}
+
+export function laneDraftFrom(lane: LaneWire): LaneDraft {
+  return {
+    origin: lane.Origin,
+    destination: lane.Destination,
+    leadTimeHours: leadTimeHoursValue(lane.LeadTime),
+    unitHandlingCost: String(lane.UnitHandlingCost),
+    enabled: lane.Enabled ? "yes" : "no",
+  };
+}
+
+/** Client-side mirror of transfer.Lane.Validate: keys present and differing,
+ *  non-negative lead time and cost. Either `request` or per-field `errors`. */
+export function buildLaneRequest(d: LaneDraft): {
+  request?: LaneWire;
+  errors: Partial<Record<LaneField, string>>;
+} {
+  const errors: Partial<Record<LaneField, string>> = {};
+  const origin = d.origin.trim();
+  const destination = d.destination.trim();
+  if (!origin) errors.origin = "Origin site is required.";
+  if (!destination) errors.destination = "Destination site is required.";
+  if (origin && origin === destination) {
+    errors.destination = "Origin and destination must differ — a lane is directed; WH1→WH2 and WH2→WH1 are two lanes.";
+  }
+  const hours = d.leadTimeHours.trim() === "" ? 0 : Number(d.leadTimeHours.trim());
+  if (!Number.isFinite(hours) || hours < 0) errors.leadTimeHours = "Lead time must be zero or more hours.";
+  const cost = d.unitHandlingCost.trim() === "" ? "0" : d.unitHandlingCost.trim();
+  if (!/^\d+$/.test(cost) || !Number.isSafeInteger(Number(cost))) {
+    errors.unitHandlingCost = "Unit handling cost must be zero or a positive whole number.";
+  }
+  if (Object.keys(errors).length > 0) return { errors };
+  return {
+    errors,
+    request: {
+      Origin: origin,
+      Destination: destination,
+      LeadTime: Math.round(hours * NS_PER_HOUR),
+      UnitHandlingCost: Number(cost),
+      Enabled: d.enabled === "yes",
+    },
+  };
+}
+
+/** The stored entry a PUT answered with, worded for the operator. */
+export function catalogueOutcomeNote(key: string, entry: { revision: number; outcome?: string }): string {
+  switch (entry.outcome) {
+    case "CREATED":
+      return `Created ${key} at revision ${entry.revision}.`;
+    case "UPDATED":
+      return `Updated ${key} to revision ${entry.revision}.`;
+    case "UNCHANGED":
+      return `${key} is unchanged (the PUT carried exactly the stored entry; nothing was written). Revision ${entry.revision}.`;
+    default:
+      return `Saved ${key} at revision ${entry.revision}.`;
+  }
+}
+
+/**
+ * Operator guidance for the catalogue problems the service documents
+ * (catalogue.go writeCatalogueProblem, parseIfMatch). Nothing is written on
+ * any of these: 412/409 mean the entry moved under the operator and the list
+ * has been refreshed.
+ */
+export function catalogueLead(error: ApiError): string | undefined {
+  switch (error.status) {
+    case 400:
+      return "The request was refused before anything was written (a malformed If-Match, or a body field the service does not know).";
+    case 412:
+      return "The entry moved on since it was loaded (If-Match does not match the current revision). Nothing was written; the list below has been refreshed — edit the entry again from its current revision.";
+    case 409:
+      return "Another writer changed this entry while yours was being saved. Nothing of yours was written; the list has been refreshed — retry from the current revision.";
+    case 422:
+      return "The service refused the entry as invalid. Nothing was written; fix the named field and save again.";
+    case 503:
+      return "This instance runs without the persistence the catalogues require; nothing was written.";
     default:
       return undefined;
   }
