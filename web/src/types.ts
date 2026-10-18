@@ -153,3 +153,121 @@ export interface RebalanceRun {
 export interface RebalanceRunsResponse {
   runs: RebalanceRun[];
 }
+
+/**
+ * Wire shapes of the operator-managed catalogues (ADR 0015) and the proposal
+ * generator. UNLIKE the DTOs above, the Go structs these embed
+ * (internal/domain/transfer/model.go Policy, Lane, Position, Proposal) carry
+ * NO json tags, so they marshal keyed by their Go field names (PascalCase)
+ * and every field is always present -- there is no omitempty on them. The
+ * PUT decoders and the generate decoder run with DisallowUnknownFields, so a
+ * body must carry exactly these keys and no others.
+ */
+
+/** transfer.Lane: one DIRECTED origin → destination route. LeadTime is Go's
+ *  time.Duration wire shape (integer nanoseconds). */
+export interface LaneWire {
+  Origin: string;
+  Destination: string;
+  /** Lead time in nanoseconds. */
+  LeadTime: number;
+  UnitHandlingCost: number;
+  Enabled: boolean;
+}
+
+/** What a catalogue PUT did (usecases.CatalogueOutcome); only on a PUT response. */
+export type CatalogueOutcome = "CREATED" | "UPDATED" | "UNCHANGED";
+
+/** transferLaneEntryDTO: GET/PUT /v1/transfer-lanes row. `outcome` (the ETag is
+ *  `revision` in quotes) is set only on a PUT response. */
+export interface TransferLaneEntry {
+  lane: LaneWire;
+  /** Optimistic-concurrency token; 1 on creation, +1 per accepted change. */
+  revision: number;
+  updatedAt: string;
+  outcome?: CatalogueOutcome;
+}
+
+/** GET /v1/transfer-lanes 200 (ordered by origin, then destination). */
+export interface TransferLaneList {
+  lanes: TransferLaneEntry[];
+}
+
+/** transfer.Policy (untagged Go struct): versioned guardrails for one SKU at
+ *  one destination site. A TargetStock of 0 means "do not stock this SKU
+ *  here"; zero SafetyStock/UnitPriority are legal. */
+export interface PolicyWire {
+  Version: string;
+  Site: string;
+  SKU: string;
+  SafetyStock: number;
+  TargetStock: number;
+  UnitPriority: number;
+}
+
+/** rebalancePolicyEntryDTO: GET/PUT /v1/rebalance-policies row; `outcome` is
+ *  set only on a PUT response (the ETag is `revision` in quotes). */
+export interface RebalancePolicyEntry {
+  policy: PolicyWire;
+  /** Optimistic-concurrency token; 1 on creation, +1 per accepted change. */
+  revision: number;
+  updatedAt: string;
+  outcome?: CatalogueOutcome;
+}
+
+/** GET /v1/rebalance-policies 200 (ordered by site, then SKU). */
+export interface RebalancePolicyList {
+  policies: RebalancePolicyEntry[];
+}
+
+/** transfer.Position (untagged Go struct): the planner's point-in-time view of
+ *  one SKU at one site. Not an inventory ledger — inventory-storage is
+ *  authoritative for physical quantities. */
+export interface PositionWire {
+  Site: string;
+  SKU: string;
+  Available: number;
+  CustomerReservations: number;
+  ConfirmedInbound: number;
+  CommittedOutbound: number;
+  /** The use case requires this to EQUAL the request's asOf (a mixed snapshot is a 422). */
+  AsOf: string;
+}
+
+/** transfer.ScoreBreakdown (untagged): the planner's inspectable scoring; the
+ *  ordering score is PriorityBenefit − HandlingPenalty − LeadTimePenalty. */
+export interface ScoreBreakdownWire {
+  PriorityBenefit: number;
+  HandlingPenalty: number;
+  LeadTimePenalty: number;
+}
+
+/** transfer.Proposal (untagged): one advisory, explainable recommendation.
+ *  It reserves and moves nothing. */
+export interface ProposalWire {
+  Origin: string;
+  Destination: string;
+  SKU: string;
+  Quantity: number;
+  PolicyVersion: string;
+  PositionAsOf: string;
+  Reasons: string[];
+  ScoreBreakdown: ScoreBreakdownWire;
+}
+
+/** generateRequest (handler.go, camelCase json tags): the explicit, coherent
+ *  snapshot POST /v1/transfer-proposals:generate plans from. The decoder
+ *  refuses unknown fields. */
+export interface GenerateRequestWire {
+  asOf: string;
+  positions: PositionWire[];
+  policies: PolicyWire[];
+  lanes: LaneWire[];
+}
+
+/** POST /v1/transfer-proposals:generate 200: advisory proposals, highest
+ *  score first (ties by SKU, then origin). The response carries ONLY this —
+ *  no considered/rejected counters. */
+export interface GenerateResponseWire {
+  proposals: ProposalWire[];
+}

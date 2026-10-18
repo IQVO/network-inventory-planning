@@ -2,10 +2,18 @@ import { NIP_API_BASE } from "./config";
 import type {
   ApproveTransferRequest,
   ApproveTransferResponse,
+  GenerateRequestWire,
+  GenerateResponseWire,
+  LaneWire,
+  PolicyWire,
+  RebalancePolicyEntry,
+  RebalancePolicyList,
   RebalanceRun,
   RebalanceRunsResponse,
   SimulationResponse,
   TransferDetail,
+  TransferLaneEntry,
+  TransferLaneList,
   TransferList,
   TransferQuery,
 } from "./types";
@@ -67,7 +75,7 @@ function withQuery(path: string, query?: Query): string {
 }
 
 async function request<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   path: string,
   opts: { body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<T> {
@@ -137,4 +145,63 @@ export function approveTransfer(
 export async function listRebalanceRuns(limit?: number): Promise<RebalanceRun[]> {
   const res = await request<RebalanceRunsResponse>("GET", withQuery("/v1/rebalance-runs", { limit }));
   return res.runs ?? [];
+}
+
+/** GET /v1/transfer-lanes (every lane, ordered by origin then destination). */
+export function listTransferLanes(): Promise<TransferLaneList> {
+  return request<TransferLaneList>("GET", "/v1/transfer-lanes");
+}
+
+/**
+ * PUT /v1/transfer-lanes: an idempotent upsert of the DIRECTED lane in the
+ * body, keyed by its Origin → Destination. `ifMatch` is the loaded entry's
+ * revision as a strong ETag (`"3"`) for optimistic concurrency -- omit it to
+ * apply to whatever revision is current. 201 CREATED (new, revision 1) or
+ * 200 UPDATED / UNCHANGED, answered with the stored entry plus its `outcome`.
+ * 412 when the revision moved on, 409 on a lost write race, 422 for an entry
+ * the catalogue refuses on its face, 503 without persistence.
+ */
+export function putTransferLane(lane: LaneWire, ifMatch?: string): Promise<TransferLaneEntry> {
+  return request<TransferLaneEntry>("PUT", "/v1/transfer-lanes", {
+    body: lane,
+    ...(ifMatch !== undefined ? { headers: { "If-Match": ifMatch } } : {}),
+  });
+}
+
+/** GET /v1/rebalance-policies (every entry, ordered by site then SKU). */
+export function listRebalancePolicies(): Promise<RebalancePolicyList> {
+  return request<RebalancePolicyList>("GET", "/v1/rebalance-policies");
+}
+
+/**
+ * PUT /v1/rebalance-policies: an idempotent upsert of the Policy in the body,
+ * keyed by its Site + SKU — same If-Match/409/412 rules and outcomes as
+ * putTransferLane. 422 for an entry refused on its face (missing key, a
+ * negative quantity, a TargetStock below the SafetyStock).
+ */
+export function putRebalancePolicy(policy: PolicyWire, ifMatch?: string): Promise<RebalancePolicyEntry> {
+  return request<RebalancePolicyEntry>("PUT", "/v1/rebalance-policies", {
+    body: policy,
+    ...(ifMatch !== undefined ? { headers: { "If-Match": ifMatch } } : {}),
+  });
+}
+
+/**
+ * POST /v1/transfer-proposals:generate — the DIAGNOSTIC planning boundary:
+ * deterministic, explainable proposal generation over the caller-provided
+ * snapshot (production planning consumes the local read models via the
+ * simulation endpoint instead). Advisory only — nothing is reserved or moved.
+ * 422 problem+json when the snapshot is refused (a missing asOf, or a position
+ * whose AsOf does not equal it). The Idempotency-Key follows the remote's
+ * convention: a fresh key per logical run, reused when the same snapshot is
+ * retried.
+ */
+export function generateTransferProposals(
+  input: GenerateRequestWire,
+  idempotencyKey: string,
+): Promise<GenerateResponseWire> {
+  return request<GenerateResponseWire>("POST", "/v1/transfer-proposals:generate", {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }
