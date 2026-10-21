@@ -27,7 +27,7 @@ FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cab
 # base image was last rebuilt (e.g. openssl point releases); ca-certificates
 # is still pinned explicitly for a reproducible, auditable base layer.
 RUN apk upgrade --no-cache && \
-    apk add --no-cache ca-certificates=20260909-r0 && \
+    apk add --no-cache ca-certificates=20261020-r0 && \
     addgroup -g 1000 -S app && adduser -u 1000 -S app -G app
 WORKDIR /app
 COPY --from=build --chown=app:app /out/network-inventory-planning ./network-inventory-planning
