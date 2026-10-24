@@ -97,3 +97,42 @@ func TestNewLogger_LevelMapping(t *testing.T) {
 		t.Error("warn/error level mapping is wrong")
 	}
 }
+
+func TestDrainConsumer_CancellationIsTheCleanOutcome(t *testing.T) {
+	done := make(chan error, 1)
+	done <- context.Canceled
+	if err := drainConsumer(done, context.Background(), nil, quietLogger()); err != nil {
+		t.Fatalf("graceful drain returned %v, want nil", err)
+	}
+}
+
+func TestDrainConsumer_RealFailureIsSurfaced(t *testing.T) {
+	sentinel := errors.New("reader: broker went away")
+	done := make(chan error, 1)
+	done <- sentinel
+	err := drainConsumer(done, context.Background(), nil, quietLogger())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("drain error = %v, want it to wrap %v", err, sentinel)
+	}
+}
+
+func TestDrainConsumer_FailureJoinsAdminShutdownError(t *testing.T) {
+	adminErr := errors.New("admin: shutdown deadline")
+	consumerErr := errors.New("reader: broker went away")
+	done := make(chan error, 1)
+	done <- consumerErr
+	err := drainConsumer(done, context.Background(), adminErr, quietLogger())
+	if !errors.Is(err, adminErr) || !errors.Is(err, consumerErr) {
+		t.Fatalf("drain error = %v, want it to wrap both %v and %v", err, adminErr, consumerErr)
+	}
+}
+
+func TestDrainConsumer_DeadlineKeepsShutdownError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // deadline already expired, consumer never reported
+	done := make(chan error, 1)
+	adminErr := errors.New("admin: shutdown deadline")
+	if err := drainConsumer(done, ctx, adminErr, quietLogger()); !errors.Is(err, adminErr) {
+		t.Fatalf("drain error = %v, want %v", err, adminErr)
+	}
+}
