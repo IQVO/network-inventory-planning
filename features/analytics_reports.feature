@@ -168,6 +168,7 @@ Feature: Saga-health analytics reports
     And 2 hours pass
     When the saga health check runs
     Then the saga health check has detected 1 stuck transfer
+    And the domain event "TransferStuckDetected" was published
     When 1 minute passes
     And the analytics projector has consumed the analytics topic
     And I request the report "/reports/stuck-transfers"
@@ -191,6 +192,7 @@ Feature: Saga-health analytics reports
     And 1 minute passes
     And the saga health check runs
     And 1 minute passes
+    And the domain event "TransferStuckDetected" was published 2 times
     And the analytics projector has consumed the analytics topic
     When I request the report "/reports/stuck-transfers"
     Then the JSON field "days.0.detections" is 2
@@ -207,6 +209,7 @@ Feature: Saga-health analytics reports
     And 30 minutes pass
     When the saga health check runs
     Then the saga health check has detected 0 stuck transfers
+    And the domain event "TransferStuckDetected" was not published
 
   Scenario: A finished transfer is never stuck, however old
     Given a transfer "T1" in state "RECEIVED"
