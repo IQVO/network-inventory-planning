@@ -25,6 +25,7 @@ ENABLE_EVERYTHING = [
     "--set", "kafka.capacityPlanConsumerGroup=nip-capacity-plan",
     "--set", "kafka.transferReplyConsumerGroup=nip-transfer-reply",
     "--set", "kafka.transferFactConsumerGroup=nip-transfer-fact",
+    "--set", "kafka.packLevelConsumerGroup=nip-pack-level",
     "--set", "config.transferPickPathId=pick-path",
     "--set", "config.transferPickCptOffset=90m",
     "--set", "config.transferDispatchPathId=dispatch-path",
@@ -49,6 +50,7 @@ EXPECTED_ENV = {
     "CAPACITY_PLAN_CONSUMER_GROUP",
     "TRANSFER_REPLY_CONSUMER_GROUP",
     "TRANSFER_FACT_CONSUMER_GROUP",
+    "PACK_LEVEL_CONSUMER_GROUP",
 }
 
 
@@ -114,6 +116,7 @@ MCP_FORBIDDEN_ENV = {
     "CAPACITY_PLAN_CONSUMER_GROUP",
     "TRANSFER_REPLY_CONSUMER_GROUP",
     "TRANSFER_FACT_CONSUMER_GROUP",
+    "PACK_LEVEL_CONSUMER_GROUP",
     "HTTP_ADDR",
     "MCP_API_KEY",
     "API_KEY",
@@ -140,6 +143,7 @@ PROJECTOR_FORBIDDEN_ENV = {
     "CAPACITY_PLAN_CONSUMER_GROUP",
     "TRANSFER_REPLY_CONSUMER_GROUP",
     "TRANSFER_FACT_CONSUMER_GROUP",
+    "PACK_LEVEL_CONSUMER_GROUP",
     "ANALYTICS_READER_DATABASE_URL",
     "MCP_API_KEY",
     "API_KEY",
@@ -294,6 +298,7 @@ def main() -> int:
             "CAPACITY_PLAN_CONSUMER_GROUP",
             "TRANSFER_REPLY_CONSUMER_GROUP",
             "TRANSFER_FACT_CONSUMER_GROUP",
+            "PACK_LEVEL_CONSUMER_GROUP",
             "DATABASE_URL",
             "MIGRATIONS_DATABASE_URL",
             "TRANSFER_PICK_PATH_ID",
@@ -302,6 +307,18 @@ def main() -> int:
     )
     if leaked:
         failures.append(f"env vars leaked with default values: {leaked}")
+
+    # ADR 0017: the pack-level consumer group is MANDATORY when kafka.enabled:
+    # the chart must refuse to render without it, and wire it when set.
+    if plain.get("PACK_LEVEL_CONSUMER_GROUP") != "nip-pack-level":
+        failures.append(f"PACK_LEVEL_CONSUMER_GROUP = {plain.get('PACK_LEVEL_CONSUMER_GROUP')!r}, want 'nip-pack-level'")
+    refused = subprocess.run(
+        ["helm", "template", "nip", str(CHART_DIR),
+         "--set", "database.existingSecret=nip-database", "--set", "kafka.enabled=true"],
+        capture_output=True, text=True,
+    )
+    if refused.returncode == 0 or "packLevelConsumerGroup" not in refused.stderr:
+        failures.append("kafka.enabled=true without kafka.packLevelConsumerGroup must fail the render naming packLevelConsumerGroup")
 
     # Routing is opt-in and renders the right kind.
     kinds = {d["kind"] for d in render(["--set", "database.existingSecret=x", "--set", "gatewayApi.enabled=true",

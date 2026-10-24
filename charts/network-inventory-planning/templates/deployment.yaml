@@ -131,6 +131,10 @@ spec:
             - name: TRANSFER_FACT_CONSUMER_GROUP
               value: {{ .Values.kafka.transferFactConsumerGroup | quote }}
             {{- end }}
+            # MANDATORY (ADR 0017): the pack-level consumer feeds the local
+            # product-master pack view the transfer rounding reads.
+            - name: PACK_LEVEL_CONSUMER_GROUP
+              value: {{ include "network-inventory-planning.requirePackLevelGroup" . | quote }}
             {{- end }}
             {{- range .Values.extraEnv }}
             - {{ toYaml . | nindent 14 | trim }}

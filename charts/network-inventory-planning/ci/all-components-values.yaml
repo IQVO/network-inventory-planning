@@ -9,6 +9,7 @@ kafka:
   capacityPlanConsumerGroup: "nip-capacity-plan"
   transferReplyConsumerGroup: "nip-transfer-reply"
   transferFactConsumerGroup: "nip-transfer-fact"
+  packLevelConsumerGroup: "nip-pack-level"
 autoscaling:
   enabled: true
 mcp:

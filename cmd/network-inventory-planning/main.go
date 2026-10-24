@@ -662,6 +662,12 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 			"enable_with", strings.Join([]string{envCapabilityGroup, envDemandGroup, envCapacityGroup, envPackLevelGroup}, ", "))
 		return nil, nil, nil
 	}
+	// Unlike the other group ids (each its own off switch), the pack-level
+	// group is MANDATORY whenever Kafka is configured: without the local pack
+	// view every case SKU would silently stop rounding to whole cases.
+	if os.Getenv(envPackLevelGroup) == "" {
+		return nil, nil, fmt.Errorf("%s is required when %s is set (ADR 0017): no default group id is safe", envPackLevelGroup, envKafkaBrokers)
+	}
 	brokers := strings.Split(raw, ",")
 
 	var runners, closers []func() error

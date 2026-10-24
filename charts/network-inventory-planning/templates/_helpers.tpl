@@ -145,3 +145,12 @@ installs without Kong are unaffected.
 {{- end -}}
 {{- join "," $names -}}
 {{- end -}}
+
+{{/*
+kafka.packLevelConsumerGroup is MANDATORY when kafka.enabled (ADR 0017): the
+api refuses to boot without PACK_LEVEL_CONSUMER_GROUP, and no default group id
+is safe. Fail at render instead of crash-looping.
+*/}}
+{{- define "network-inventory-planning.requirePackLevelGroup" -}}
+{{- required "kafka.enabled is true but kafka.packLevelConsumerGroup is empty — the api refuses to boot without PACK_LEVEL_CONSUMER_GROUP (ADR 0017). Set e.g. kafka.packLevelConsumerGroup=network-inventory-planning-pack-level." .Values.kafka.packLevelConsumerGroup -}}
+{{- end -}}

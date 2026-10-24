@@ -37,7 +37,7 @@ ENABLE_EVERYTHING = BASE + [
     "--set", "gatewayApi.enabled=true",
     "--set", "gatewayApi.parentRefs[0].name=gw",
     "--set", "ingress.enabled=true",
-    "--set", "kafka.enabled=true",
+    "--set", "kafka.enabled=true", "--set", "kafka.packLevelConsumerGroup=nip-pack-level",
     "--set", "analytics.enabled=true",
     "--set", "analytics.database.existingSecret=nip-analytics",
     "--set", "analytics.projector.autoscaling.enabled=true",
@@ -255,7 +255,7 @@ def check_analytics(failures: list[str], services: dict, deployments: dict) -> N
         failures.append("the projector serves only its admin port to probes and must have no Service")
 
     # Render-time guards: analytics without a DSN source, or without kafka, must not render.
-    no_dsn = [*BASE, "--set", "kafka.enabled=true", "--set", "analytics.enabled=true"]
+    no_dsn = [*BASE, "--set", "kafka.enabled=true", "--set", "kafka.packLevelConsumerGroup=nip-pack-level", "--set", "analytics.enabled=true"]
     no_kafka = [*BASE, "--set", "analytics.enabled=true", "--set", "analytics.database.existingSecret=x"]
     for label, args in (("a DSN source", no_dsn), ("kafka.enabled", no_kafka)):
         proc = subprocess.run(["helm", "template", RELEASE, str(CHART_DIR), *args], capture_output=True, text=True)
@@ -265,7 +265,7 @@ def check_analytics(failures: list[str], services: dict, deployments: dict) -> N
             failures.append(f"the missing-{label} failure must name analytics.enabled, got: {proc.stderr.strip()[:200]}")
 
     # The chart creates its own Secret from the DSN values, with both keys.
-    docs = render([*BASE, "--set", "kafka.enabled=true", "--set", "analytics.enabled=true",
+    docs = render([*BASE, "--set", "kafka.enabled=true", "--set", "kafka.packLevelConsumerGroup=nip-pack-level", "--set", "analytics.enabled=true",
                    "--set", "analytics.database.projectorUrl=postgres://p@h:5432/db"])
     secrets = [d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"].endswith("-analytics")]
     if len(secrets) != 1 or set(secrets[0].get("stringData", {})) != {"ANALYTICS_DATABASE_URL", "ANALYTICS_READER_DATABASE_URL"}:
