@@ -93,6 +93,11 @@ type Proposal struct {
 	PositionAsOf   time.Time
 	Reasons        []ReasonCode
 	ScoreBreakdown ScoreBreakdown
+	// CaseRounding is set only for a SKU with an active CASE level: Quantity
+	// is then a whole number of cases and the report keeps the requested
+	// total and the remainder visible (ADR 0017). Nil leaves the proposal,
+	// and its JSON, exactly as before.
+	*CaseRounding
 }
 
 // Score returns the proposal's deterministic final score.
@@ -106,6 +111,9 @@ func (p Proposal) Valid() bool {
 		return false
 	}
 	if strings.TrimSpace(string(p.SKU)) == "" || strings.TrimSpace(p.PolicyVersion) == "" || p.Quantity <= 0 || p.PositionAsOf.IsZero() {
+		return false
+	}
+	if p.CaseRounding != nil && p.CaseRounding.check(p.Quantity) != nil {
 		return false
 	}
 	return p.Score() > 0

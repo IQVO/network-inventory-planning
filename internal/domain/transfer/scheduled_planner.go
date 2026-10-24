@@ -31,7 +31,7 @@ import (
 // rejected counts candidates the proposal's own validity check refused
 // (for example a lane whose handling and lead-time cost outweigh the
 // priority benefit); an exhausted budget is not a rejection.
-func (Planner) PlanFromSnapshot(snap planning.PlanningSnapshot, policies []Policy, lanes []Lane) (proposals []Proposal, rejected int) {
+func (pl Planner) PlanFromSnapshot(snap planning.PlanningSnapshot, policies []Policy, lanes []Lane) (proposals []Proposal, rejected int) {
 	byKey := indexPolicies(policies)
 	candidates := make([]scheduledCandidate, 0)
 	for _, l := range usableLanes(snap, lanes) {
@@ -41,7 +41,11 @@ func (Planner) PlanFromSnapshot(snap planning.PlanningSnapshot, policies []Polic
 				continue
 			}
 			c := scheduledCandidate{lane: l, destination: destination, origin: origin}
-			p, ok := c.propose(snap, need(snap, destination), headroom(snap, l.Origin)-origin.SafetyStock)
+			p, ok, belowCase := c.propose(snap, pl.caseMultiples, need(snap, destination), headroom(snap, l.Origin)-origin.SafetyStock)
+			if belowCase {
+				rejected++
+				continue
+			}
 			if !ok {
 				continue
 			}
@@ -53,7 +57,7 @@ func (Planner) PlanFromSnapshot(snap planning.PlanningSnapshot, policies []Polic
 			candidates = append(candidates, c)
 		}
 	}
-	accepted, refused := allocate(snap, candidates)
+	accepted, refused := allocate(snap, pl.caseMultiples, candidates)
 	sortProposals(accepted)
 	return accepted, rejected + refused
 }
@@ -67,11 +71,22 @@ type scheduledCandidate struct {
 }
 
 // propose builds the candidate's proposal for at most min(need, donor)
-// units; ok is false when there is nothing to move.
-func (c scheduledCandidate) propose(snap planning.PlanningSnapshot, need, donor int) (Proposal, bool) {
+// units, rounded to whole cases when the SKU has an active CASE level
+// (donor is the case rounding's source availability). ok is false when
+// there is nothing to move; belowCase is true when there IS something to
+// move but the donor cannot supply one whole case (ADR 0017), which the
+// caller counts as a rejection, not as an exhausted budget.
+func (c scheduledCandidate) propose(snap planning.PlanningSnapshot, multiples CaseMultiples, need, donor int) (p Proposal, ok, belowCase bool) {
 	quantity := min(need, donor)
 	if quantity <= 0 {
-		return Proposal{}, false
+		return Proposal{}, false, false
+	}
+	rounding, ok := roundForSKU(multiples, c.destination.SKU, need, donor)
+	if !ok {
+		return Proposal{}, false, true
+	}
+	if rounding != nil {
+		quantity = rounding.RoundedEaches
 	}
 	return Proposal{
 		Origin:        c.lane.Origin,
@@ -86,13 +101,14 @@ func (c scheduledCandidate) propose(snap planning.PlanningSnapshot, need, donor 
 			HandlingPenalty: quantity * c.lane.UnitHandlingCost,
 			LeadTimePenalty: int(c.lane.LeadTime.Hours() / 24),
 		},
-	}, true
+		CaseRounding: rounding,
+	}, true, false
 }
 
 // allocate serves the candidates highest score first against the shared
 // budgets: remaining need per destination+SKU and remaining headroom per
 // origin site.
-func allocate(snap planning.PlanningSnapshot, candidates []scheduledCandidate) (accepted []Proposal, refused int) {
+func allocate(snap planning.PlanningSnapshot, multiples CaseMultiples, candidates []scheduledCandidate) (accepted []Proposal, refused int) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return lessProposal(candidates[i].proposal, candidates[j].proposal)
 	})
@@ -107,7 +123,11 @@ func allocate(snap planning.PlanningSnapshot, candidates []scheduledCandidate) (
 		if _, seen := headroomLeft[c.lane.Origin]; !seen {
 			headroomLeft[c.lane.Origin] = headroom(snap, c.lane.Origin)
 		}
-		p, ok := c.propose(snap, needLeft[needKey], headroomLeft[c.lane.Origin]-c.origin.SafetyStock)
+		p, ok, belowCase := c.propose(snap, multiples, needLeft[needKey], headroomLeft[c.lane.Origin]-c.origin.SafetyStock)
+		if belowCase {
+			refused++
+			continue
+		}
 		if !ok {
 			continue // budget exhausted by a better candidate
 		}
