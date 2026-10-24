@@ -188,9 +188,23 @@ func run() error {
 	defer cancel()
 	shutdownErr := admin.Shutdown(ctx)
 	cancelConsumer()
+	return drainConsumer(consumerDone, ctx, shutdownErr, logger)
+}
+
+// drainConsumer waits for the analytics consumer to finish after its context
+// was cancelled. The loop's FetchMessage returns the context cancellation on a
+// graceful stop, so that is the expected outcome and stays unreported; any
+// OTHER error (a reader failure that raced the shutdown) is joined onto the
+// admin shutdown error so the process still exits non-zero. If the consumer
+// misses the shutdown deadline the admin error is returned unchanged.
+func drainConsumer(consumerDone <-chan error, deadline context.Context, shutdownErr error, logger *slog.Logger) error {
 	select {
-	case <-consumerDone:
-	case <-ctx.Done():
+	case consumerErr := <-consumerDone:
+		if consumerErr != nil && !errors.Is(consumerErr, context.Canceled) {
+			logger.Warn("analytics consumer failed during shutdown", "error", consumerErr)
+			return errors.Join(shutdownErr, consumerErr)
+		}
+	case <-deadline.Done():
 		logger.Warn("analytics consumer did not stop before the shutdown deadline")
 	}
 	return shutdownErr
