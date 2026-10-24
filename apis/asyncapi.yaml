@@ -413,6 +413,7 @@ components:
       payload:
         $ref: '#/components/schemas/CapacityPlanPublishedEvent'
     transferPlanApproved:
+      x-no-consumer-reason: "operator approval record of the transfer saga; consumed on demand"
       name: TransferPlanApproved
       title: Transfer plan approved
       summary: An operator approved an advisory proposal into a transfer plan (published).
