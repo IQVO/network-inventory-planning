@@ -329,12 +329,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	// case SKU to whole cases. No planning path calls product-master.
 	packLevels := postgres.NewPackLevelView(pool)
 	out.generate = usecases.GenerateTransferProposals{Packs: packLevels}
-
-	out.simulate = &usecases.SimulateTransferOptions{
-		Snapshot:     snapshots,
-		MaxStaleness: maxStaleness,
-		Now:          time.Now,
-	}
+	out.simulate = &usecases.SimulateTransferOptions{Snapshot: snapshots, MaxStaleness: maxStaleness, Now: time.Now}
 
 	// Transactional outbox: the approval writes TransferPlanApproved +
 	// TransferAllocationRequested rows in its own transaction; the relay
@@ -371,10 +366,10 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		if err := approve.Release.Validate(); err != nil {
 			logger.Warn("work release not configured; POST /v1/transfers:approve answers 503 (no transfer may be approved without a releasable pick leg)",
 				"error", err, "enable_with", strings.Join([]string{envPickPathID, envPickCPTOffset}, ","))
-			out.approve = approve // non-nil: the endpoint answers the typed 503 with the missing-var detail
-		} else {
-			out.approve = approve
 		}
+		// Non-nil even when unconfigured: the endpoint answers the typed 503
+		// with the missing-variable detail.
+		out.approve = approve
 	} else {
 		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers:approve answers 503 (the saga cannot emit its allocation command without the outbox)")
 	}

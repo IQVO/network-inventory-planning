@@ -88,6 +88,12 @@ func TestApplyPackLevelRetired(t *testing.T) {
 	if got.EffectiveTo == nil || !got.EffectiveTo.Equal(end) || got.Version != 4 {
 		t.Fatalf("got %+v", got)
 	}
+}
+
+func TestApplyPackLevelRetiredRefusesInvalidEvents(t *testing.T) {
+	a := ApplyPackLevel{PackLevels: memory.NewPackLevelView()}
+	ctx := context.Background()
+	end := plT0.Add(time.Hour)
 	for name, c := range map[string]PackLevelRetiredChange{
 		"blank gtin": {SKU: "S", Level: "CASE", GTIN: "", EffectiveTo: end, Version: 1},
 		"zero ver":   {SKU: "S", Level: "CASE", GTIN: "g", EffectiveTo: end, Version: 0},
@@ -132,5 +138,6 @@ func TestActiveCaseMultiples(t *testing.T) {
 	if m, err := ActiveCaseMultiples(ctx, nil, []string{"ACTIVE"}, at); err != nil || len(m) != 0 {
 		t.Fatalf("a nil view must yield an empty table, got %v %v", m, err)
 	}
-	var _ transfer.CaseMultiples = got
+	assertTable := func(transfer.CaseMultiples) {}
+	assertTable(got)
 }

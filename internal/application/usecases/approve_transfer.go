@@ -92,19 +92,9 @@ func (u ApproveTransfer) Execute(ctx context.Context, in ApproveTransferInput) (
 	}
 	now := u.Now().UTC()
 
-	facts, err := u.Snapshot.Load(ctx)
+	snap, err := u.loadSnapshot(ctx, now)
 	if err != nil {
-		return ApproveTransferResult{}, fmt.Errorf("approve transfer: load read models: %w", err)
-	}
-	snap, err := planning.BuildSnapshot(planning.SnapshotInput{
-		Capabilities: facts.Capabilities,
-		Demands:      facts.Demands,
-		Plans:        facts.Plans,
-		MaxStaleness: u.MaxStaleness,
-		Now:          func() time.Time { return now },
-	})
-	if err != nil {
-		return ApproveTransferResult{}, fmt.Errorf("%w: %s", transfer.ErrFactsIncomplete, err)
+		return ApproveTransferResult{}, err
 	}
 
 	quantity, rounding, err := u.roundToCases(ctx, in, snap, now)
@@ -320,4 +310,25 @@ func classifyProposalError(err error) error {
 		return fmt.Errorf("%w: %w", ErrInvalidApproval, err)
 	}
 	return err
+}
+
+// loadSnapshot reads the current read models and builds the planning
+// snapshot approval validates against: unusable models are a load error (503),
+// incomplete or stale facts are ErrFactsIncomplete (422).
+func (u ApproveTransfer) loadSnapshot(ctx context.Context, now time.Time) (planning.PlanningSnapshot, error) {
+	facts, err := u.Snapshot.Load(ctx)
+	if err != nil {
+		return planning.PlanningSnapshot{}, fmt.Errorf("approve transfer: load read models: %w", err)
+	}
+	snap, err := planning.BuildSnapshot(planning.SnapshotInput{
+		Capabilities: facts.Capabilities,
+		Demands:      facts.Demands,
+		Plans:        facts.Plans,
+		MaxStaleness: u.MaxStaleness,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		return planning.PlanningSnapshot{}, fmt.Errorf("%w: %s", transfer.ErrFactsIncomplete, err)
+	}
+	return snap, nil
 }

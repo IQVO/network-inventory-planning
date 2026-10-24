@@ -6,13 +6,15 @@ import (
 	"time"
 )
 
+type roundCase struct {
+	name                    string
+	requested, units, avail int
+	wantOK                  bool
+	wantCases, wantRem      int
+}
+
 func TestRoundToCases(t *testing.T) {
-	cases := []struct {
-		name                    string
-		requested, units, avail int
-		wantOK                  bool
-		wantCases, wantRem      int
-	}{
+	cases := []roundCase{
 		{"exactly one case", 12, 12, 100, true, 1, 0},
 		{"exactly two cases", 24, 12, 100, true, 2, 0},
 		{"k*u+1 rounds down, remainder +1", 25, 12, 100, true, 2, 1},
@@ -39,34 +41,38 @@ func TestRoundToCases(t *testing.T) {
 		{"negative source moves nothing", 40, 12, -5, false, 0, 0},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, ok := RoundToCases(tc.requested, tc.units, tc.avail)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v (%+v)", ok, tc.wantOK, got)
-			}
-			if !ok {
-				if got != (CaseRounding{}) {
-					t.Fatalf("a refusal must carry the zero report, got %+v", got)
-				}
-				return
-			}
-			want := CaseRounding{
-				CaseMultiple: tc.units, Cases: tc.wantCases, RequestedEaches: tc.requested,
-				RoundedEaches: tc.wantCases * tc.units, RemainderEaches: tc.wantRem,
-			}
-			if got != want {
-				t.Fatalf("got %+v, want %+v", got, want)
-			}
-			if got.RoundedEaches%tc.units != 0 || got.RoundedEaches > tc.avail {
-				t.Fatalf("rounded %d must be a multiple of %d and within availability %d", got.RoundedEaches, tc.units, tc.avail)
-			}
-			if got.RequestedEaches != got.RoundedEaches+got.RemainderEaches {
-				t.Fatalf("the demand total is not preserved: %+v", got)
-			}
-			if err := got.check(got.RoundedEaches); err != nil {
-				t.Fatalf("a produced rounding must pass its own check: %v", err)
-			}
-		})
+		t.Run(tc.name, tc.run)
+	}
+}
+
+// run asserts one table row: the verdict, the exact report, the invariants
+// every produced rounding keeps and the zero report of a refusal.
+func (tc roundCase) run(t *testing.T) {
+	got, ok := RoundToCases(tc.requested, tc.units, tc.avail)
+	if ok != tc.wantOK {
+		t.Fatalf("ok = %v, want %v (%+v)", ok, tc.wantOK, got)
+	}
+	if !ok {
+		if got != (CaseRounding{}) {
+			t.Fatalf("a refusal must carry the zero report, got %+v", got)
+		}
+		return
+	}
+	want := CaseRounding{
+		CaseMultiple: tc.units, Cases: tc.wantCases, RequestedEaches: tc.requested,
+		RoundedEaches: tc.wantCases * tc.units, RemainderEaches: tc.wantRem,
+	}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	if got.RoundedEaches%tc.units != 0 || got.RoundedEaches > tc.avail {
+		t.Fatalf("rounded %d must be a multiple of %d and within availability %d", got.RoundedEaches, tc.units, tc.avail)
+	}
+	if got.RequestedEaches != got.RoundedEaches+got.RemainderEaches {
+		t.Fatalf("the demand total is not preserved: %+v", got)
+	}
+	if err := got.check(got.RoundedEaches); err != nil {
+		t.Fatalf("a produced rounding must pass its own check: %v", err)
 	}
 }
 

@@ -113,7 +113,7 @@ func (p Proposal) Valid() bool {
 	if strings.TrimSpace(string(p.SKU)) == "" || strings.TrimSpace(p.PolicyVersion) == "" || p.Quantity <= 0 || p.PositionAsOf.IsZero() {
 		return false
 	}
-	if p.CaseRounding != nil && p.CaseRounding.check(p.Quantity) != nil {
+	if p.CaseRounding != nil && p.check(p.Quantity) != nil {
 		return false
 	}
 	return p.Score() > 0
