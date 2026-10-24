@@ -93,18 +93,24 @@ func RoundToCases(requested, unitsPerPack, available int) (CaseRounding, bool) {
 // and Proposal.Valid enforce so a hand-built or corrupted report can never
 // be persisted or advertised.
 func (r CaseRounding) check(quantity int) error {
-	switch {
-	case r.CaseMultiple < 2:
+	// Plain ifs, not a tagless switch: gremlins under-reports coverage of
+	// switch cases (HARNESS.md), which would hide these guards from the gate.
+	if r.CaseMultiple < 2 {
 		return fmt.Errorf("case multiple must be at least 2, got %d", r.CaseMultiple)
-	case r.Cases < 1:
+	}
+	if r.Cases < 1 {
 		return fmt.Errorf("cases must be at least 1, got %d", r.Cases)
-	case r.RoundedEaches != r.Cases*r.CaseMultiple:
+	}
+	if r.RoundedEaches != r.Cases*r.CaseMultiple {
 		return fmt.Errorf("rounded eaches %d is not %d cases of %d", r.RoundedEaches, r.Cases, r.CaseMultiple)
-	case r.RoundedEaches != quantity:
+	}
+	if r.RoundedEaches != quantity {
 		return fmt.Errorf("rounded eaches %d differs from the quantity %d", r.RoundedEaches, quantity)
-	case r.RequestedEaches < 1:
+	}
+	if r.RequestedEaches < 1 {
 		return fmt.Errorf("requested eaches must be at least 1, got %d", r.RequestedEaches)
-	case r.RemainderEaches != r.RequestedEaches-r.RoundedEaches:
+	}
+	if r.RemainderEaches != r.RequestedEaches-r.RoundedEaches {
 		return fmt.Errorf("remainder %d is not requested %d minus rounded %d", r.RemainderEaches, r.RequestedEaches, r.RoundedEaches)
 	}
 	return nil

@@ -29,20 +29,27 @@ type Deps struct {
 // transferView is the wire shape of one transfer. Optional facts are omitted
 // until the saga has produced them.
 type transferView struct {
-	ID                string `json:"id"`
-	State             string `json:"state"`
-	SKU               string `json:"sku"`
-	Quantity          int    `json:"quantity"`
-	PickedQuantity    int    `json:"picked_quantity,omitempty"`
-	OriginSiteID      string `json:"origin_site_id"`
-	DestinationSiteID string `json:"destination_site_id"`
-	PolicyVersion     string `json:"policy_version"`
-	ReservationID     string `json:"reservation_id,omitempty"`
-	RejectionReason   string `json:"rejection_reason,omitempty"`
-	ExpiresAt         string `json:"expires_at"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
-	Version           int64  `json:"version"`
+	ID       string `json:"id"`
+	State    string `json:"state"`
+	SKU      string `json:"sku"`
+	Quantity int    `json:"quantity"`
+	// Case rounding (ADR 0017), present only for a SKU that had an active
+	// CASE level at approval.
+	CaseMultiple       *int   `json:"case_multiple,omitempty"`
+	Cases              *int   `json:"cases,omitempty"`
+	RequestedQtyEaches *int   `json:"requested_qty_eaches,omitempty"`
+	RoundedQtyEaches   *int   `json:"rounded_qty_eaches,omitempty"`
+	RemainderEaches    *int   `json:"remainder_eaches,omitempty"`
+	PickedQuantity     int    `json:"picked_quantity,omitempty"`
+	OriginSiteID       string `json:"origin_site_id"`
+	DestinationSiteID  string `json:"destination_site_id"`
+	PolicyVersion      string `json:"policy_version"`
+	ReservationID      string `json:"reservation_id,omitempty"`
+	RejectionReason    string `json:"rejection_reason,omitempty"`
+	ExpiresAt          string `json:"expires_at"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
+	Version            int64  `json:"version"`
 }
 
 // auditView is one state transition: when, what moved and the cause.
@@ -59,6 +66,15 @@ type auditView struct {
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 func toTransferView(t *transfer.InterWarehouseTransfer) transferView {
+	view := baseTransferView(t)
+	if r := t.CaseRounding(); r != nil {
+		view.CaseMultiple, view.Cases = &r.CaseMultiple, &r.Cases
+		view.RequestedQtyEaches, view.RoundedQtyEaches, view.RemainderEaches = &r.RequestedEaches, &r.RoundedEaches, &r.RemainderEaches
+	}
+	return view
+}
+
+func baseTransferView(t *transfer.InterWarehouseTransfer) transferView {
 	return transferView{
 		ID:                string(t.ID()),
 		State:             string(t.State()),

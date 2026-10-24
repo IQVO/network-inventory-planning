@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,6 +59,12 @@ type ApproveTransfer struct {
 	Snapshot     ports.PlanningSnapshotRepository
 	UoW          ports.UnitOfWork
 	MaxStaleness time.Duration
+	// Packs is the local pack-level view (ADR 0017). With it, a SKU that has
+	// an active CASE level is approved in whole cases: the quantity becomes
+	// the rounded eaches and the plan carries the case-rounding report.
+	// Nil (or a SKU without an active CASE level) leaves the approval
+	// exactly as before.
+	Packs ports.PackLevelView
 	// Release is the work-release configuration (ADR 0005). Validate()
 	// MUST pass before any approval is accepted: an approval without a
 	// configured pick path would mint a transfer whose allocation reply
@@ -100,13 +107,19 @@ func (u ApproveTransfer) Execute(ctx context.Context, in ApproveTransferInput) (
 		return ApproveTransferResult{}, fmt.Errorf("%w: %s", transfer.ErrFactsIncomplete, err)
 	}
 
+	quantity, rounding, err := u.roundToCases(ctx, in, snap, now)
+	if err != nil {
+		return ApproveTransferResult{}, err
+	}
+
 	proposal := transfer.ProposalInput{
 		ID:                transfer.TransferID("trf-" + uuid.NewString()),
 		IdempotencyKey:    in.IdempotencyKey,
 		OriginSiteID:      in.OriginSiteID,
 		DestinationSiteID: in.DestinationSiteID,
 		SKU:               in.SKU,
-		Quantity:          in.Quantity,
+		Quantity:          quantity,
+		CaseRounding:      rounding,
 		PolicyVersion:     in.PolicyVersion,
 		OperatorReason:    in.OperatorReason,
 		ProposalAsOf:      in.ProposalAsOf,
@@ -164,6 +177,38 @@ func (u ApproveTransfer) Execute(ctx context.Context, in ApproveTransferInput) (
 	return result, nil
 }
 
+// roundToCases applies the case rule (ADR 0017) to the requested quantity: a
+// SKU with an active CASE level moves a whole number of cases, never more
+// than the origin can send (the headroom ValidateApproval enforces), and the
+// report keeps the requested total and the remainder. A SKU without one is
+// returned untouched with a nil report. A source that cannot send even one
+// case is transfer.ErrBelowOneCase (422), never a silently shrunk partial
+// case. An unreadable pack view is ErrPackLevelsUnavailable (503).
+func (u ApproveTransfer) roundToCases(ctx context.Context, in ApproveTransferInput, snap planning.PlanningSnapshot, at time.Time) (int, *transfer.CaseRounding, error) {
+	multiples, err := ActiveCaseMultiples(ctx, u.Packs, []string{in.SKU}, at)
+	if err != nil {
+		return 0, nil, fmt.Errorf("approve transfer: %w: %w", ErrPackLevelsUnavailable, err)
+	}
+	units, ok := multiples.Of(transfer.SKU(in.SKU))
+	if !ok || in.Quantity <= 0 {
+		// No active CASE level, or a request ProposeTransfer refuses on its
+		// face (quantity must be positive): hand it on unchanged.
+		return in.Quantity, nil, nil
+	}
+	available, known := transfer.OriginHeadroom(snap, in.OriginSiteID)
+	if !known {
+		// No published capacity plan: ValidateApproval reports that precise
+		// fact error next, so do not cap (and do not mask it) here.
+		available = math.MaxInt
+	}
+	rounding, ok := transfer.RoundToCases(in.Quantity, units, available)
+	if !ok {
+		return 0, nil, fmt.Errorf("%w: SKU %s moves in whole cases of %d and origin site %s can send only %d",
+			transfer.ErrBelowOneCase, in.SKU, units, in.OriginSiteID, available)
+	}
+	return rounding.RoundedEaches, &rounding, nil
+}
+
 func (u ApproveTransfer) validate(in ApproveTransferInput) error {
 	if u.Now == nil {
 		return fmt.Errorf("%w: clock is required", ErrInvalidApproval)
@@ -193,7 +238,7 @@ func sameApproval(t *transfer.InterWarehouseTransfer, in ApproveTransferInput) b
 	return t.OriginSiteID() == in.OriginSiteID &&
 		t.DestinationSiteID() == in.DestinationSiteID &&
 		t.SKU() == in.SKU &&
-		t.Quantity() == in.Quantity &&
+		t.RequestedQuantity() == in.Quantity &&
 		t.PolicyVersion() == in.PolicyVersion &&
 		t.ProposalAsOf().Equal(in.ProposalAsOf)
 }

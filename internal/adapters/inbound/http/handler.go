@@ -160,9 +160,14 @@ func (h Handler) generate(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
 		return
 	}
-	proposals, err := h.Generate.Execute(usecases.GenerateInput{
+	proposals, err := h.Generate.Execute(r.Context(), usecases.GenerateInput{
 		AsOf: request.AsOf, Positions: request.Positions, Policies: request.Policies, Lanes: request.Lanes,
 	})
+	if errors.Is(err, usecases.ErrPackLevelsUnavailable) {
+		writeProblem(w, http.StatusServiceUnavailable, "pack-levels-unavailable",
+			"Pack levels are unavailable", err.Error())
+		return
+	}
 	if err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, "invalid-planning-snapshot", "Invalid planning snapshot", err.Error())
 		return
@@ -195,18 +200,20 @@ type approveRequest struct {
 
 // approveTransferDTO is the response view of the persisted saga state.
 type approveTransferDTO struct {
-	TransferID        string    `json:"transferId"`
-	State             string    `json:"state"`
-	OriginSiteID      string    `json:"originSiteId"`
-	DestinationSiteID string    `json:"destinationSiteId"`
-	SKU               string    `json:"sku"`
-	Quantity          int       `json:"quantity"`
-	PolicyVersion     string    `json:"policyVersion"`
-	ReservationID     string    `json:"reservationId,omitempty"`
-	RejectionReason   string    `json:"rejectionReason,omitempty"`
-	Replayed          bool      `json:"replayed"`
-	ExpiresAt         time.Time `json:"expiresAt"`
-	TransferLineID    string    `json:"transferLineId"`
+	TransferID        string `json:"transferId"`
+	State             string `json:"state"`
+	OriginSiteID      string `json:"originSiteId"`
+	DestinationSiteID string `json:"destinationSiteId"`
+	SKU               string `json:"sku"`
+	Quantity          int    `json:"quantity"`
+	// CaseRounding: see transferDTO (ADR 0017).
+	*transfer.CaseRounding
+	PolicyVersion   string    `json:"policyVersion"`
+	ReservationID   string    `json:"reservationId,omitempty"`
+	RejectionReason string    `json:"rejectionReason,omitempty"`
+	Replayed        bool      `json:"replayed"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	TransferLineID  string    `json:"transferLineId"`
 }
 
 // approve serves POST /v1/transfers:approve: the Phase-2 saga approval.
@@ -255,6 +262,7 @@ func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 		DestinationSiteID: result.Transfer.DestinationSiteID(),
 		SKU:               result.Transfer.SKU(),
 		Quantity:          result.Transfer.Quantity(),
+		CaseRounding:      result.Transfer.CaseRounding(),
 		PolicyVersion:     result.Transfer.PolicyVersion(),
 		ReservationID:     result.Transfer.ReservationID(),
 		RejectionReason:   string(result.Transfer.RejectionReason()),
@@ -275,6 +283,12 @@ func writeApproveProblem(w http.ResponseWriter, err error) {
 	case errors.Is(err, usecases.ErrWorkReleaseNotConfigured):
 		writeProblem(w, http.StatusServiceUnavailable, "config-incomplete",
 			"Work release is not configured", "set TRANSFER_PICK_PATH_ID and TRANSFER_PICK_CPT_OFFSET so an approved transfer's pick demand can be released (ADR 0005); approval is refused while unset")
+	case errors.Is(err, transfer.ErrBelowOneCase):
+		writeProblem(w, http.StatusUnprocessableEntity, "below-one-case",
+			"The origin cannot send one whole case", err.Error())
+	case errors.Is(err, usecases.ErrPackLevelsUnavailable):
+		writeProblem(w, http.StatusServiceUnavailable, "pack-levels-unavailable",
+			"Pack levels are unavailable", err.Error())
 	case errors.Is(err, usecases.ErrInvalidApproval):
 		writeProblem(w, http.StatusUnprocessableEntity, "invalid-approval",
 			"Invalid approval request", err.Error())

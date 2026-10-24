@@ -33,6 +33,9 @@ type RunScheduledRebalance struct {
 	// an empty catalogue (the pass then has nothing to propose).
 	Policies ports.RebalancePolicyRepository
 	Lanes    ports.TransferLaneRepository
+	// Packs is the local pack-level view (ADR 0017): a SKU with an active
+	// CASE level is planned in whole cases. Nil plans every SKU in eaches.
+	Packs ports.PackLevelView
 	// Runs persists the rebalance_runs row.
 	Runs ports.RebalanceRunRepository
 	// Events publishes the RebalanceRunCompleted occurrence.
@@ -101,7 +104,18 @@ func (u RunScheduledRebalance) Execute(ctx context.Context) (int64, error) {
 			FailClosedReason: strPtr(fmt.Sprintf("load rebalance catalogue: %v", err)),
 		}, err)
 	}
-	proposals, rejected := u.Planner.PlanFromSnapshot(snap, policies, lanes)
+	multiples, err := ActiveCaseMultiples(ctx, u.Packs, policySKUs(policies), startedAt)
+	if err != nil {
+		// An unreadable pack view is a FAILED run too: planning in eaches
+		// instead would silently break the case-multiple rule.
+		return u.recordFailed(ctx, transfer.RebalanceRun{
+			StartedAt:        startedAt,
+			SnapshotAsOf:     snap.AsOf,
+			Outcome:          transfer.RebalanceFailed,
+			FailClosedReason: strPtr(fmt.Sprintf("read pack levels: %v", err)),
+		}, err)
+	}
+	proposals, rejected := u.Planner.WithCaseMultiples(multiples).PlanFromSnapshot(snap, policies, lanes)
 
 	run := transfer.RebalanceRun{
 		StartedAt:     startedAt,

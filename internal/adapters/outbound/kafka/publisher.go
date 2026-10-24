@@ -154,6 +154,17 @@ func (e *TransferEncoder) encodePlanApproved(ctx context.Context, evt transfer.P
 		"operator_reason":     evt.OperatorReason,
 		"proposal_as_of":      evt.ProposalAsOf.UTC().Format(time.RFC3339),
 	}
+	if r := evt.CaseRounding; r != nil {
+		// ADR 0017, additive and only for a SKU with an active CASE level:
+		// the quantity above is then the rounded eaches and the report keeps
+		// the demand total and the remainder visible. A plain SKU's payload
+		// is byte-for-byte what it was.
+		payload["case_multiple"] = r.CaseMultiple
+		payload["cases"] = r.Cases
+		payload["requested_qty_eaches"] = r.RequestedEaches
+		payload["rounded_qty_eaches"] = r.RoundedEaches
+		payload["remainder_eaches"] = r.RemainderEaches
+	}
 	value, err := cloudevents.New(cloudevents.Spec{
 		ID:        e.mintID(),
 		Entity:    entityTransfer,

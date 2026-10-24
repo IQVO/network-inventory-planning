@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 
 func TestGenerateTransferProposalsRejectsMixedSnapshotAtApplicationBoundary(t *testing.T) {
 	asOf := time.Date(2026, 10, 5, 15, 0, 0, 0, time.UTC)
-	_, err := (GenerateTransferProposals{}).Execute(GenerateInput{
+	_, err := (GenerateTransferProposals{}).Execute(context.Background(), GenerateInput{
 		AsOf: asOf,
 		Positions: []transfer.Position{
 			{Site: "A", SKU: "SKU", AsOf: asOf},
@@ -23,7 +24,7 @@ func TestGenerateTransferProposalsRejectsMixedSnapshotAtApplicationBoundary(t *t
 }
 
 func TestGenerateTransferProposalsRequiresAsOf(t *testing.T) {
-	_, err := (GenerateTransferProposals{}).Execute(GenerateInput{})
+	_, err := (GenerateTransferProposals{}).Execute(context.Background(), GenerateInput{})
 	if err == nil || !strings.Contains(err.Error(), "asOf is required") {
 		t.Fatalf("error = %v, want asOf is required", err)
 	}

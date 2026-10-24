@@ -181,20 +181,31 @@ func need(snap planning.PlanningSnapshot, destination Policy) int {
 }
 
 // headroom is the site's published capacity over the window minus its own
-// in-window demand (the same arithmetic as ValidateApproval).
+// in-window demand (the same arithmetic as ValidateApproval); 0 when the site
+// has no published capacity plan.
 func headroom(snap planning.PlanningSnapshot, site SiteID) int {
-	plan, ok := snap.CapacityBySite[string(site)]
-	if !ok {
-		return 0
+	room, _ := OriginHeadroom(snap, string(site))
+	return room
+}
+
+// OriginHeadroom is the most a site can send over the snapshot window: its
+// published capacity minus its own in-window demand. ValidateApproval
+// refuses a transfer above it, so it is also the availability the case
+// rounding caps at (ADR 0017). ok is false when the site has no published
+// capacity plan (then ValidateApproval reports the precise fact error).
+func OriginHeadroom(snap planning.PlanningSnapshot, site string) (room int, ok bool) {
+	plan, found := snap.CapacityBySite[site]
+	if !found {
+		return 0, false
 	}
 	demand := 0
-	prefix := string(site) + "\x00"
+	prefix := site + "\x00"
 	for key, units := range snap.DemandBySiteSKU {
 		if len(key) > len(prefix) && key[:len(prefix)] == prefix {
 			demand += units
 		}
 	}
-	return int(plan.CapacityOverWindow) - demand
+	return int(plan.CapacityOverWindow) - demand, true
 }
 
 // lessProposal is the planner's total order: score descending, then SKU,
