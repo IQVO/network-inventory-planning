@@ -133,6 +133,50 @@ Feature: Rebalance policy and transfer lane catalogues
     And the JSON field "policies.0.policy.TargetStock" is 80
     And the JSON field "policies.0.revision" is 2
 
+  Scenario: A lane update under If-Match is guarded by its revision
+    When I send PUT "/v1/transfer-lanes" with this body:
+      """
+      {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}
+      """
+    Then the response status is 201
+    And the response header "ETag" is "1"
+    And the JSON field "outcome" is "CREATED"
+    When I send PUT "/v1/transfer-lanes" with If-Match "1" and this body:
+      """
+      {"Origin":"WH1","Destination":"WH2","LeadTime":172800000000000,"UnitHandlingCost":2,"Enabled":true}
+      """
+    Then the response status is 200
+    And the response header "ETag" is "2"
+    And the JSON field "outcome" is "UPDATED"
+    When I send PUT "/v1/transfer-lanes" with If-Match "1" and this body:
+      """
+      {"Origin":"WH1","Destination":"WH2","LeadTime":259200000000000,"UnitHandlingCost":3,"Enabled":true}
+      """
+    Then the response status is 412
+    And the problem detail type is "version-mismatch"
+    When I request GET "/v1/transfer-lanes"
+    Then the JSON array "lanes" has 1 element
+    And the JSON field "lanes.0.lane.LeadTime" is 172800000000000
+    And the JSON field "lanes.0.lane.UnitHandlingCost" is 2
+    And the JSON field "lanes.0.revision" is 2
+
+  Scenario Outline: A malformed If-Match is refused with 400 and applied nothing
+    When I send PUT "<path>" with If-Match <ifMatch> and this body:
+      """
+      <body>
+      """
+    Then the response status is 400
+    And the problem detail type is "invalid-if-match"
+    When I request GET "<path>"
+    Then the JSON array "<list>" has 0 elements
+
+    Examples: malformed If-Match values
+      | path                   | ifMatch | list     | body                                                                                                       | why                    |
+      | /v1/rebalance-policies | abc     | policies | {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":0,"TargetStock":10,"UnitPriority":1}              | not a revision         |
+      | /v1/rebalance-policies | 0       | policies | {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":0,"TargetStock":10,"UnitPriority":1}              | revisions start at 1   |
+      | /v1/transfer-lanes     | abc     | lanes    | {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}          | not a revision         |
+      | /v1/transfer-lanes     | -1      | lanes    | {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}          | revisions are positive |
+
   Scenario Outline: An entry refused on its face is a 422
     When I send PUT "<path>" with this body:
       """
