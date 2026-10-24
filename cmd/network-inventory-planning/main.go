@@ -38,6 +38,7 @@ const (
 	envCapacityGroup     = "CAPACITY_PLAN_CONSUMER_GROUP"
 	envTransferGroup     = "TRANSFER_REPLY_CONSUMER_GROUP"
 	envTransferFactGrp   = "TRANSFER_FACT_CONSUMER_GROUP"
+	envPackLevelGroup    = "PACK_LEVEL_CONSUMER_GROUP"
 	envOutboxRelay       = "OUTBOX_RELAY_ENABLED"
 	envOutboxMaxAttempts = "OUTBOX_MAX_ATTEMPTS"
 	envMaxStaleness      = "PLANNING_MAX_STALENESS"
@@ -210,6 +211,7 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 		return handler, nil, closeAll, err
 	}
 	handler.Simulate = wired.simulate
+	handler.Generate = wired.generate
 	handler.Approve = wired.approve
 	handler.ListRebalanceRuns = wired.runs
 	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)
@@ -301,6 +303,7 @@ func workReleaseConfigFromEnv(logger *slog.Logger) usecases.WorkReleaseConfig {
 // plus the runner/closer funcs of the consumers and the outbox relay.
 type sagaWiring struct {
 	simulate *usecases.SimulateTransferOptions
+	generate usecases.GenerateTransferProposals
 	approve  *usecases.ApproveTransfer
 	runs     *usecases.ListRebalanceRuns
 	// The operator-managed rebalance catalogues (ADR 0015).
@@ -321,6 +324,11 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	processedEvents := postgres.NewProcessedEventRepo(pool)
 	snapshots := postgres.NewSnapshotRepo(pool)
 	transfers := postgres.NewTransferRepo(pool)
+	// The local copy of product-master's pack levels (ADR 0017): written by
+	// the pack-level consumer, read by every planning path that rounds a
+	// case SKU to whole cases. No planning path calls product-master.
+	packLevels := postgres.NewPackLevelView(pool)
+	out.generate = usecases.GenerateTransferProposals{Packs: packLevels}
 
 	out.simulate = &usecases.SimulateTransferOptions{
 		Snapshot:     snapshots,
@@ -356,6 +364,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 			Snapshot:     snapshots,
 			UoW:          uow,
 			MaxStaleness: maxStaleness,
+			Packs:        packLevels,
 			Release:      release,
 			Now:          time.Now,
 		}
@@ -395,6 +404,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		plans:           postgres.NewPublishedCapacityPlanRepo(pool),
 		replyApplier:    replyApplier,
 		factApplier:     factApplier,
+		packLevels:      usecases.ApplyPackLevel{PackLevels: packLevels},
 	})
 	if err != nil {
 		return out, err
@@ -410,7 +420,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	out.runs = &usecases.ListRebalanceRuns{Runs: rebalanceRuns}
 	catalogue := wireCatalogue(pool, &out)
 	wireHealthTicker(logger, pool, outboxPublisher, &out)
-	wireRebalanceTicker(logger, snapshots, rebalanceRuns, catalogue, outboxPublisher, maxStaleness, &out)
+	wireRebalanceTicker(logger, snapshots, packLevels, rebalanceRuns, catalogue, outboxPublisher, maxStaleness, &out)
 	return out, nil
 }
 
@@ -514,6 +524,7 @@ func wireCatalogue(pool *pgxpool.Pool, out *sagaWiring) rebalanceCatalogue {
 func wireRebalanceTicker(
 	logger *slog.Logger,
 	snapshots ports.PlanningSnapshotRepository,
+	packLevels ports.PackLevelView,
 	runs ports.RebalanceRunRepository,
 	catalogue rebalanceCatalogue,
 	events ports.TransferEventPublisher,
@@ -538,6 +549,7 @@ func wireRebalanceTicker(
 	run := usecases.RunScheduledRebalance{
 		Snapshot:     snapshots,
 		Planner:      transfer.Planner{},
+		Packs:        packLevels,
 		Policies:     catalogue.policies,
 		Lanes:        catalogue.lanes,
 		Runs:         runs,
@@ -568,6 +580,7 @@ type consumerDeps struct {
 	plans           ports.PublishedCapacityPlanRepository
 	replyApplier    inboundkafka.TransferReplyApplier
 	factApplier     inboundkafka.TransferFactApplier
+	packLevels      inboundkafka.PackLevelApplier
 }
 
 // wireOutbox builds the transactional-outbox publisher and, when
@@ -646,7 +659,7 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 	raw := os.Getenv(envKafkaBrokers)
 	if raw == "" {
 		logger.Warn("KAFKA_BROKERS not configured; read-model Kafka ingestion is disabled",
-			"enable_with", strings.Join([]string{envCapabilityGroup, envDemandGroup, envCapacityGroup}, ", "))
+			"enable_with", strings.Join([]string{envCapabilityGroup, envDemandGroup, envCapacityGroup, envPackLevelGroup}, ", "))
 		return nil, nil, nil
 	}
 	brokers := strings.Split(raw, ",")
@@ -678,6 +691,9 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 	})
 	spawn("transfer-fact", os.Getenv(envTransferFactGrp), func() consumer {
 		return inboundkafka.NewTransferFactConsumer(brokers, os.Getenv(envTransferFactGrp), d.factApplier, d.processedEvents, d.uow, logger)
+	})
+	spawn("pack-level", os.Getenv(envPackLevelGroup), func() consumer {
+		return inboundkafka.NewPackLevelConsumer(brokers, os.Getenv(envPackLevelGroup), d.packLevels, d.processedEvents, d.uow, logger)
 	})
 	return runners, closers, nil
 }
