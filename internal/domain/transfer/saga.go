@@ -157,6 +157,7 @@ type InterWarehouseTransfer struct {
 	destinationSiteID   string
 	sku                 string
 	quantity            int
+	caseRounding        *CaseRounding
 	policyVersion       string
 	operatorReason      string
 	proposalAsOf        time.Time
@@ -183,11 +184,15 @@ type ProposalInput struct {
 	DestinationSiteID string
 	SKU               string
 	Quantity          int
-	PolicyVersion     string
-	OperatorReason    string
-	ProposalAsOf      time.Time
-	ExpiresAt         time.Time
-	Now               time.Time
+	// CaseRounding is set only when the SKU has an active CASE level and
+	// Quantity is the rounded whole-case quantity (ADR 0017); nil leaves
+	// the transfer exactly as before.
+	CaseRounding   *CaseRounding
+	PolicyVersion  string
+	OperatorReason string
+	ProposalAsOf   time.Time
+	ExpiresAt      time.Time
+	Now            time.Time
 }
 
 // ProposeTransfer validates the proposal snapshot and returns the aggregate
@@ -206,6 +211,7 @@ func ProposeTransfer(in ProposalInput) (*InterWarehouseTransfer, error) {
 		destinationSiteID: in.DestinationSiteID,
 		sku:               in.SKU,
 		quantity:          in.Quantity,
+		caseRounding:      copyRounding(in.CaseRounding),
 		policyVersion:     in.PolicyVersion,
 		operatorReason:    in.OperatorReason,
 		proposalAsOf:      in.ProposalAsOf.UTC(),
@@ -260,6 +266,11 @@ func (in ProposalInput) validate() error {
 	if in.Quantity <= 0 {
 		return invalidProposal("transfer proposal %s: quantity must be positive, got %d", in.ID, in.Quantity)
 	}
+	if in.CaseRounding != nil {
+		if err := in.CaseRounding.check(in.Quantity); err != nil {
+			return invalidProposal("transfer proposal %s: case rounding: %v", in.ID, err)
+		}
+	}
 	if strings.TrimSpace(in.PolicyVersion) == "" {
 		return invalidProposal("transfer proposal %s: policy version is required", in.ID)
 	}
@@ -295,6 +306,7 @@ func (t *InterWarehouseTransfer) Approve(now time.Time) (PlanApproved, error) {
 		DestinationSiteID: t.destinationSiteID,
 		SKU:               t.sku,
 		Quantity:          t.quantity,
+		CaseRounding:      copyRounding(t.caseRounding),
 		PolicyVersion:     t.policyVersion,
 		OperatorReason:    t.operatorReason,
 		ProposalAsOf:      t.proposalAsOf,
@@ -436,6 +448,7 @@ type Snapshot struct {
 	DestinationSiteID   string
 	SKU                 string
 	Quantity            int
+	CaseRounding        *CaseRounding
 	PolicyVersion       string
 	OperatorReason      string
 	ProposalAsOf        time.Time
@@ -464,6 +477,7 @@ func Rehydrate(s Snapshot) *InterWarehouseTransfer {
 		destinationSiteID:   s.DestinationSiteID,
 		sku:                 s.SKU,
 		quantity:            s.Quantity,
+		caseRounding:        copyRounding(s.CaseRounding),
 		policyVersion:       s.PolicyVersion,
 		operatorReason:      s.OperatorReason,
 		proposalAsOf:        s.ProposalAsOf,
@@ -498,8 +512,22 @@ func (t *InterWarehouseTransfer) DestinationSiteID() string { return t.destinati
 // SKU returns the stock keeping unit being moved.
 func (t *InterWarehouseTransfer) SKU() string { return t.sku }
 
-// Quantity returns the units to move.
+// Quantity returns the units (eaches) to move: for a SKU with an active CASE
+// level, the rounded whole-case quantity.
 func (t *InterWarehouseTransfer) Quantity() int { return t.quantity }
+
+// CaseRounding returns a copy of the case-rounding report, or nil when the
+// SKU had no active CASE level at approval (the transfer is in plain eaches).
+func (t *InterWarehouseTransfer) CaseRounding() *CaseRounding { return copyRounding(t.caseRounding) }
+
+// RequestedQuantity is the quantity asked for before any rounding: the
+// demand total. It equals Quantity unless a case rounding applied.
+func (t *InterWarehouseTransfer) RequestedQuantity() int {
+	if t.caseRounding != nil {
+		return t.caseRounding.RequestedEaches
+	}
+	return t.quantity
+}
 
 // PolicyVersion returns the policy version the proposal was scored under.
 func (t *InterWarehouseTransfer) PolicyVersion() string { return t.policyVersion }

@@ -38,6 +38,7 @@ ENABLE_KONG = [
     # deliberate guard in reports-deployment.yaml) — supply a dummy.
     "--set", "analytics.database.projectorUrl=postgres://user:pass@localhost:5432/analytics",
     "--set", "kafka.enabled=true",
+    "--set", "kafka.packLevelConsumerGroup=nip-pack-level",
     "--set", "kafka.brokers=dummy:9092",
     "--set", "gatewayApi.enabled=true",
     "--set", "gatewayApi.parentRefs[0].name=warehouse-gateway",

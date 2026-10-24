@@ -24,6 +24,7 @@ helm install network-inventory-planning ./charts/network-inventory-planning \
   --set kafka.capacityPlanConsumerGroup=nip-capacity-plan \
   --set kafka.transferReplyConsumerGroup=nip-transfer-reply \
   --set kafka.transferFactConsumerGroup=nip-transfer-fact \
+  --set kafka.packLevelConsumerGroup=nip-pack-level \
   --set config.transferPickPathId=pick-path \
   --set config.transferDispatchPathId=dispatch-path
 ```
@@ -63,6 +64,7 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `kafka.capacityPlanConsumerGroup` | `""` | `CAPACITY_PLAN_CONSUMER_GROUP` — empty = consumer off |
 | `kafka.transferReplyConsumerGroup` | `""` | `TRANSFER_REPLY_CONSUMER_GROUP` — empty = consumer off |
 | `kafka.transferFactConsumerGroup` | `""` | `TRANSFER_FACT_CONSUMER_GROUP` — empty = consumer off |
+| `kafka.packLevelConsumerGroup` | `""` | `PACK_LEVEL_CONSUMER_GROUP` — **mandatory when `kafka.enabled`** (render fails without it; ADR 0017) |
 | `extraEnv` | `[]` | Extra container env (rendered verbatim) |
 | `mcp.enabled` | `false` | Renders the read-only MCP server (`cmd/mcp`): its own Deployment + Service, `component=mcp`, command `/app/mcp` |
 | `mcp.httpAddr` | `:8090` | `MCP_ADDR` (Streamable HTTP at `/` and `/mcp`, `GET /healthz`) |

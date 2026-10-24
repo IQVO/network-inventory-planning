@@ -29,6 +29,7 @@ the `Status:` line of each ADR body.
 | [0014](./0014-site-sku-demand-ordering-guard.md) | Ordering guard on the site_sku_demand read model | Accepted |
 | [0015](./0015-rebalance-policy-and-lane-catalogue.md) | Rebalance Policy and Transfer Lane catalogues | Accepted |
 | [0016](./0016-outbox-relay-attempt-cap.md) | Outbox relay attempt cap: `OUTBOX_MAX_ATTEMPTS` (default 20) excludes a poison row and logs it at ERROR | Accepted |
+| [0017](./0017-case-multiple-transfers.md) | Case-multiple transfers: round to whole cases (nearest, tie up, at least one, capped by the origin), report the signed remainder, local pack-level copy | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -50,3 +51,4 @@ the `Status:` line of each ADR body.
 | 0014 | `SiteSkuDemandRepo.Upsert` (`WHERE EXCLUDED.as_of >= site_sku_demand.as_of`), the demand consumer's stale-event INFO line |
 | 0015 | `transfer.RebalancePolicy` / `transfer.TransferLane` (`catalogue.go`), `Planner.PlanFromSnapshot` (`scheduled_planner.go`), `usecases.PutRebalancePolicy` / `PutTransferLane`, `RunScheduledRebalance.loadCatalogue`, `postgres.RebalancePolicyRepo` / `TransferLaneRepo` (migration `0005_rebalance_catalogue`), `PUT/GET /v1/rebalance-policies` and `/v1/transfer-lanes` |
 | 0016 | `postgres.WithMaxAttempts` / `WithRelayLogger` / `DefaultOutboxMaxAttempts` (`outbox.go`), `outboxMaxAttemptsFromEnv` (`cmd/network-inventory-planning/main.go`), `OUTBOX_MAX_ATTEMPTS`, chart `config.outboxMaxAttempts`, `internal/architecture/outbox_relay_cap_fitness_test.go` |
+| 0017 | `transfer.RoundToCases` / `CaseRounding` (`casemultiple.go`), `PACK_LEVEL_CONSUMER_GROUP`, pack-level view (migration 0006), rounding columns (migration 0007) |
