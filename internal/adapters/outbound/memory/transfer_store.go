@@ -47,6 +47,7 @@ func snapshotOf(t *transfer.InterWarehouseTransfer) transfer.Snapshot {
 		DestinationSiteID:   t.DestinationSiteID(),
 		SKU:                 t.SKU(),
 		Quantity:            t.Quantity(),
+		CaseRounding:        t.CaseRounding(),
 		PolicyVersion:       t.PolicyVersion(),
 		OperatorReason:      t.OperatorReason(),
 		ProposalAsOf:        t.ProposalAsOf(),

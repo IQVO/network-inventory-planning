@@ -167,6 +167,8 @@ kafka:
   capacityPlanConsumerGroup: ""
   transferReplyConsumerGroup: ""
   transferFactConsumerGroup: ""
+  # MANDATORY when kafka.enabled (ADR 0017): chart refuses to render without it.
+  packLevelConsumerGroup: ""
 
 extraEnv: []
 

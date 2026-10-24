@@ -33,6 +33,9 @@ type RunScheduledRebalance struct {
 	// an empty catalogue (the pass then has nothing to propose).
 	Policies ports.RebalancePolicyRepository
 	Lanes    ports.TransferLaneRepository
+	// Packs is the local pack-level view (ADR 0017): a SKU with an active
+	// CASE level is planned in whole cases. Nil plans every SKU in eaches.
+	Packs ports.PackLevelView
 	// Runs persists the rebalance_runs row.
 	Runs ports.RebalanceRunRepository
 	// Events publishes the RebalanceRunCompleted occurrence.
@@ -94,14 +97,15 @@ func (u RunScheduledRebalance) Execute(ctx context.Context) (int64, error) {
 	if err != nil {
 		// An unreadable catalogue is a FAILED run, never a silent
 		// zero-proposal COMPLETED one.
-		return u.recordFailed(ctx, transfer.RebalanceRun{
-			StartedAt:        startedAt,
-			SnapshotAsOf:     snap.AsOf,
-			Outcome:          transfer.RebalanceFailed,
-			FailClosedReason: strPtr(fmt.Sprintf("load rebalance catalogue: %v", err)),
-		}, err)
+		return u.failedRun(ctx, startedAt, snap.AsOf, fmt.Sprintf("load rebalance catalogue: %v", err), err)
 	}
-	proposals, rejected := u.Planner.PlanFromSnapshot(snap, policies, lanes)
+	multiples, err := ActiveCaseMultiples(ctx, u.Packs, policySKUs(policies), startedAt)
+	if err != nil {
+		// An unreadable pack view is a FAILED run too: planning in eaches
+		// instead would silently break the case-multiple rule.
+		return u.failedRun(ctx, startedAt, snap.AsOf, fmt.Sprintf("read pack levels: %v", err), err)
+	}
+	proposals, rejected := u.Planner.WithCaseMultiples(multiples).PlanFromSnapshot(snap, policies, lanes)
 
 	run := transfer.RebalanceRun{
 		StartedAt:     startedAt,
@@ -177,6 +181,17 @@ func (u RunScheduledRebalance) recordFailed(ctx context.Context, run transfer.Re
 		return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (cause: %v)", err, cause)
 	}
 	return id, nil
+}
+
+// failedRun records a FAILED run for a fail-closed reason after the snapshot
+// was built.
+func (u RunScheduledRebalance) failedRun(ctx context.Context, startedAt, asOf time.Time, reason string, cause error) (int64, error) {
+	return u.recordFailed(ctx, transfer.RebalanceRun{
+		StartedAt:        startedAt,
+		SnapshotAsOf:     asOf,
+		Outcome:          transfer.RebalanceFailed,
+		FailClosedReason: strPtr(reason),
+	}, cause)
 }
 
 // strPtr is a tiny helper for the nullable fail_closed_reason.

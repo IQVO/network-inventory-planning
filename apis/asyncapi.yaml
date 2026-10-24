@@ -660,6 +660,23 @@ components:
                 quantity:
                   type: integer
                   minimum: 1
+                case_multiple:
+                  type: integer
+                  minimum: 2
+                  description: Additive (ADR 0017). Units per pack of the SKU's active CASE level; the case rounding fields are present only for such a SKU, and quantity is then the rounded whole-case quantity.
+                cases:
+                  type: integer
+                  minimum: 1
+                requested_qty_eaches:
+                  type: integer
+                  minimum: 1
+                  description: The quantity before rounding (the demand).
+                rounded_qty_eaches:
+                  type: integer
+                  minimum: 1
+                remainder_eaches:
+                  type: integer
+                  description: requested_qty_eaches minus rounded_qty_eaches (signed).
                 policy_version:
                   type: string
                 operator_reason:
