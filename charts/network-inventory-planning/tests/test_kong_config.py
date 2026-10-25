@@ -34,8 +34,10 @@ FORBIDDEN_PLUGINS = {
 }
 
 ENABLE_KONG = [
-    # This chart refuses to render analytics without an analytical DSN (a
-    # deliberate guard in reports-deployment.yaml) — supply a dummy.
+    # This chart refuses to render without a database source (the
+    # requireDatabase gate) and without an analytical DSN when analytics is
+    # on (a deliberate guard in reports-deployment.yaml) — supply dummies.
+    "--set", "database.existingSecret=nip-database",
     "--set", "analytics.database.projectorUrl=postgres://user:pass@localhost:5432/analytics",
     "--set", "kafka.enabled=true",
     "--set", "kafka.packLevelConsumerGroup=nip-pack-level",
@@ -75,7 +77,7 @@ def main() -> int:
     failures: list[str] = []
 
     # 1. Defaults render zero Kong objects.
-    default_docs = render([])
+    default_docs = render(["--set", "database.existingSecret=x"])
     kong_docs = [d for d in default_docs if "Kong" in (d.get("kind") or "")]
     if kong_docs:
         failures.append(
