@@ -4,6 +4,10 @@ Network Inventory Planning is the bounded context for network inventory position
 
 It recommends transfers; it never becomes the inventory ledger or moves physical stock directly. Inventory Storage remains authoritative for stock and reservations, while WES contexts remain authoritative for executable work.
 
+## Disclaimer
+
+This project is a domain-driven design study. It is not associated with, endorsed by or affiliated with any company, and it uses no company's code, data, logos or trademarks. All names, figures and examples are illustrative or synthetic.
+
 ## Running locally
 
 ```sh

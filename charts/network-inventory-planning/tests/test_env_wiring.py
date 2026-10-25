@@ -198,11 +198,14 @@ def check_mcp(failures: list[str]) -> None:
     if any(name.endswith("-mcp") for _, name in default_kinds):
         failures.append("MCP resources rendered with default values; mcp.enabled must default to false")
 
-    # Without a database source the MCP still renders (tools answer
-    # read-side-unavailable) but never wires DATABASE_URL.
-    bare_plain, bare_from_ref = component_env(render(["--set", "mcp.enabled=true"]), "mcp")
-    if "DATABASE_URL" in bare_plain or "DATABASE_URL" in bare_from_ref:
-        failures.append("MCP rendered DATABASE_URL without a database source")
+    # Since the requireDatabase gate, a render without a database source is
+    # refused outright (asserted in the defaults block), so the MCP is always
+    # rendered WITH a source: its DATABASE_URL must come from the Secret.
+    mcp_plain, mcp_from_ref = component_env(render(["--set", "database.existingSecret=x", "--set", "mcp.enabled=true"]), "mcp")
+    if "DATABASE_URL" in mcp_plain:
+        failures.append("MCP rendered a literal DATABASE_URL instead of the Secret")
+    if "DATABASE_URL" not in mcp_from_ref:
+        failures.append("MCP did not render DATABASE_URL from the database Secret")
 
 
 def check_analytics(failures: list[str]) -> None:
@@ -287,8 +290,11 @@ def main() -> int:
         failures.append(f"config.outboxMaxAttempts=0 rendered {tuned.get('OUTBOX_MAX_ATTEMPTS')!r}, want '0' (unlimited)")
 
     # Default values: no kafka env at all (groups are off switches), no
-    # DATABASE_URL (no secret set), no transfer_* release config.
-    default_plain, default_from_ref = deployment_env(render([]))
+    # transfer_* release config. DATABASE_URL no longer belongs in the
+    # "leaked" set: since the requireDatabase gate, a render with NO database
+    # source is REFUSED (asserted below) instead of silently rendering a pod
+    # the binary would kill at boot.
+    default_plain, default_from_ref = deployment_env(render(["--set", "database.existingSecret=x"]))
     leaked = sorted(
         (set(default_plain) | default_from_ref)
         & {
@@ -299,14 +305,21 @@ def main() -> int:
             "TRANSFER_REPLY_CONSUMER_GROUP",
             "TRANSFER_FACT_CONSUMER_GROUP",
             "PACK_LEVEL_CONSUMER_GROUP",
-            "DATABASE_URL",
-            "MIGRATIONS_DATABASE_URL",
             "TRANSFER_PICK_PATH_ID",
             "TRANSFER_DISPATCH_PATH_ID",
         }
     )
     if leaked:
         failures.append(f"env vars leaked with default values: {leaked}")
+
+    # The database-source gate: no url and no existingSecret must refuse the
+    # render (same fleet standard as every sibling chart).
+    bare = subprocess.run(
+        ["helm", "template", "nip", str(CHART_DIR)],
+        capture_output=True, text=True,
+    )
+    if bare.returncode == 0 or "database.url or database.existingSecret" not in bare.stderr:
+        failures.append("a render with no database source must fail naming database.url / database.existingSecret")
 
     # ADR 0017: the pack-level consumer group is MANDATORY when kafka.enabled:
     # the chart must refuse to render without it, and wire it when set.
