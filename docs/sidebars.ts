@@ -98,6 +98,7 @@ const sidebars: SidebarsConfig = {
         'adr/0016-outbox-relay-attempt-cap',
         'adr/0017-case-multiple-transfers',
         'adr/0018-per-site-staleness',
+        'adr/0019-a-dead-consumer-takes-the-process-down',
       ],
     },
   ],

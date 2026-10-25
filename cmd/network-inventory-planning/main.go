@@ -135,19 +135,19 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()
-	for _, r := range runners {
-		go func(r func() error) {
-			if err := r(); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error("consumer stopped", "error", err)
-			}
-		}(r)
-	}
+	deaths := startRunners(ctx, runners, logger)
 
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
+	case err := <-deaths:
+		// A consumer that stopped while the service was still meant to run
+		// leaves a frozen read model behind a /readyz that still answers 200.
+		// Exit instead, so the kubelet restarts the pod and the consumers
+		// rejoin (ADR 0019).
+		return err
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -706,4 +706,31 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// startRunners starts every consumer and returns a channel that receives the
+// first UNEXPECTED stop: an error that is not the context's own cancellation,
+// or a nil return while ctx is still live (a consumer is meant to run until
+// ctx ends). Further deaths are logged and dropped, because run() exits on the
+// first. A stop caused by ctx being cancelled is a clean shutdown and reports
+// nothing.
+func startRunners(ctx context.Context, runners []func() error, logger *slog.Logger) <-chan error {
+	deaths := make(chan error, 1)
+	for _, r := range runners {
+		go func(r func() error) {
+			err := r()
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+				return
+			}
+			if err == nil {
+				err = errors.New("returned without an error while the service was still running")
+			}
+			logger.Error("consumer stopped", "error", err)
+			select {
+			case deaths <- fmt.Errorf("consumer stopped: %w", err):
+			default:
+			}
+		}(r)
+	}
+	return deaths
 }

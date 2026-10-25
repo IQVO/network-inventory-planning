@@ -31,6 +31,7 @@ the `Status:` line of each ADR body.
 | [0016](./0016-outbox-relay-attempt-cap.md) | Outbox relay attempt cap: `OUTBOX_MAX_ATTEMPTS` (default 20) excludes a poison row and logs it at ERROR | Accepted |
 | [0017](./0017-case-multiple-transfers.md) | Case-multiple transfers: round to whole cases (nearest, tie up, at least one, capped by the origin), report the signed remainder, local pack-level copy | Accepted |
 | [0018](./0018-per-site-staleness.md) | A stale fact excludes its site from the planning snapshot (never the whole snapshot); approval is refused only when its origin or destination is excluded; direction-disabled sites still participate | Accepted |
+| [0019](./0019-a-dead-consumer-takes-the-process-down.md) | A consumer that stops on its own (not by shutdown) ends the process so the kubelet restarts it, instead of leaving a frozen read model behind a Ready pod | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -54,3 +55,4 @@ the `Status:` line of each ADR body.
 | 0016 | `postgres.WithMaxAttempts` / `WithRelayLogger` / `DefaultOutboxMaxAttempts` (`outbox.go`), `outboxMaxAttemptsFromEnv` (`cmd/network-inventory-planning/main.go`), `OUTBOX_MAX_ATTEMPTS`, chart `config.outboxMaxAttempts`, `internal/architecture/outbox_relay_cap_fitness_test.go` |
 | 0017 | `transfer.RoundToCases` / `CaseRounding` (`casemultiple.go`), `PACK_LEVEL_CONSUMER_GROUP`, pack-level view (migration 0006), rounding columns (migration 0007) |
 | 0018 | `planning.BuildSnapshot` / `PlanningSnapshot.StaleSites` (`snapshot.go`), `transfer.ValidateApproval` (`approval.go`), `PLANNING_MAX_STALENESS` |
+| 0019 | `startRunners` (`cmd/network-inventory-planning/main.go`) |
