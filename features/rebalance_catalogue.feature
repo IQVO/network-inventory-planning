@@ -51,7 +51,7 @@ Feature: Rebalance policy and transfer lane catalogues
     Then the JSON field "runs.0.outcome" is "COMPLETED"
     And the JSON field "runs.0.proposalCount" is 0
 
-  Scenario Outline: A site capability that forbids a direction fails the pass closed
+  Scenario Outline: A site capability that forbids a direction leaves its lanes unused without failing the pass
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
     And site "WH2" is declared with capacity 300 and 10 units of demand for SKU "SKU-1"
     And site "<site>" cannot <direction> transfers
@@ -60,15 +60,14 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds an enabled lane from "WH1" to "WH2" with lead time 24 hours and unit handling cost 1
     When the scheduled rebalance runs
     And I request GET "/v1/rebalance-runs"
-    Then the JSON field "runs.0.outcome" is "FAILED"
-    And the JSON field "runs.0.failClosedReason" contains "<reason>"
+    Then the JSON field "runs.0.outcome" is "COMPLETED"
     And the JSON field "runs.0.proposalCount" is 0
-    And the domain event "RebalanceRunCompleted" was not published
+    And the JSON field "runs.0.failClosedReason" is absent
 
     Examples: capability gates
-      | site | direction | reason                                  |
-      | WH1  | send      | WH1 is disabled as a transfer origin      |
-      | WH2  | receive   | WH2 is disabled as a transfer destination |
+      | site | direction |
+      | WH1  | send      |
+      | WH2  | receive   |
 
   Scenario: A disabled lane is never used
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"

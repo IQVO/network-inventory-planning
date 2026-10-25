@@ -200,6 +200,26 @@ Feature: Approving a transfer proposal starts the allocation saga
     And the JSON field "detail" contains "stale"
     And no transfer exists
 
+  Scenario Outline: A stale origin or destination refuses the approval and names the site and the stale fact
+    Given the facts of site "<site>" were last updated 11 minutes ago
+    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
+    Then the response status is 422
+    And the problem detail type is "facts-incomplete"
+    And the JSON field "detail" contains "<role> site <site> is excluded from the planning snapshot: stale site capability"
+    And no transfer exists
+
+    Examples: stale roles
+      | site | role        |
+      | WH1  | origin      |
+      | WH2  | destination |
+
+  Scenario: A stale site that is neither origin nor destination does not block the approval
+    Given site "WH3" is declared with capacity 200 and 5 units of demand for SKU "SKU-1"
+    And the facts of site "WH3" were last updated 11 minutes ago
+    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
+    Then the response status is 200
+    And the JSON field "state" is "ALLOCATING"
+
   Scenario Outline: A site disabled for its role in the transfer refuses the approval
     Given site "<site>" cannot <direction> transfers
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"

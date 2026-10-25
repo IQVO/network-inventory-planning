@@ -89,18 +89,37 @@ Feature: Advisory network simulation from the local read models
     And the problem detail type is "read-models-incomplete"
     And the JSON field "detail" contains "stale"
 
-  Scenario Outline: A site disabled for a transfer direction fails the whole simulation closed
+  Scenario: A stale site is left out of the simulation, the fresh ones are still served
+    Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
+    And site "WH2" is declared with capacity 300 and 10 units of demand for SKU "SKU-1"
+    And the facts of site "WH2" were last updated 11 minutes ago
+    When I request GET "/v1/transfer-simulations"
+    Then the response status is 200
+    And the JSON array "sites" has 1 element
+    And the JSON field "sites.0.site" is "WH1"
+    And the JSON field "asOf" is "2026-10-06T14:59:00Z"
+
+  Scenario: Facts exactly at the freshness budget are still fresh
+    Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
+    And the facts of site "WH1" were last updated 10 minutes ago
+    When I request GET "/v1/transfer-simulations"
+    Then the response status is 200
+    And the JSON array "sites" has 1 element
+
+  Scenario Outline: A site disabled for one transfer direction still participates in the other
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
     And site "WH2" is declared with capacity 300 and 10 units of demand for SKU "SKU-1"
     And site "WH2" cannot <direction> transfers
     When I request GET "/v1/transfer-simulations"
-    Then the response status is 503
-    And the JSON field "detail" contains "<refusal>"
+    Then the response status is 200
+    And the JSON array "sites" has 2 elements
+    And the JSON field "sites.1.site" is "WH2"
+    And the JSON field "sites.1.<flag>" is false
 
     Examples: direction rules
-      | direction | refusal                           |
-      | send      | disabled as a transfer origin      |
-      | receive   | disabled as a transfer destination |
+      | direction | flag               |
+      | send      | originEnabled      |
+      | receive   | destinationEnabled |
 
   Scenario: Simulating is advisory: nothing is created, reserved or published
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
