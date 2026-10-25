@@ -53,7 +53,7 @@ sequenceDiagram
   S->>R: Load capabilities, demands, plans
   R-->>S: facts
   S->>D: BuildSnapshot(facts, MaxStaleness, now)
-  Note over D: refuses on an empty model, a stale fact, or a participating site disabled for a direction
+  Note over D: refuses on an empty model or when no site survives; a stale or missing fact excludes only its site (ADR-0018)
   D-->>S: PlanningSnapshot or error
   S-->>H: per-site demand, capacity, headroom
   H-->>Client: 200, or 503 problem+json read-models-incomplete
@@ -81,7 +81,7 @@ sequenceDiagram
   A->>A: check clock, staleness, work-release config, key, as-of
   Note over A: no pick path id or offset is 503 config-incomplete, nothing persisted
   A->>D: BuildSnapshot, then ValidateApproval
-  Note over D: missing, stale or disabled facts are 422 facts-incomplete
+  Note over D: an origin or destination that is excluded (missing or stale) or disabled for its role is 422 facts-incomplete
   A->>U: Do
   U->>T: ProposeTransfer, Approve, RequestAllocation in memory
   U->>T: Create(transfer, idempotency key)

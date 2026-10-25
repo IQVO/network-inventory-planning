@@ -1,6 +1,6 @@
 # ADR-0002: Phase-1 local read models, fail-closed planning snapshot and advisory simulation
 
-Status: Accepted
+Status: Accepted (the staleness and direction rules of "Fail-closed PlanningSnapshot" amended by [ADR-0018](./0018-per-site-staleness.md))
 
 ## Context
 
@@ -73,6 +73,10 @@ at-least-once atomicity checklist:
   an error.
 
 ### Fail-closed PlanningSnapshot
+
+> Amended by [ADR-0018](./0018-per-site-staleness.md): a stale fact or a
+> direction-disabled site no longer refuses the whole snapshot; a stale fact
+> excludes its site and a disabled direction is gated where it is used.
 
 `internal/domain/planning.BuildSnapshot` refuses (returns an error, never
 a degraded snapshot) when:

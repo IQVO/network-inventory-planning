@@ -43,7 +43,17 @@ Feature: Scheduled rebalance run history
     And the domain event "TransferAllocationRequested" was not published
     And the domain event "WorkDemandReleased" was not published
 
-  Scenario: Stale facts make the pass a FAILED run that says why
+  Scenario: One stale site is left out and the pass still COMPLETES over the others
+    Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
+    And site "WH2" is declared with capacity 300 and 10 units of demand for SKU "SKU-1"
+    And the facts of site "WH2" were last updated 11 minutes ago
+    When the scheduled rebalance runs
+    And I request GET "/v1/rebalance-runs"
+    Then the JSON field "runs.0.outcome" is "COMPLETED"
+    And the JSON field "runs.0.snapshotAsOf" is "2026-10-06T14:59:00Z"
+    And the JSON field "runs.0.failClosedReason" is absent
+
+  Scenario: Stale facts at EVERY site make the pass a FAILED run that says why
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
     When 11 minutes pass
     And the scheduled rebalance runs

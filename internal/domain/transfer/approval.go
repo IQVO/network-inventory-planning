@@ -25,16 +25,16 @@ type ApprovalFacts struct {
 
 // ValidateApproval proves an about-to-be-approved proposal is still valid
 // against the CURRENT read models. Fail-closed, mirroring
-// planning.BuildSnapshot: a missing or stale fact refuses the approval
-// (wrapped ErrFactsIncomplete), never a zero-filled pass.
+// planning.BuildSnapshot: a missing or stale fact on the origin or the
+// destination refuses the approval (wrapped ErrFactsIncomplete), never a
+// zero-filled pass. Stale facts of OTHER sites do not matter (ADR 0018).
 //
 // v1 rules (single line, site-level):
 //   - both sites must PARTICIPATE in the snapshot (each carries capability,
 //     demand and capacity facts);
 //   - the origin must be origin-enabled, the destination
-//     destination-enabled (a disabled participating site is a hard error in
-//     BuildSnapshot already, so reaching here with it disabled is a
-//     contract break);
+//     destination-enabled (a site disabled for one direction still
+//     participates in the snapshot, so the direction is gated here);
 //   - the destination must still show a deficit for the SKU (there is
 //     in-window ACTIVE demand for it) and the origin must show headroom
 //     (capacity over window above its own in-window demand).
@@ -46,14 +46,14 @@ func ValidateApproval(in ProposalInput, facts ApprovalFacts) error {
 
 	originCap, ok := snap.Capabilities[in.OriginSiteID]
 	if !ok {
-		return fmt.Errorf("%w: origin site %s has no complete facts in the planning snapshot", ErrFactsIncomplete, in.OriginSiteID)
+		return missingSiteError("origin", in.OriginSiteID, snap)
 	}
 	if !originCap.OriginAllowed() {
 		return fmt.Errorf("%w: origin site %s is not transfer-origin enabled", ErrFactsIncomplete, in.OriginSiteID)
 	}
 	destCap, ok := snap.Capabilities[in.DestinationSiteID]
 	if !ok {
-		return fmt.Errorf("%w: destination site %s has no complete facts in the planning snapshot", ErrFactsIncomplete, in.DestinationSiteID)
+		return missingSiteError("destination", in.DestinationSiteID, snap)
 	}
 	if !destCap.DestinationAllowed() {
 		return fmt.Errorf("%w: destination site %s is not transfer-destination enabled", ErrFactsIncomplete, in.DestinationSiteID)
@@ -82,4 +82,14 @@ func ValidateApproval(in ProposalInput, facts ApprovalFacts) error {
 			ErrFactsIncomplete, in.OriginSiteID, int(originPlan.CapacityOverWindow), originDemand, in.Quantity)
 	}
 	return nil
+}
+
+// missingSiteError explains why a role's site is not in the snapshot: it
+// names the stale fact when the site was excluded for one, and otherwise
+// says its facts are incomplete.
+func missingSiteError(role, site string, snap planning.PlanningSnapshot) error {
+	if reason, stale := snap.StaleSites[site]; stale {
+		return fmt.Errorf("%w: %s site %s is excluded from the planning snapshot: %s", ErrFactsIncomplete, role, site, reason)
+	}
+	return fmt.Errorf("%w: %s site %s has no complete facts in the planning snapshot", ErrFactsIncomplete, role, site)
 }

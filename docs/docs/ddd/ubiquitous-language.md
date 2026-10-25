@@ -28,8 +28,8 @@ constant or field in `internal/domain/**`, a use case, or a migration column.
 | **SiteSkuDemand** | One source order line's demand at a site: units, `due_at`, state `ACTIVE` or `REMOVED`, assignment version | `planning.SiteSkuDemand` |
 | **PublishedCapacityPlan** | A warehouse-planning capacity plan mirrored locally: window `[window_start, window_end)`, `capacity_over_window` | `planning.PublishedCapacityPlan` |
 | **PlanningSnapshot** | The coherent, fail-closed view simulation, approval and scheduled runs use. `AsOf` is the oldest watermark it used | `planning.PlanningSnapshot`, `BuildSnapshot` |
-| **Participating site** | A site with all three facts fresh within `PLANNING_MAX_STALENESS`. Others are excluded, never zero-filled | `planning.BuildSnapshot` |
-| **Staleness budget** | `PLANNING_MAX_STALENESS` (default 10m): the maximum age of any fact | `cmd/network-inventory-planning/main.go` |
+| **Participating site** | A site with all three facts fresh within `PLANNING_MAX_STALENESS`. Others (missing or stale facts) are excluded, never zero-filled and never refuse the other sites (ADR-0018) | `planning.BuildSnapshot` |
+| **Staleness budget** | `PLANNING_MAX_STALENESS` (default 10m): the maximum age of any fact; an older fact excludes its site | `cmd/network-inventory-planning/main.go` |
 | **Simulation** | The advisory per-site view: demand, capacity over window, headroom (negative = short) | `usecases.SimulateTransferOptions` |
 | **InterWarehouseTransfer** | The saga aggregate: an operator-approved plan to move a quantity of one SKU from origin to destination | `transfer.InterWarehouseTransfer` |
 | **TransferState** | `DRAFT`, `PROPOSED`, `APPROVED`, `ALLOCATING`, `ALLOCATED`, `PICKED`, `IN_TRANSIT`, `ARRIVED`, `RECEIVED`, `UNFULFILLABLE`, `CANCELLED`; `RECEIVED`, `UNFULFILLABLE` and `CANCELLED` are terminal | `transfer.TransferState` |

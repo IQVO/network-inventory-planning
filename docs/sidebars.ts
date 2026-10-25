@@ -97,6 +97,7 @@ const sidebars: SidebarsConfig = {
         'adr/0015-rebalance-policy-and-lane-catalogue',
         'adr/0016-outbox-relay-attempt-cap',
         'adr/0017-case-multiple-transfers',
+        'adr/0018-per-site-staleness',
       ],
     },
   ],
