@@ -29,7 +29,7 @@ sequenceDiagram
   WPL->>NIP: evt: CapacityPlanPublished on warehouse.warehouse-planning.events
   Note over NIP: three local read models, each deduplicated on the CloudEvents id
   Op->>NIP: qry: GET /v1/transfer-simulations
-  Note over NIP: per-site demand, capacity and headroom, or 503 when facts are missing or stale
+  Note over NIP: per-site demand, capacity and headroom, or 503 when no site has complete, fresh facts
   Op->>NIP: cmd: POST /v1/transfers:approve with Idempotency-Key
   Note over NIP: validated against the current snapshot, persisted as ALLOCATING, events in the outbox
   Note over NIP: TransferPlanApproved goes to the events topic, no consumer

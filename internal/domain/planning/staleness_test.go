@@ -90,15 +90,7 @@ func TestBuildSnapshotStaleFactExcludesOnlyItsSite(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(snap.Capabilities) != 1 || len(snap.CapacityBySite) != 1 {
-				t.Fatalf("only WH2 may remain, got caps=%v plans=%v", keysOf(snap), snap.CapacityBySite)
-			}
-			if got := snap.DemandBySiteSKU["WH2\x00SKU-1"]; got != 10 {
-				t.Fatalf("WH2 demand = %d, want 10", got)
-			}
-			if _, leaked := snap.DemandBySiteSKU["WH1\x00SKU-1"]; leaked {
-				t.Fatal("the excluded site must contribute no demand")
-			}
+			assertOnlyWH2Remains(t, snap)
 			reason := snap.StaleSites["WH1"]
 			if !strings.Contains(reason, wants[kind]) || !strings.Contains(reason, "older than 1h0m0s") {
 				t.Fatalf("StaleSites[WH1] = %q, want it to name %q and the budget", reason, wants[kind])
@@ -107,6 +99,19 @@ func TestBuildSnapshotStaleFactExcludesOnlyItsSite(t *testing.T) {
 				t.Fatal("a fresh site must not be listed as stale")
 			}
 		})
+	}
+}
+
+func assertOnlyWH2Remains(t *testing.T, snap PlanningSnapshot) {
+	t.Helper()
+	if len(snap.Capabilities) != 1 || len(snap.CapacityBySite) != 1 {
+		t.Fatalf("only WH2 may remain, got caps=%v plans=%v", keysOf(snap), snap.CapacityBySite)
+	}
+	if got := snap.DemandBySiteSKU["WH2\x00SKU-1"]; got != 10 {
+		t.Fatalf("WH2 demand = %d, want 10", got)
+	}
+	if _, leaked := snap.DemandBySiteSKU["WH1\x00SKU-1"]; leaked {
+		t.Fatal("the excluded site must contribute no demand")
 	}
 }
 

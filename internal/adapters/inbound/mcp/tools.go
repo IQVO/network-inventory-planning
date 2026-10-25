@@ -206,8 +206,8 @@ func (d Deps) simulateTransferOptions(ctx context.Context, _ simulateInput) (sim
 	}
 	result, err := d.Simulate.Execute(ctx)
 	if err != nil {
-		// Fail-closed, as the REST endpoint: missing, stale or disabled
-		// facts refuse rather than degrade into a simulation of nothing.
+		// Fail-closed, as the REST endpoint: when no site has complete,
+		// fresh facts the tool refuses rather than simulate nothing.
 		return simulateOutput{}, toolError("read-models-incomplete", err.Error())
 	}
 	sites := make([]siteSimulationView, 0, len(result.Sites))
@@ -259,7 +259,7 @@ func (d Deps) registerTools(server *mcp.Server) {
 		Name: "simulate_transfer_options",
 		Description: "Read the advisory network simulation from the local read models: per site, whether it may originate or receive transfers, its total demand, " +
 			"its capacity over the published plan window and the resulting headroom (negative means short). Advisory only: it reserves and moves nothing. " +
-			"Fail-closed: fails with read-models-incomplete when facts are missing, stale or a site is disabled. Read-only.",
+			"Fail-closed per site: a site with a missing or stale fact is left out; fails with read-models-incomplete only when no site has complete, fresh facts. Read-only.",
 		Annotations: readOnly,
 	}, d.simulateTransferOptions)
 }

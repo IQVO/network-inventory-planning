@@ -14,7 +14,7 @@ the `Status:` line of each ADR body.
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](./0001-network-inventory-planning-boundary.md) | Network Inventory Planning Boundary | Accepted |
-| [0002](./0002-phase1-read-models-and-simulation.md) | Phase-1 local read models, fail-closed planning snapshot and advisory simulation | Accepted |
+| [0002](./0002-phase1-read-models-and-simulation.md) | Phase-1 local read models, fail-closed planning snapshot and advisory simulation | Accepted (snapshot staleness and direction rules amended by 0018) |
 | [0003](./0003-transfer-saga.md) | Phase-2 inter-warehouse transfer saga (approval, outbox, allocation replies) | Accepted (per-key ordering amended by 0016) |
 | [0004](./0004-cloudevents-type-catalogue.md) | CloudEvents type catalogue for network-inventory-planning | Accepted |
 | [0005](./0005-work-demand-release-and-fact-transitions.md) | Work-demand release and fact-driven saga transitions | Accepted |
@@ -30,6 +30,7 @@ the `Status:` line of each ADR body.
 | [0015](./0015-rebalance-policy-and-lane-catalogue.md) | Rebalance Policy and Transfer Lane catalogues | Accepted |
 | [0016](./0016-outbox-relay-attempt-cap.md) | Outbox relay attempt cap: `OUTBOX_MAX_ATTEMPTS` (default 20) excludes a poison row and logs it at ERROR | Accepted |
 | [0017](./0017-case-multiple-transfers.md) | Case-multiple transfers: round to whole cases (nearest, tie up, at least one, capped by the origin), report the signed remainder, local pack-level copy | Accepted |
+| [0018](./0018-per-site-staleness.md) | A stale fact excludes its site from the planning snapshot (never the whole snapshot); approval is refused only when its origin or destination is excluded; direction-disabled sites still participate | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -52,3 +53,4 @@ the `Status:` line of each ADR body.
 | 0015 | `transfer.RebalancePolicy` / `transfer.TransferLane` (`catalogue.go`), `Planner.PlanFromSnapshot` (`scheduled_planner.go`), `usecases.PutRebalancePolicy` / `PutTransferLane`, `RunScheduledRebalance.loadCatalogue`, `postgres.RebalancePolicyRepo` / `TransferLaneRepo` (migration `0005_rebalance_catalogue`), `PUT/GET /v1/rebalance-policies` and `/v1/transfer-lanes` |
 | 0016 | `postgres.WithMaxAttempts` / `WithRelayLogger` / `DefaultOutboxMaxAttempts` (`outbox.go`), `outboxMaxAttemptsFromEnv` (`cmd/network-inventory-planning/main.go`), `OUTBOX_MAX_ATTEMPTS`, chart `config.outboxMaxAttempts`, `internal/architecture/outbox_relay_cap_fitness_test.go` |
 | 0017 | `transfer.RoundToCases` / `CaseRounding` (`casemultiple.go`), `PACK_LEVEL_CONSUMER_GROUP`, pack-level view (migration 0006), rounding columns (migration 0007) |
+| 0018 | `planning.BuildSnapshot` / `PlanningSnapshot.StaleSites` (`snapshot.go`), `transfer.ValidateApproval` (`approval.go`), `PLANNING_MAX_STALENESS` |
