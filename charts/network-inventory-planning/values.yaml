@@ -3,7 +3,7 @@
 replicaCount: 1
 
 image:
-  repository: claudioed/network-inventory-planning
+  repository: ghcr.io/iqvo/network-inventory-planning
   pullPolicy: IfNotPresent
   tag: ""
 

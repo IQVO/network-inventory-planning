@@ -200,3 +200,46 @@ generated helper, the rewritten integration-events rule/skill, and the
 blocking `TestNoEventEnvelopeToggleOrFlatEnvelope`). Record `harness-template: v3` in each instantiated
 repo's `AGENTS.md` so a fleet-wide audit (see `scripts/harness-audit.py` / `scripts/harness-health.py`) can tell which repos are
 behind the template and by how much.
+
+## Harness² comparison (v4)
+
+A published research paper's Harness² (arXiv:2610.14224, "Recursive Agent Harnessing for an Open World")
+edits an agent's own harness DURING a task (Propose-Probe-Compose: propose an edit, probe it
+against the same task with no ground truth needed, compose the winner) and keeps a persistent
+"improvement harness" of adopted edits across tasks. This template's v1-v3 harness only ever
+changed on a human's cadence: an incident happens, a human writes the INCIDENTS.md row and the
+fitness test, `migrate_v3.py` rolls it out. v4 closes three concrete gaps that comparison
+surfaced, each scoped to something this fleet had ALREADY identified as a problem (not a
+speculative import of the paper's generality):
+
+- **No task-level recursion.** EVALS.md rounds 2-3 found "a docs convention that is only a
+  sentence in a skill is followed about half the time by everyone" and could not tell whether
+  rewording the guide would change that, or whether to stop spending on prose and build a sensor
+  instead (its own stated conclusion). `tools/harness_probe.py` answers exactly that question with
+  real `claude -p` runs scored by `harness_eval2.py`'s existing gates: baseline wording vs a
+  candidate, same task, interleaved — Compose prints adopt/keep/inconclusive, never a guess.
+- **Harnessing-level recursion was 100% manual.** `red_issue.py --draft` (new) drafts the FIRST
+  PASS of an INCIDENTS.md row and a `t.Skip`-marked fitness-test stub from a failing scheduled
+  job, and opens it as a draft PR — mirroring Harness²'s "experience reflector" for the drafting
+  step only. It never fills in root cause or a real assertion, and never merges; a human (or the
+  existing fix agent) still does the adoption Harness² automates, because hard architecture calls
+  in this fleet stay human decisions.
+- **Two of the paper's 8 harness components were missing.** `.claude/agents/*.md` promotes
+  `code-review`/`architecture-review`/`domain-review` from prompted skills to isolated-context
+  subagents (the "subagents" component); `.claude/memory/MEMORY.md` gives each repo a durable,
+  repo-specific heuristics file (the "memory" component) distinct from INCIDENTS.md (incidents)
+  and EVALS.md (measured harness claims).
+
+What v4 deliberately does NOT import: Harness²'s executor posture. Their README runs with the
+Codex sandbox disabled and network access unrestricted, because the paper needs unconstrained
+agent behaviour to measure. This fleet's `hook.py` defaults closed (blocks destructive git,
+`--no-verify`, edits to generated files/gates) and stays that way — loosening it toward Harness²'s
+benchmark posture would trade a measured research convenience for a production-safety regression
+this fleet does not need.
+
+`benchmarks/wms-bench/` is the evaluation-rigor half of the comparison: Harness² tracks scores
+per harness config across JobBench/LAB/WorkBuddy-Bench; this fleet's EVALS.md never had a fixed,
+repeatable suite to do the equivalent across harness-template versions. `benchmarks/wms-bench/`
+is seeded with 3 tasks (reusing `harness_eval.py`/`harness_eval2.py`'s prompts and gates
+unchanged) and a `run.py` that names results by the target repo's version marker, so v3-vs-v4
+(and v4-vs-v5) becomes a diff of two JSONL files instead of a fresh ad hoc round each time.

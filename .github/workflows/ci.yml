@@ -345,10 +345,14 @@ jobs:
       - name: Chart tests
         run: |
           set -euo pipefail
-          for t in charts/network-inventory-planning/tests/test_*.py; do
+          shopt -s nullglob
+          for t in charts/network-inventory-planning/tests/*.sh charts/network-inventory-planning/tests/test_*.py; do
             echo "::group::$t"
             status=0
-            out=$(python3 "$t" 2>&1) || status=$?
+            case "$t" in
+              *.sh) out=$(bash "$t" 2>&1) || status=$? ;;
+              *) out=$(python3 "$t" 2>&1) || status=$? ;;
+            esac
             echo "$out"
             echo "::endgroup::"
             if [ "$status" -ne 0 ]; then
