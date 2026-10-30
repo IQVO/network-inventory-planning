@@ -36,6 +36,21 @@ curl -X POST http://localhost:8080/v1/transfer-proposals:generate \
 
 The response is an explainable, score-ordered advisory proposal. It reserves and moves nothing: an operator approves a transfer separately (`POST /v1/transfers:approve`), and the transfer saga then drives the Inventory Storage reservation, WES work release, pick, dispatch, arrival and stow through Kafka (see [Domain message flow](docs/docs/ddd/domain-message-flow.md)).
 
+## A2A agent
+
+`cmd/a2a` serves the same read side as the MCP server as an Agent2Agent agent (JSON-RPC over HTTP, Agent Card at
+`/.well-known/agent-card.json`, endpoint at `/` and `/a2a`, default `:8093`). It is read-only and offers two goal-shaped skills,
+`transfer_status` and `find_stuck_transfers` ([ADR-0020](docs/docs/adr/0020-a2a-inbound-adapter.md)). A2A carries delegation only;
+facts still leave as CloudEvents through the transactional outbox of the api binary.
+
+```sh
+DATABASE_URL=$DATABASE_URL A2A_AGENT_URL=http://localhost:8093/ go run ./cmd/a2a
+curl -s http://localhost:8093/.well-known/agent-card.json
+```
+
+Layout: `internal/adapters/inbound/a2a` (card, skills, problem mapping), `cmd/a2a` (composition root, a clone of `cmd/mcp`),
+chart component `a2a` (default off, `charts/network-inventory-planning/templates/a2a-*.yaml`).
+
 ## Guardrails
 
 - Every input position must have exactly the request `asOf`; mixed snapshots are rejected.
@@ -61,6 +76,6 @@ The full documentation is a Docusaurus site under [`docs/`](docs/), published at
 - Development: [Testing](docs/docs/development/testing.md)
 - Domain-Driven Design: [Subdomain classification](docs/docs/ddd/subdomain-classification.md), [Use cases](docs/docs/ddd/use-cases.md), [Domain events](docs/docs/ddd/domain-events.md), [Ubiquitous language](docs/docs/ddd/ubiquitous-language.md), [Core domain chart](docs/docs/ddd/core-domain-chart.md), [Bounded context canvas](docs/docs/ddd/bounded-context-canvas.md), [Context map](docs/docs/ddd/context-map.md), [Aggregate design canvas](docs/docs/ddd/aggregate-design-canvas.md), [Domain message flow](docs/docs/ddd/domain-message-flow.md), [EventStorming](docs/docs/ddd/eventstorming.md), [Class diagrams](docs/docs/ddd/class-diagram.md), [Entity-relationship](docs/docs/ddd/entity-relationship.md), [Sequence diagrams](docs/docs/ddd/sequence-diagrams.md)
 - Ecosystem: [Integration](docs/docs/ecosystem/integration.md)
-- AI ecosystem: [MCP tools](docs/docs/mcp/tools.md)
+- AI ecosystem: [MCP tools](docs/docs/mcp/tools.md), [A2A inbound adapter](docs/docs/adr/0020-a2a-inbound-adapter.md)
 - API: [API reference overview](docs/docs/api-reference/overview.md) (the REST reference is generated from [`apis/openapi.yaml`](apis/openapi.yaml))
 - Decisions: [ADR index](docs/docs/adr/about.md)

@@ -62,6 +62,21 @@ Source: `cmd/mcp/main.go`.
 | `LOG_LEVEL` | `info` | no | `debug`, `info`, `warn`/`warning`, `error` (JSON logs on stdout). | `mcp.logLevel` |
 | `OTEL_SERVICE_NAME` | `network-inventory-planning-mcp` | no | `service.name` of this binary's traces and metrics (OTLP export is configured by `OTEL_EXPORTER_OTLP_ENDPOINT` as for the API). | not rendered; use `extraEnv` |
 
+## `a2a`
+
+Source: `cmd/a2a/main.go` (`loadBootConfig`). Read-only: no Kafka, outbox relay or consumer, so none of those variables exist here.
+
+| Variable | Default | Required? | Meaning | Chart value |
+| --- | --- | --- | --- | --- |
+| `A2A_ADDR` | `:8093` | no | Listen address (JSON-RPC at `/` and `/a2a`, the Agent Card at `/.well-known/agent-card.json`, `GET /healthz`). | `a2a.httpAddr` |
+| `A2A_AGENT_URL` | none | **yes** | Absolute http(s) URL of the JSON-RPC endpoint, advertised on the Agent Card. Missing or not absolute → exit 1 before telemetry and the listener. | `a2a.agentUrl` (default `http://<release>-a2a.<ns>.svc.cluster.local:8093/`) |
+| `DATABASE_URL` | none | **yes** | OLTP DSN. Missing → exit 1. Migrate, connect, ping or exit 1. | same secret as the API |
+| `MIGRATIONS_PATH` | `internal/adapters/outbound/postgres/migrations` | no | OLTP migrations directory. | `a2a.migrationsPath` (`migrations`) |
+| `MIGRATIONS_DATABASE_URL` | value of `DATABASE_URL` | no | Direct DSN for the migration step only. | `database.migrationsExistingSecretKey` |
+| `LOG_LEVEL` | `info` | no | `debug`, `info`, `warn`/`warning`, `error` (JSON logs on stdout). | `a2a.logLevel` |
+| `SERVICE_VERSION` | `dev` | no | Agent Card version and `service.version` of traces and metrics. | not rendered; use `extraEnv` |
+| `OTEL_SERVICE_NAME` | `network-inventory-planning-a2a` | no | `service.name` of this binary's traces and metrics. | not rendered; use `a2a.extraEnv` |
+
 ## `nip-projector`
 
 Source: `cmd/nip-projector/main.go` (`loadConfig`).
@@ -97,6 +112,7 @@ The reports pool opens every connection with
 | --- | --- | --- |
 | `kafka.enabled` | `false` | Renders `KAFKA_BROKERS` and the five group ids into the API Deployment. |
 | `mcp.enabled` | `false` | Renders the `mcp` Deployment and Service. |
+| `a2a.enabled` | `false` | Renders the `a2a` Deployment and Service (and the Kong route when `a2a.route.enabled`). |
 | `analytics.enabled` | `false` | Renders the `analytics-projector` and `analytics-reports` Deployments (and the reports Service); needs `kafka.enabled` and a DSN source. |
 | `frontend.enabled` | `false` | Renders the `nip_mfe` console remote (nginx) Deployment and Service. |
 | `autoscaling.enabled`, `analytics.projector.autoscaling.enabled`, `analytics.reports.autoscaling.enabled` | `false` | HPAs (max 3, 2 and 3 replicas). |

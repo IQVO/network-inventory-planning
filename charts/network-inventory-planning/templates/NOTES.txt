@@ -37,3 +37,10 @@ MCP server (read-only, Streamable HTTP): {{ include "network-inventory-planning.
   endpoint: http://{{ include "network-inventory-planning.mcpFullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.mcp.service.port }}/mcp
   tools: get_transfer, list_transfers, find_stuck_transfers, simulate_transfer_options
 {{- end }}
+
+{{- if .Values.a2a.enabled }}
+
+A2A agent (read-only, JSON-RPC over HTTP): {{ include "network-inventory-planning.a2aFullname" . }} ({{ .Values.a2a.service.type }}, port {{ .Values.a2a.service.port }})
+  agent card: http://{{ include "network-inventory-planning.a2aFullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.a2a.service.port }}/.well-known/agent-card.json
+  skills: transfer_status, find_stuck_transfers
+{{- end }}

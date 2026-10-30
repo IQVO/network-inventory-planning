@@ -213,6 +213,57 @@ mcp:
       cpu: 100m
       memory: 128Mi
 
+# --- A2A agent (ADR 0020) ---
+# The Agent2Agent agent (cmd/a2a, JSON-RPC over HTTP, Agent Card at
+# /.well-known/agent-card.json, endpoint at "/" and "/a2a", GET /healthz):
+# the third driving adapter over the SAME read use cases as REST and MCP.
+# DISABLED by default. Enabling it renders its own Deployment + Service
+# (component=a2a, command /app/a2a) over the same OLTP database. READ-ONLY, like
+# the MCP server: skills transfer_status and find_stuck_transfers; approving a
+# transfer stays an operator action on the REST API. It starts no outbox relay,
+# no Kafka consumer and dials no Kafka, so it takes no KAFKA_BROKERS /
+# EVENT_PUBLISHER. A2A carries delegation only; facts between contexts stay
+# CloudEvents on Kafka. No auth / API key: unauthenticated fleet-wide.
+a2a:
+  enabled: false
+  replicaCount: 1
+  # A2A_ADDR the binary listens on; keep in sync with service.targetPort.
+  # (8090 is the MCP server, 8091 the projector admin port and 8092 the
+  # reports API, so 8093.)
+  httpAddr: ":8093"
+  # Absolute URL advertised on the Agent Card (A2A_AGENT_URL, mandatory at boot).
+  # Empty defaults to this release's in-cluster Service DNS
+  # (http://<release>-a2a.<ns>.svc.cluster.local:8093/); warehouse-infra can
+  # override it with the Kong path when the agent must be reachable off-cluster.
+  agentUrl: ""
+  # Directory of the SQL migrations inside the image (the Dockerfile copies
+  # them to /app/migrations); cmd/a2a applies them idempotently on start.
+  migrationsPath: "migrations"
+  logLevel: "info"
+  service:
+    type: ClusterIP
+    port: 8093
+    targetPort: 8093
+  # Kong exposure of the A2A agent (a2a-route.yaml): host path
+  # /api/a2a/<context> rewritten to / (JSON-RPC root; the well-known agent
+  # card stays reachable under the same prefix). Off by default; warehouse-infra
+  # turns it on with the real parentRefs and path.
+  route:
+    enabled: false
+    path: "/api/a2a/network-inventory-planning"
+    parentRefs:
+      - name: ""
+        namespace: ""
+        sectionName: "http"
+  extraEnv: []
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
 # --- console remote (ADR 0010) -----------------------------------------------
 # An OPTIONAL nginx pod that serves the nip_mfe Module Federation remote (web/)
 # as static bytes. DISABLED by default and entirely absent from the rendered
