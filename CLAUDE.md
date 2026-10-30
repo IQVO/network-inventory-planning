@@ -30,3 +30,5 @@ Boundary and phase decisions in docs/docs/adr/0001-0005 (boundary, read models +
 ## Workflow
 GitFlow: feature/* -> PR into develop, CI green before merge, never push develop or main. lefthook: pre-commit fmt/vet/lint, pre-push `make check`. Commit and push after each step.
 Helm chart: charts/network-inventory-planning (mcp + frontend default OFF; chart tests in charts/network-inventory-planning/tests: render_test.sh, test_env_wiring.py, test_kong_config.py, test_service_selectors.py — run in CI by the chart-tests job).
+
+A2A: `cmd/a2a` (port 8093) is this context's read-only Agent2Agent agent, skills `transfer_status` (read), `find_stuck_transfers` (read), decided in `docs/docs/adr/0020-a2a-inbound-adapter.md`; delegation only (facts stay CloudEvents on Kafka), unauthenticated like REST and MCP; rules in `.claude/rules/fleet/a2a.md`.

@@ -211,6 +211,21 @@ channels:
       transferArrived:
         $ref: '#/components/messages/transferArrived'
 
+  warehouse.product-master.events:
+    address: warehouse.product-master.events
+    title: product-master integration topic
+    description: |
+      product-master's integration stream (the ProductMasterTopic constant in
+      internal/adapters/inbound/kafka/pack_level_consumer.go).
+      network-inventory-planning consumes only ProductPackLevelDeclared and
+      ProductPackLevelRetired into its local pack_levels view (ADR 0017,
+      case-multiple transfers) and ignores every other type.
+    messages:
+      productPackLevelDeclared:
+        $ref: '#/components/messages/productPackLevelDeclared'
+      productPackLevelRetired:
+        $ref: '#/components/messages/productPackLevelRetired'
+
 operations:
   receiveSiteCapabilityChanged:
     action: receive
@@ -388,9 +403,49 @@ operations:
       stowed into destination bins. RECEIVED is terminal; the stow
       allocations are persisted on the aggregate. Consumer group
       TRANSFER_REPLY_CONSUMER_GROUP (env-configured).
+  receiveProductPackLevelDeclared:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.product-master.events'
+    summary: Keep the local pack_levels view current (a pack level declared).
+    description: |
+      Upsert the (sku, level) pack level with its GTIN, units_per_pack and
+      effective_from, last writer wins on version, in ONE transaction with
+      the processed-event claim (consumer pack-level-consumer). A malformed
+      payload or an unparsable effective_from is dead-lettered to
+      warehouse.product-master.events.dlq; only infrastructure failures are
+      retried. Consumer group PACK_LEVEL_CONSUMER_GROUP (env-configured; unset
+      = the consumer does not start).
+    messages:
+      - $ref: '#/channels/warehouse.product-master.events/messages/productPackLevelDeclared'
+  receiveProductPackLevelRetired:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.product-master.events'
+    summary: Keep the local pack_levels view current (a pack level retired).
+    description: |
+      Mark the (sku, level) pack level retired as of effective_to, last
+      writer wins on version, in the same transaction shape as the declared
+      handler. Consumer group PACK_LEVEL_CONSUMER_GROUP.
+    messages:
+      - $ref: '#/channels/warehouse.product-master.events/messages/productPackLevelRetired'
 
 components:
   messages:
+    productPackLevelDeclared:
+      name: ProductPackLevelDeclared
+      title: Product pack level declared
+      summary: product-master declared or revised a pack level of a SKU (consumed).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ProductPackLevelDeclaredEvent'
+    productPackLevelRetired:
+      name: ProductPackLevelRetired
+      title: Product pack level retired
+      summary: product-master retired a pack level of a SKU (consumed).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ProductPackLevelRetiredEvent'
     siteCapabilityChanged:
       name: SiteCapabilityChanged
       title: Site capability changed
@@ -505,6 +560,79 @@ components:
       payload:
         $ref: '#/components/schemas/RebalanceRunCompletedEvent'
   schemas:
+    ProductPackLevelDeclaredEvent:
+      description: CloudEvents 1.0 envelope of product-master's ProductPackLevelDeclared (fields as product-master's apis/asyncapi.yaml; this service reads sku, level, gtin, units_per_pack, effective_from, version).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wms.product-master.product.ProductPackLevelDeclared
+            dataschema:
+              const: urn:warehouse:product-master:events:ProductPackLevelDeclared:v1
+            data:
+              type: object
+              required: [sku, level, gtin, units_per_pack, is_orderable, is_despatch_unit, effective_from, version]
+              properties:
+                sku:
+                  type: string
+                  description: The SKU; also the Kafka key and subject.
+                level:
+                  type: string
+                  description: The pack level (product-master's PackLevel enum).
+                gtin:
+                  type: string
+                child_gtin:
+                  type: string
+                qty_of_child:
+                  type: integer
+                  minimum: 2
+                  description: Absent for EACH.
+                units_per_pack:
+                  type: integer
+                  minimum: 1
+                  description: Direct factor to eaches; 1 for EACH.
+                is_orderable:
+                  type: boolean
+                is_despatch_unit:
+                  type: boolean
+                effective_from:
+                  type: string
+                  format: date-time
+                version:
+                  type: integer
+                  minimum: 1
+                  description: Per (sku, level); last writer wins.
+    ProductPackLevelRetiredEvent:
+      description: CloudEvents 1.0 envelope of product-master's ProductPackLevelRetired (this service reads sku, level, gtin, effective_to, version).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wms.product-master.product.ProductPackLevelRetired
+            dataschema:
+              const: urn:warehouse:product-master:events:ProductPackLevelRetired:v1
+            data:
+              type: object
+              required: [sku, level, gtin, effective_to, reason, version]
+              properties:
+                sku:
+                  type: string
+                level:
+                  type: string
+                gtin:
+                  type: string
+                effective_to:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                version:
+                  type: integer
+                  minimum: 1
     cloudEvent:
       type: object
       required: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]

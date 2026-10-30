@@ -32,6 +32,7 @@ FULLNAME = "nip-network-inventory-planning"
 BASE = ["--set", "database.existingSecret=nip-database"]
 ENABLE_EVERYTHING = BASE + [
     "--set", "mcp.enabled=true",
+    "--set", "a2a.enabled=true",
     "--set", "frontend.enabled=true",
     "--set", "autoscaling.enabled=true",
     "--set", "gatewayApi.enabled=true",
@@ -93,6 +94,14 @@ def main() -> int:
     if mcp_name not in deployments:
         failures.append("the MCP Deployment was not rendered with mcp.enabled=true")
 
+    a2a_name = f"{FULLNAME}-a2a"
+    if a2a_name not in services:
+        failures.append("the A2A Service was not rendered with a2a.enabled=true")
+    elif selector_of(services[a2a_name]).get("app.kubernetes.io/component") != "a2a":
+        failures.append("the A2A Service selector must pin component=a2a")
+    if a2a_name not in deployments:
+        failures.append("the A2A Deployment was not rendered with a2a.enabled=true")
+
     # The optional frontend: its own Deployment + ClusterIP Service pinned to
     # component=frontend, serving the static nip_mfe remote on 8080.
     frontend_name = f"{FULLNAME}-frontend"
@@ -117,7 +126,7 @@ def main() -> int:
         if not fe_pod["securityContext"].get("runAsNonRoot"):
             failures.append("the frontend pod must run as non-root (nginx-unprivileged)")
     # The api and MCP Services never select the frontend pod (and vice versa).
-    for svc_name, comp in ((FULLNAME, "api"), (mcp_name, "mcp")):
+    for svc_name, comp in ((FULLNAME, "api"), (mcp_name, "mcp"), (a2a_name, "a2a")):
         if svc_name in services and fe is not None and matches(selector_of(services[svc_name]), pod_labels_of(fe)):
             failures.append(f"Service {svc_name} (component={comp}) must not select the frontend pod")
 
@@ -143,6 +152,14 @@ def main() -> int:
             failures.append("the MCP Deployment must carry component=mcp in selector.matchLabels and its pod labels")
         if mcp["spec"]["template"]["spec"]["containers"][0].get("command") != ["/app/mcp"]:
             failures.append("the MCP container must run /app/mcp")
+
+    a2a = deployments.get(a2a_name)
+    if a2a is not None:
+        if (a2a["spec"]["selector"].get("matchLabels") or {}).get("app.kubernetes.io/component") != "a2a" \
+                or pod_labels_of(a2a).get("app.kubernetes.io/component") != "a2a":
+            failures.append("the A2A Deployment must carry component=a2a in selector.matchLabels and its pod labels")
+        if a2a["spec"]["template"]["spec"]["containers"][0].get("command") != ["/app/a2a"]:
+            failures.append("the A2A container must run /app/a2a")
 
     # Each HPA owns the replicas of EXACTLY the Deployment it scales: the api's
     # HPA the api, the analytics ones the projector / reports.
@@ -201,13 +218,13 @@ def main() -> int:
                 f"Service {svc_name} selects {len(hit)} Deployments {sorted(hit)}; expected exactly 1"
             )
 
-    # Default values must not deploy the MCP, frontend or analytics components at all,
+    # Default values must not deploy the MCP, A2A, frontend or analytics components at all,
     # and the lone api Service still selects exactly the api Deployment.
     default_docs = render(BASE)
     stray = [
         d["metadata"]["name"]
         for d in default_docs
-        if d.get("metadata", {}).get("name", "").endswith(("-mcp", "-frontend", "-projector", "-reports", "-analytics"))
+        if d.get("metadata", {}).get("name", "").endswith(("-mcp", "-a2a", "-frontend", "-projector", "-reports", "-analytics"))
     ]
     if stray:
         failures.append(f"optional components rendered with default values: {stray}")
@@ -224,7 +241,7 @@ def main() -> int:
         return 1
 
     print(f"PASS: {len(services)} Services each select exactly one Deployment; "
-          "api pins component=api, mcp and frontend pin their own component, are ClusterIP and are off by default; "
+          "api pins component=api, mcp, a2a and frontend pin their own component, are ClusterIP and are off by default; "
           "analytics-projector / analytics-reports pin their components, are off by default and fail closed")
     return 0
 

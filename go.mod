@@ -3,6 +3,7 @@ module github.com/claudioed/network-inventory-planning
 go 1.27.3
 
 require (
+	github.com/a2aproject/a2a-go/v2 v2.7.0
 	github.com/arch-go/arch-go v1.7.0
 	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/cucumber/godog v0.16.0
