@@ -122,6 +122,27 @@ MCP_FORBIDDEN_ENV = {
     "API_KEY",
 }
 
+# Env cmd/a2a reads (cmd/a2a/main.go) and that the chart must wire. Both
+# DATABASE_URL and A2A_AGENT_URL are mandatory at boot.
+A2A_EXPECTED_ENV = {
+    "A2A_ADDR",
+    "A2A_AGENT_URL",
+    "MIGRATIONS_PATH",
+    "LOG_LEVEL",
+    "DATABASE_URL",
+    "MIGRATIONS_DATABASE_URL",
+}
+
+# Env the A2A binary must NEVER be given: the agent is read-only, dials no
+# Kafka (so no brokers and no EVENT_PUBLISHER), runs no relay and no consumer,
+# and has no auth.
+A2A_FORBIDDEN_ENV = MCP_FORBIDDEN_ENV | {
+    "EVENT_PUBLISHER",
+    "MCP_ADDR",
+    "PLANNING_MAX_STALENESS",
+    "A2A_API_KEY",
+}
+
 # Env cmd/nip-projector reads (cmd/nip-projector/main.go) and that the chart
 # must wire. It writes ONLY the analytical database: never the OLTP DSNs, the
 # outbox relay or the OLTP consumer groups.
@@ -206,6 +227,71 @@ def check_mcp(failures: list[str]) -> None:
         failures.append("MCP rendered a literal DATABASE_URL instead of the Secret")
     if "DATABASE_URL" not in mcp_from_ref:
         failures.append("MCP did not render DATABASE_URL from the database Secret")
+
+
+def check_a2a(failures: list[str]) -> None:
+    import re
+
+    docs = render(ENABLE_EVERYTHING + ["--set", "a2a.enabled=true"])
+    plain, from_ref = component_env(docs, "a2a")
+    if not plain and not from_ref:
+        failures.append("a2a.enabled=true rendered no A2A Deployment")
+        return
+    missing = A2A_EXPECTED_ENV - set(plain) - from_ref
+    if missing:
+        failures.append(f"A2A env vars missing with everything enabled: {sorted(missing)}")
+    for dsn in ("DATABASE_URL", "MIGRATIONS_DATABASE_URL"):
+        if dsn in plain or dsn not in from_ref:
+            failures.append(f"A2A {dsn} must be wired via secretKeyRef, not a plain value")
+    if plain.get("A2A_ADDR") != ":8093":
+        failures.append(f"A2A_ADDR = {plain.get('A2A_ADDR')!r}, want ':8093'")
+    forbidden = sorted((set(plain) | from_ref) & A2A_FORBIDDEN_ENV)
+    if forbidden:
+        failures.append(f"A2A Deployment must not carry {forbidden} (read-only: no Kafka, relay, consumers or auth)")
+
+    # The Agent Card advertises a dialable absolute URL: it defaults to the
+    # release's in-cluster Service DNS (namespace-derived, so pattern-match) and
+    # stays overridable.
+    url = plain.get("A2A_AGENT_URL", "")
+    if not re.fullmatch(r"http://nip-network-inventory-planning-a2a\.[a-z0-9-]+\.svc\.cluster\.local:8093/", url):
+        failures.append(f"A2A_AGENT_URL default is not the in-cluster Service DNS: {url!r}")
+    override = "http://gw.example/api/a2a/network-inventory-planning/"
+    over_plain, _ = component_env(
+        render(["--set", "database.existingSecret=x", "--set", "a2a.enabled=true", "--set", f"a2a.agentUrl={override}"]),
+        "a2a",
+    )
+    if over_plain.get("A2A_AGENT_URL") != override:
+        failures.append(f"a2a.agentUrl did not override A2A_AGENT_URL: {over_plain.get('A2A_AGENT_URL')!r}")
+
+    # Every variable cmd/a2a's boot config names as REQUIRED is rendered, derived
+    # from the Go source so a new mandatory variable fails until the chart has it.
+    required = set()
+    for source in sorted((CHART_DIR.parents[1] / "cmd" / "a2a").glob("*.go")):
+        if source.name.endswith("_test.go"):
+            continue
+        required |= set(re.findall(r"([A-Z][A-Z0-9_]+) is required", source.read_text()))
+    if not required:
+        failures.append("found no mandatory variables in cmd/a2a; the scan is looking in the wrong place")
+    unrendered = sorted(required - set(plain) - from_ref)
+    if unrendered:
+        failures.append(f"the A2A Deployment does not render {unrendered}, which cmd/a2a requires")
+
+    # The api Deployment is untouched by enabling the A2A agent.
+    api_plain, api_from_ref = deployment_env(docs)
+    if "A2A_ADDR" in api_plain or "A2A_AGENT_URL" in api_plain or "A2A_ADDR" in api_from_ref:
+        failures.append("the api Deployment must not carry A2A env")
+
+    # A2A is opt-in: the default render has no A2A resource at all.
+    default_kinds = {
+        (d["kind"], d["metadata"]["name"]) for d in render(["--set", "database.existingSecret=x"])
+    }
+    if any(name.endswith("-a2a") for _, name in default_kinds):
+        failures.append("A2A resources rendered with default values; a2a.enabled must default to false")
+
+    # DATABASE_URL comes from the Secret even when only a Secret name is given.
+    a2a_plain, a2a_from_ref = component_env(render(["--set", "database.existingSecret=x", "--set", "a2a.enabled=true"]), "a2a")
+    if "DATABASE_URL" in a2a_plain or "DATABASE_URL" not in a2a_from_ref:
+        failures.append("A2A did not render DATABASE_URL from the database Secret")
 
 
 def check_analytics(failures: list[str]) -> None:
@@ -343,6 +429,7 @@ def main() -> int:
         failures.append("routing resources rendered with default values; they must be opt-in")
 
     check_mcp(failures)
+    check_a2a(failures)
     check_analytics(failures)
 
     if failures:
@@ -353,6 +440,7 @@ def main() -> int:
     print(f"PASS: all {len(EXPECTED_ENV)} api env vars wire correctly; "
           "defaults leak no kafka/database/release config; "
           f"mcp wires {len(MCP_EXPECTED_ENV)} env vars, none of them kafka/relay/auth, and is off by default; "
+          f"a2a wires {len(A2A_EXPECTED_ENV)} env vars (agent URL defaulted + overridable, no kafka/relay/auth), and is off by default; "
           f"analytics-projector wires {len(PROJECTOR_EXPECTED_ENV)} and analytics-reports {len(REPORTS_EXPECTED_ENV)} env vars "
           "(DSNs via secretKeyRef, no OLTP database), both off by default")
     return 0

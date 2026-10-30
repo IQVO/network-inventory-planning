@@ -78,6 +78,13 @@ Fully qualified name of the MCP server deployment/service.
 {{- end }}
 
 {{/*
+Fully qualified name of the A2A agent deployment/service (<release>-a2a, ADR 0020).
+*/}}
+{{- define "network-inventory-planning.a2aFullname" -}}
+{{- include "network-inventory-planning.fullname" . }}-a2a
+{{- end }}
+
+{{/*
 Fully qualified name of the console-remote frontend deployment/service
 (the nginx pod that serves nip_mfe, ADR 0010).
 */}}

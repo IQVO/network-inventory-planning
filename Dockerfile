@@ -18,6 +18,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/network-inventory-planning ./cmd/network-inventory-planning && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mcp ./cmd/mcp && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/a2a ./cmd/a2a && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/nip-projector ./cmd/nip-projector && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/nip-reports ./cmd/nip-reports
 
@@ -34,6 +35,9 @@ COPY --from=build --chown=app:app /out/network-inventory-planning ./network-inve
 # The read-only MCP server (Streamable HTTP on :8090). The api image
 # entrypoint is unchanged; the chart's mcp Deployment runs `/app/mcp`.
 COPY --from=build --chown=app:app /out/mcp ./mcp
+# The read-only A2A agent (JSON-RPC over HTTP on :8093). The api image
+# entrypoint is unchanged; the chart's a2a Deployment runs `/app/a2a`.
+COPY --from=build --chown=app:app /out/a2a ./a2a
 # The analytics read side (ADR 0009): the projector (the only writer of the
 # separate analytical database; admin /healthz + /readyz on :8091) and the
 # read-only reports server (:8092). The api entrypoint is unchanged; the
@@ -50,5 +54,5 @@ COPY --from=build --chown=app:app /src/analytics/migrations ./analytics/migratio
 COPY --from=build --chown=app:app /src/internal/adapters/outbound/postgres/migrations ./migrations
 ENV MIGRATIONS_PATH=migrations
 USER 1000
-EXPOSE 8080 8090 8091 8092
+EXPOSE 8080 8090 8091 8092 8093
 ENTRYPOINT ["./network-inventory-planning"]
