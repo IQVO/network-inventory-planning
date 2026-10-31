@@ -77,9 +77,13 @@ paths:
       summary: Simulate advisory transfer options from local read models.
       description: |
         Serves an advisory-only simulation built from the service's projected
-        network facts. Fail-closed: returns 503 problem+json when the read
-        models are unconfigured, incomplete or stale, rather than proposing
-        from partial state.
+        network facts. Fail-closed per site: a site whose capability, demand or
+        capacity-plan fact is missing or older than the freshness budget
+        (PLANNING_MAX_STALENESS) is left out of the answer; a site disabled for
+        one transfer direction is listed with that direction flagged off.
+        Returns 503 problem+json only when the read models are unconfigured or
+        no site has complete, fresh facts, rather than proposing from partial
+        state.
       responses:
         '200':
           description: Advisory simulation from current local read models.
@@ -105,8 +109,12 @@ paths:
         UNFULFILLABLE. Idempotent per the required Idempotency-Key header:
         replaying the same key with the same payload returns the ORIGINAL
         transfer (replayed: true); the same key with a different payload is a
-        409. Fail-closed validation failures (missing/stale/disabled facts)
-        return 422; unusable read models return 503.
+        409. Fail-closed validation failures return 422: the origin or the
+        destination is missing or stale in the planning snapshot (the problem
+        detail names the site and the stale fact), is disabled for its role, or
+        the demand and capacity checks fail. Stale facts of any other site do
+        not matter. When no site has complete fresh facts at all the answer is
+        the same 422; unusable (unreadable) read models return 503.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -756,6 +764,25 @@ components:
         Quantity:
           type: integer
           minimum: 1
+        caseMultiple:
+          type: integer
+          minimum: 2
+          description: Units per pack (eaches) of the SKU's active CASE level. Case rounding fields (ADR 0017) are present only for a SKU with an active CASE level.
+        cases:
+          type: integer
+          minimum: 1
+          description: Whole cases the transfer moves.
+        requestedQtyEaches:
+          type: integer
+          minimum: 1
+          description: The quantity before rounding (the demand).
+        roundedQtyEaches:
+          type: integer
+          minimum: 1
+          description: The quantity the transfer moves, cases times caseMultiple.
+        remainderEaches:
+          type: integer
+          description: requestedQtyEaches minus roundedQtyEaches. Positive means that many requested eaches were not moved; negative means the rounding went up.
         PolicyVersion:
           type: string
         PositionAsOf:
@@ -887,6 +914,25 @@ components:
           $ref: '#/components/schemas/SKU'
         quantity:
           type: integer
+        caseMultiple:
+          type: integer
+          minimum: 2
+          description: Units per pack (eaches) of the SKU's active CASE level. Case rounding fields (ADR 0017) are present only for a SKU with an active CASE level.
+        cases:
+          type: integer
+          minimum: 1
+          description: Whole cases the transfer moves.
+        requestedQtyEaches:
+          type: integer
+          minimum: 1
+          description: The quantity before rounding (the demand).
+        roundedQtyEaches:
+          type: integer
+          minimum: 1
+          description: The quantity the transfer moves, cases times caseMultiple.
+        remainderEaches:
+          type: integer
+          description: requestedQtyEaches minus roundedQtyEaches. Positive means that many requested eaches were not moved; negative means the rounding went up.
         policyVersion:
           type: string
         reservationId:
@@ -960,6 +1006,25 @@ components:
         quantity:
           type: integer
           description: Units planned to move.
+        caseMultiple:
+          type: integer
+          minimum: 2
+          description: Units per pack (eaches) of the SKU's active CASE level. Case rounding fields (ADR 0017) are present only for a SKU with an active CASE level.
+        cases:
+          type: integer
+          minimum: 1
+          description: Whole cases the transfer moves.
+        requestedQtyEaches:
+          type: integer
+          minimum: 1
+          description: The quantity before rounding (the demand).
+        roundedQtyEaches:
+          type: integer
+          minimum: 1
+          description: The quantity the transfer moves, cases times caseMultiple.
+        remainderEaches:
+          type: integer
+          description: requestedQtyEaches minus roundedQtyEaches. Positive means that many requested eaches were not moved; negative means the rounding went up.
         pickedQuantity:
           type: integer
           description: Units the origin pick actually picked; present from PICKED onwards (may be short of quantity).

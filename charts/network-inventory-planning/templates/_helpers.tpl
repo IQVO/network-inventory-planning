@@ -78,6 +78,13 @@ Fully qualified name of the MCP server deployment/service.
 {{- end }}
 
 {{/*
+Fully qualified name of the A2A agent deployment/service (<release>-a2a, ADR 0020).
+*/}}
+{{- define "network-inventory-planning.a2aFullname" -}}
+{{- include "network-inventory-planning.fullname" . }}-a2a
+{{- end }}
+
+{{/*
 Fully qualified name of the console-remote frontend deployment/service
 (the nginx pod that serves nip_mfe, ADR 0010).
 */}}
@@ -144,4 +151,26 @@ installs without Kong are unaffected.
 {{- end -}}
 {{- end -}}
 {{- join "," $names -}}
+{{- end -}}
+
+
+{{/*
+Postgres is the only runtime. The binaries exit at boot without DATABASE_URL
+(cmd/network-inventory-planning, cmd/mcp, cmd/nip-projector, cmd/nip-reports):
+there is no in-memory mode and no default DSN. The chart therefore refuses to
+render without a source for it, naming the value.
+*/}}
+{{- define "network-inventory-planning.requireDatabase" -}}
+{{- if not (or .Values.database.url .Values.database.existingSecret) -}}
+{{- fail "database.url or database.existingSecret is required: DATABASE_URL is mandatory, this service runs only on a real Postgres" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+kafka.packLevelConsumerGroup is MANDATORY when kafka.enabled (ADR 0017): the
+api refuses to boot without PACK_LEVEL_CONSUMER_GROUP, and no default group id
+is safe. Fail at render instead of crash-looping.
+*/}}
+{{- define "network-inventory-planning.requirePackLevelGroup" -}}
+{{- required "kafka.enabled is true but kafka.packLevelConsumerGroup is empty — the api refuses to boot without PACK_LEVEL_CONSUMER_GROUP (ADR 0017). Set e.g. kafka.packLevelConsumerGroup=network-inventory-planning-pack-level." .Values.kafka.packLevelConsumerGroup -}}
 {{- end -}}

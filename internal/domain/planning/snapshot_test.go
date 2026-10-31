@@ -77,7 +77,8 @@ func TestBuildSnapshotSucceedsOnCompleteFreshInput(t *testing.T) {
 	}
 }
 
-// Fail-closed: every missing or stale input must refuse, never degrade.
+// Fail-closed: every structurally missing input must refuse, never degrade.
+// (A STALE fact excludes its site instead: see staleness_test.go.)
 func TestBuildSnapshotFailsClosed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -87,18 +88,6 @@ func TestBuildSnapshotFailsClosed(t *testing.T) {
 		{"no capabilities", func(in *SnapshotInput) { in.Capabilities = nil }, "no site capability"},
 		{"no demands", func(in *SnapshotInput) { in.Demands = nil }, "no site sku demand"},
 		{"no plans", func(in *SnapshotInput) { in.Plans = nil }, "no published capacity plan"},
-		{"stale capability", func(in *SnapshotInput) {
-			in.Capabilities[0].AsOf = snapshotTime().Add(-2 * time.Hour)
-		}, "stale site capability"},
-		{"stale plan", func(in *SnapshotInput) {
-			in.Plans[0].PublishedAt = snapshotTime().Add(-2 * time.Hour)
-		}, "stale published capacity plan"},
-		{"origin disabled", func(in *SnapshotInput) {
-			in.Capabilities[0].TransferOriginEnabled = false
-		}, "origin"},
-		{"destination disabled", func(in *SnapshotInput) {
-			in.Capabilities[1].TransferDestinationEnabled = false
-		}, "destination"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

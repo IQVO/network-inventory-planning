@@ -1,0 +1,111 @@
+{{- if .Values.a2a.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "network-inventory-planning.a2aFullname" . }}
+  labels:
+    {{- include "network-inventory-planning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: a2a
+spec:
+  replicas: {{ .Values.a2a.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "network-inventory-planning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: a2a
+  template:
+    metadata:
+      labels:
+        {{- include "network-inventory-planning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: a2a
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "network-inventory-planning.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: a2a
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/a2a"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.a2a.service.targetPort }}
+              protocol: TCP
+          env:
+            # Env contract verified against cmd/a2a/main.go: A2A_ADDR,
+            # A2A_AGENT_URL, MIGRATIONS_PATH, LOG_LEVEL, DATABASE_URL and
+            # (migration step only) MIGRATIONS_DATABASE_URL. cmd/a2a has no auth
+            # env, starts no outbox relay, starts no consumer and never dials
+            # Kafka (so no KAFKA_BROKERS / EVENT_PUBLISHER): both skills are
+            # read-only. A2A_AGENT_URL and DATABASE_URL are mandatory at boot.
+            - name: A2A_ADDR
+              value: {{ .Values.a2a.httpAddr | quote }}
+            # The Agent Card advertises this URL. Default: this release's
+            # in-cluster Service DNS (what the fleet's agent clients dial);
+            # a2a.agentUrl overrides it (e.g. the Kong path for off-cluster use).
+            - name: A2A_AGENT_URL
+              value: {{ .Values.a2a.agentUrl | default (printf "http://%s.%s.svc.cluster.local:%v/" (include "network-inventory-planning.a2aFullname" .) .Release.Namespace .Values.a2a.service.port) | quote }}
+            - name: MIGRATIONS_PATH
+              value: {{ .Values.a2a.migrationsPath | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.a2a.logLevel | quote }}
+            {{- if or .Values.database.url .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.databaseSecretName" . }}
+                  key: {{ .Values.database.existingSecretKey }}
+            {{- if .Values.database.migrationsExistingSecretKey }}
+            # See values.yaml's database.migrationsExistingSecretKey comment.
+            # cmd/a2a runs the idempotent migrations on start (like the api),
+            # so it needs the same direct-connection split.
+            - name: MIGRATIONS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "network-inventory-planning.databaseSecretName" . }}
+                  key: {{ .Values.database.migrationsExistingSecretKey }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+            {{- range .Values.a2a.extraEnv }}
+            - {{ toYaml . | nindent 14 | trim }}
+            {{- end }}
+          # GET /healthz is served by cmd/a2a, so the probes have a cheap target.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.a2a.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

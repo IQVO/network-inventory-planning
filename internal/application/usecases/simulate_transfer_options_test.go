@@ -149,3 +149,40 @@ func TestSimulateTransferOptionsReportsCapacityHeadroom(t *testing.T) {
 		t.Fatalf("WH1 headroom = %d, want 430 (500-70)", wh1.CapacityHeadroom)
 	}
 }
+
+func TestSimulateTransferOptionsPlansOverSurvivingSitesOnly(t *testing.T) {
+	facts := completeFacts()
+	facts.Capabilities[1].AsOf = simTime().Add(-2 * time.Hour) // WH2 is stale
+	uc := SimulateTransferOptions{Snapshot: fakeSnapshotRepo{facts: facts}, MaxStaleness: time.Hour, Now: simTime}
+	result, err := uc.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("one stale site must not refuse the simulation: %v", err)
+	}
+	if len(result.Sites) != 1 || result.Sites[0].Site != "WH1" {
+		t.Fatalf("Sites = %+v, want only WH1", result.Sites)
+	}
+}
+
+func TestSimulateTransferOptionsKeepsSiteDisabledForOneDirection(t *testing.T) {
+	facts := completeFacts()
+	facts.Capabilities[1] = simCapability("WH2", false, true)
+	uc := SimulateTransferOptions{Snapshot: fakeSnapshotRepo{facts: facts}, MaxStaleness: time.Hour, Now: simTime}
+	result, err := uc.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("a direction-disabled site must not refuse the simulation: %v", err)
+	}
+	if len(result.Sites) != 2 || result.Sites[1].OriginEnabled || !result.Sites[1].DestinationEnabled {
+		t.Fatalf("Sites = %+v, want WH2 listed as destination-only", result.Sites)
+	}
+}
+
+func TestSimulateTransferOptionsRefusesWhenEverySiteIsStale(t *testing.T) {
+	facts := completeFacts()
+	facts.Capabilities[0].AsOf = simTime().Add(-2 * time.Hour)
+	facts.Plans[1].PublishedAt = simTime().Add(-2 * time.Hour)
+	uc := SimulateTransferOptions{Snapshot: fakeSnapshotRepo{facts: facts}, MaxStaleness: time.Hour, Now: simTime}
+	_, err := uc.Execute(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "stale site capability") {
+		t.Fatalf("err = %v, want a refusal naming the stale fact", err)
+	}
+}

@@ -42,12 +42,12 @@ func (r *TransferRepo) Create(ctx context.Context, t *transfer.InterWarehouseTra
 		INSERT INTO inter_warehouse_transfer
 			(transfer_id, idempotency_key, origin_site_id, destination_site_id, sku, quantity,
 			 policy_version, operator_reason, proposal_as_of, expires_at, state,
-			 created_at, updated_at, version)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			 created_at, updated_at, version, case_multiple, requested_qty_eaches)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (idempotency_key) DO NOTHING
 	`, string(t.ID()), idempotencyKey, t.OriginSiteID(), t.DestinationSiteID(), t.SKU(), t.Quantity(),
 		t.PolicyVersion(), t.OperatorReason(), t.ProposalAsOf(), t.ExpiresAt(), string(t.State()),
-		t.CreatedAt(), t.UpdatedAt(), len(t.Audit()))
+		t.CreatedAt(), t.UpdatedAt(), len(t.Audit()), caseMultipleArg(t), requestedQtyArg(t))
 	if err != nil {
 		return nil, fmt.Errorf("create transfer: %w", err)
 	}
@@ -100,7 +100,7 @@ const transferColumns = `transfer_id, idempotency_key, origin_site_id, destinati
 		       policy_version, operator_reason, proposal_as_of, expires_at, state,
 		       reservation_id, allocations, allocation_expires_at, rejection_reason,
 		       picked_quantity, stow_allocations,
-		       created_at, updated_at, version`
+		       created_at, updated_at, version, case_multiple, requested_qty_eaches`
 
 // rowScanner is the Scan half of pgx.Row / pgx.Rows.
 type rowScanner interface {
@@ -120,15 +120,20 @@ func scanTransfer(row rowScanner) (transfer.Snapshot, error) {
 		reservation       *string
 		allocationExpires *time.Time
 		pickedQty         *int
+		caseMultiple      *int
+		requestedQty      *int
 	)
 	if err := row.Scan(
 		&snap.ID, &snap.IdempotencyKey, &snap.OriginSiteID, &snap.DestinationSiteID, &snap.SKU, &snap.Quantity,
 		&snap.PolicyVersion, &snap.OperatorReason, &snap.ProposalAsOf, &snap.ExpiresAt, &state,
 		&reservation, &allocationsRaw, &allocationExpires, &rejection,
 		&pickedQty, &stowRaw,
-		&snap.CreatedAt, &snap.UpdatedAt, &snap.Version,
+		&snap.CreatedAt, &snap.UpdatedAt, &snap.Version, &caseMultiple, &requestedQty,
 	); err != nil {
 		return transfer.Snapshot{}, err
+	}
+	if caseMultiple != nil && requestedQty != nil {
+		snap.CaseRounding = transfer.RestoreCaseRounding(*caseMultiple, *requestedQty, snap.Quantity)
 	}
 	snap.State = transfer.TransferState(state)
 	if reservation != nil {
@@ -297,4 +302,22 @@ func (r *TransferRepo) ListNonTerminal(ctx context.Context, limit int) ([]transf
 		return nil, fmt.Errorf("list non-terminal transfers: %w", err)
 	}
 	return views, nil
+}
+
+// caseMultipleArg is the case_multiple column value: NULL unless a case
+// rounding applied (ADR 0017).
+func caseMultipleArg(t *transfer.InterWarehouseTransfer) any {
+	if r := t.CaseRounding(); r != nil {
+		return r.CaseMultiple
+	}
+	return nil
+}
+
+// requestedQtyArg is the requested_qty_eaches column value: NULL unless a
+// case rounding applied.
+func requestedQtyArg(t *transfer.InterWarehouseTransfer) any {
+	if r := t.CaseRounding(); r != nil {
+		return r.RequestedEaches
+	}
+	return nil
 }

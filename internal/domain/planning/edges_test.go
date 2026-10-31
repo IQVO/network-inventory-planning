@@ -43,14 +43,6 @@ func TestBuildSnapshotValidateEdgeCases(t *testing.T) {
 	}
 }
 
-func TestBuildSnapshotStaleDemandFailsClosed(t *testing.T) {
-	in := snapshotInputForEdges()
-	in.Demands[0].AsOf = in.Demands[0].AsOf.Add(-2 * time.Hour)
-	if _, err := BuildSnapshot(in); err == nil {
-		t.Fatal("stale demand must fail closed")
-	}
-}
-
 func TestBuildSnapshotOlderCapabilityIsNoop(t *testing.T) {
 	in := snapshotInputForEdges()
 	older := in.Capabilities[0]

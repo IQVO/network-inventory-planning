@@ -349,3 +349,24 @@ type failingPublisher struct{}
 func (failingPublisher) Publish(context.Context, ...transfer.DomainEvent) error {
 	return fmt.Errorf("injected publish failure")
 }
+
+func TestRunScheduledRebalanceOneStaleSiteStillCompletesTheRun(t *testing.T) {
+	// A stale WH2 excludes only WH2: the pass plans over WH1 and COMPLETES.
+	runs := &fakeRebalanceRuns{}
+	facts := rebalanceFacts()
+	facts.Capabilities[1].AsOf = stuckNow.Add(-time.Hour)
+	uc := RunScheduledRebalance{
+		Snapshot:     fakeApproveSnapshot{facts: facts},
+		Planner:      transfer.Planner{},
+		Runs:         runs,
+		Events:       &fakeEventPublisher{},
+		MaxStaleness: 10 * time.Minute,
+		Now:          func() time.Time { return stuckNow },
+	}
+	if _, err := uc.Execute(context.Background()); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := runs.runs[0].Outcome; got != transfer.RebalanceCompleted {
+		t.Fatalf("outcome = %s, want COMPLETED (a stale site must not fail the whole pass)", got)
+	}
+}

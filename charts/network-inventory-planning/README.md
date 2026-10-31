@@ -24,6 +24,7 @@ helm install network-inventory-planning ./charts/network-inventory-planning \
   --set kafka.capacityPlanConsumerGroup=nip-capacity-plan \
   --set kafka.transferReplyConsumerGroup=nip-transfer-reply \
   --set kafka.transferFactConsumerGroup=nip-transfer-fact \
+  --set kafka.packLevelConsumerGroup=nip-pack-level \
   --set config.transferPickPathId=pick-path \
   --set config.transferDispatchPathId=dispatch-path
 ```
@@ -63,6 +64,7 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `kafka.capacityPlanConsumerGroup` | `""` | `CAPACITY_PLAN_CONSUMER_GROUP` — empty = consumer off |
 | `kafka.transferReplyConsumerGroup` | `""` | `TRANSFER_REPLY_CONSUMER_GROUP` — empty = consumer off |
 | `kafka.transferFactConsumerGroup` | `""` | `TRANSFER_FACT_CONSUMER_GROUP` — empty = consumer off |
+| `kafka.packLevelConsumerGroup` | `""` | `PACK_LEVEL_CONSUMER_GROUP` — **mandatory when `kafka.enabled`** (render fails without it; ADR 0017) |
 | `extraEnv` | `[]` | Extra container env (rendered verbatim) |
 | `mcp.enabled` | `false` | Renders the read-only MCP server (`cmd/mcp`): its own Deployment + Service, `component=mcp`, command `/app/mcp` |
 | `mcp.httpAddr` | `:8090` | `MCP_ADDR` (Streamable HTTP at `/` and `/mcp`, `GET /healthz`) |
@@ -70,6 +72,13 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `mcp.migrationsPath` | `migrations` | `MIGRATIONS_PATH` inside the image |
 | `mcp.logLevel` | `info` | `LOG_LEVEL` |
 | `mcp.resources` / `mcp.replicaCount` / `mcp.extraEnv` | 100m/128Mi req, 500m/256Mi lim / `1` / `[]` | MCP container sizing and extra env |
+| `a2a.enabled` | `false` | Renders the read-only A2A agent (`cmd/a2a`): its own Deployment + Service, `component=a2a`, command `/app/a2a` |
+| `a2a.httpAddr` | `:8093` | `A2A_ADDR` (JSON-RPC at `/` and `/a2a`, Agent Card at `/.well-known/agent-card.json`, `GET /healthz`) |
+| `a2a.agentUrl` | `""` | `A2A_AGENT_URL` advertised on the card; empty = `http://<release>-a2a.<ns>.svc.cluster.local:8093/` |
+| `a2a.service.type` / `a2a.service.port` | `ClusterIP` / `8093` | A2A Service (targetPort 8093) |
+| `a2a.route.enabled` / `a2a.route.path` | `false` / `/api/a2a/network-inventory-planning` | Kong HTTPRoute, prefix rewritten to `/` |
+| `a2a.migrationsPath` / `a2a.logLevel` | `migrations` / `info` | `MIGRATIONS_PATH` / `LOG_LEVEL` |
+| `a2a.resources` / `a2a.replicaCount` / `a2a.extraEnv` | 100m/128Mi req, 500m/256Mi lim / `1` / `[]` | A2A container sizing and extra env |
 | `frontend.enabled` | `false` | Renders the console-remote nginx pod (`nip_mfe`, ADR 0010): its own Deployment + ClusterIP Service, `component=frontend`. No Ingress/HTTPRoute |
 | `frontend.image.repository` / `frontend.image.tag` | `warehouse/network-inventory-planning-frontend` / chart appVersion | Image built from `web/Dockerfile` (side-loaded in kind, never pulled) |
 | `frontend.service.port` / `frontend.service.targetPort` | `80` / `8080` | Frontend Service (nginx-unprivileged listens on 8080) |
@@ -87,6 +96,14 @@ dials Kafka. Tools (all read-only): `get_transfer`, `list_transfers`,
 `find_stuck_transfers`, `simulate_transfer_options`. There is no auth: the
 ClusterIP boundary is the access control (fleet decision, 2026-09-11). See
 `docs/docs/adr/0008-transfer-read-side-and-read-only-mcp.md`.
+
+### A2A agent (opt-in, read-only)
+
+`a2a.enabled=true` adds a Deployment + Service pinned to `component=a2a`, like the MCP server. It reuses the api's
+database Secret and takes no Kafka env (it dials no Kafka, runs no relay and no consumer). Skills (both read-only):
+`transfer_status` and `find_stuck_transfers`. `A2A_AGENT_URL` is mandatory at boot and defaults to the in-cluster
+Service DNS. No auth: the ClusterIP boundary is the access control. See
+`docs/docs/adr/0020-a2a-inbound-adapter.md`.
 
 ### Console remote (opt-in, static)
 

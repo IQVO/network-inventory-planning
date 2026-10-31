@@ -24,6 +24,7 @@ Everything below is read from `cmd/*/main.go`, the Dockerfile and
 | Inbound adapters | `internal/adapters/inbound/http` | REST handler (`Handler.Routes`) and the reports handler (`ReportsServer.Routes`). |
 | Inbound adapters | `internal/adapters/inbound/kafka` | Seven consumers: three read-model consumers, the inventory reply consumer, the fulfillment fact consumer and the analytics projector consumer. |
 | Inbound adapters | `internal/adapters/inbound/mcp` | The read-only MCP server (four tools). |
+| Inbound adapters | `internal/adapters/inbound/a2a` | The read-only A2A agent (two skills, ADR 0020). |
 | Outbound adapters | `internal/adapters/outbound/postgres` | pgx repositories, the unit of work, the transactional outbox writer and relay, golang-migrate runner and the OLTP migrations. |
 | Outbound adapters | `internal/adapters/outbound/kafka` | The CloudEvents encoders (integration and analytics) and the relay sink. |
 | Outbound adapters | `internal/adapters/outbound/analyticsstore` | The analytical database projection (writer) and report reader. |
@@ -40,14 +41,15 @@ Everything below is read from `cmd/*/main.go`, the Dockerfile and
 | --- | --- | --- | --- | --- |
 | `network-inventory-planning` | REST API, the five OLTP Kafka consumers, the outbox relay, the saga-health ticker and the scheduled-rebalance ticker | `HTTP_ADDR`, default `:8080` | `api` (Service port 80 → 8080), image entrypoint | OLTP Postgres, Kafka, OTel Collector |
 | `mcp` | Read-only MCP server, Streamable HTTP only, served at `/` and `/mcp` plus `GET /healthz` | `MCP_ADDR`, default `:8090` | `mcp` (Service port 8090), disabled by default | OLTP Postgres (read; it also applies migrations) |
+| `a2a` | Read-only A2A agent (JSON-RPC over HTTP), Agent Card at `/.well-known/agent-card.json`, served at `/` and `/a2a` plus `GET /healthz` | `A2A_ADDR`, default `:8093` | `a2a` (Service port 8093), disabled by default | OLTP Postgres (read; it also applies migrations) |
 | `nip-projector` | The only writer of the analytical database: consumes `warehouse.network-inventory-planning.analytics` and projects it | admin `ADMIN_ADDR`, default `:8091` (`/healthz`, `/readyz`) | `analytics-projector`, disabled by default | Kafka, analytical Postgres |
 | `nip-reports` | Read-only reports over the analytical database (`GET /reports/...`) | `HTTP_ADDR`, default `:8092` | `analytics-reports` (Service port 80 → 8092), disabled by default | analytical Postgres (read-only pool) |
 
-The image (`Dockerfile`) builds all four into `/app`, copies the OLTP
+The image (`Dockerfile`) builds all five into `/app`, copies the OLTP
 migrations to `/app/migrations` (and sets `MIGRATIONS_PATH=migrations`) and the
 analytical migrations to `/app/analytics/migrations`; it exposes
-`8080 8090 8091 8092` and its entrypoint is `./network-inventory-planning`. The
-chart's other Deployments override the command with `/app/mcp`,
+`8080 8090 8091 8092 8093` and its entrypoint is `./network-inventory-planning`. The
+chart's other Deployments override the command with `/app/mcp`, `/app/a2a`,
 `/app/nip-projector` and `/app/nip-reports`.
 
 The console remote is a separate image (`warehouse/network-inventory-planning-frontend`,

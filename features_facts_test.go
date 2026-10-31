@@ -110,6 +110,29 @@ func (w *world) siteHasNoCapacityPlan(site string) error {
 	return nil
 }
 
+// siteFactsAged stamps every fact of one site as last updated `minutes`
+// ago, leaving the other sites' facts as declared (per-site staleness).
+func (w *world) siteFactsAged(site string, minutes int) error {
+	asOf := w.clock.Now().Add(-time.Duration(minutes) * time.Minute)
+	for i := range w.declared.Capabilities {
+		if w.declared.Capabilities[i].Site == site {
+			w.declared.Capabilities[i].AsOf = asOf
+		}
+	}
+	for i := range w.declared.Plans {
+		if w.declared.Plans[i].SiteID == site {
+			w.declared.Plans[i].PublishedAt = asOf
+		}
+	}
+	for i := range w.declared.Demands {
+		if w.declared.Demands[i].Site == site {
+			w.declared.Demands[i].AsOf = asOf
+		}
+	}
+	w.facts.Set(w.declared)
+	return nil
+}
+
 func (w *world) noPlanningFacts() error {
 	w.declared = declaredFacts{}
 	w.facts.Set(w.declared)
@@ -243,6 +266,7 @@ func (w *world) registerFactSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^site "([^"]*)" also has (\d+) units of removed demand for SKU "([^"]*)"$`, w.siteHasRemovedDemand)
 	sc.Step(`^site "([^"]*)" cannot (send|receive) transfers$`, w.siteCannot)
 	sc.Step(`^site "([^"]*)" has no published capacity plan$`, w.siteHasNoCapacityPlan)
+	sc.Step(`^the facts of site "([^"]*)" were last updated (\d+) minutes ago$`, w.siteFactsAged)
 	sc.Step(`^no planning facts are declared$`, w.noPlanningFacts)
 	sc.Step(`^the planning facts are refreshed$`, w.planningFactsRefreshed)
 

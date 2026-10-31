@@ -18,10 +18,15 @@ import (
 // GET /v1/transfers/{id}. Optional facts (reservation, picked quantity,
 // rejection) are omitted until the saga has produced them.
 type transferDTO struct {
-	ID                string    `json:"id"`
-	State             string    `json:"state"`
-	SKU               string    `json:"sku"`
-	Quantity          int       `json:"quantity"`
+	ID       string `json:"id"`
+	State    string `json:"state"`
+	SKU      string `json:"sku"`
+	Quantity int    `json:"quantity"`
+	// CaseRounding is set only for a SKU that had an active CASE level at
+	// approval (ADR 0017); its fields (caseMultiple, cases,
+	// requestedQtyEaches, roundedQtyEaches, remainderEaches) are flattened
+	// into the object. Absent otherwise, so a plain transfer is unchanged.
+	*transfer.CaseRounding
 	PickedQuantity    int       `json:"pickedQuantity,omitempty"`
 	OriginSiteID      string    `json:"originSiteId"`
 	DestinationSiteID string    `json:"destinationSiteId"`
@@ -65,6 +70,7 @@ func toTransferDTO(t *transfer.InterWarehouseTransfer) transferDTO {
 		State:             string(t.State()),
 		SKU:               t.SKU(),
 		Quantity:          t.Quantity(),
+		CaseRounding:      t.CaseRounding(),
 		PickedQuantity:    t.PickedQuantity(),
 		OriginSiteID:      t.OriginSiteID(),
 		DestinationSiteID: t.DestinationSiteID(),

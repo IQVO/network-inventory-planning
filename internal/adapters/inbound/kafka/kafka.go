@@ -50,8 +50,15 @@ func readerConfig(brokers []string, topic, groupID string) kafkago.ReaderConfig 
 		Brokers: brokers,
 		Topic:   topic,
 		GroupID: groupID,
+		MaxWait: readerMaxWait,
 	}
 }
+
+// readerMaxWait is the fetch long-poll every reader of this service uses.
+// kafka-go's default (10 s) makes Reader.Close wait for the in-flight fetch
+// on a quiet topic, so each added consumer would add up to 10 s to the
+// graceful stop; 500 ms keeps shutdown inside its budget.
+const readerMaxWait = 500 * time.Millisecond
 
 // RetryPolicy is the capped exponential backoff the run loop applies while
 // the SAME message keeps failing with a transient error.

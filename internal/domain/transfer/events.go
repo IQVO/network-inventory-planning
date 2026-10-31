@@ -20,10 +20,15 @@ type PlanApproved struct {
 	DestinationSiteID string
 	SKU               string
 	Quantity          int
-	PolicyVersion     string
-	OperatorReason    string
-	ProposalAsOf      time.Time
-	OccurredAt        time.Time
+	// CaseRounding is set only for a SKU with an active CASE level (ADR
+	// 0017): Quantity is then the rounded whole-case quantity and the report
+	// carries the requested total and the remainder. Nil leaves the event's
+	// wire payload exactly as before.
+	CaseRounding   *CaseRounding
+	PolicyVersion  string
+	OperatorReason string
+	ProposalAsOf   time.Time
+	OccurredAt     time.Time
 }
 
 // EventName implements DomainEvent.
@@ -35,6 +40,8 @@ func (PlanApproved) EventName() string { return "TransferPlanApproved" }
 // TransferStockAllocationRejected on warehouse.inventory.events. The wire
 // payload is exactly inventory-storage's consumed contract: {transfer_id,
 // transfer_line_id, origin_site_id, sku, quantity}, key transfer_line_id.
+// It carries NO case fields: inventory-storage's command has none (ADR
+// 0017); for a case SKU the quantity is simply the rounded eaches.
 type AllocationRequested struct {
 	TransferID     TransferID
 	TransferLineID string

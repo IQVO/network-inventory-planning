@@ -14,7 +14,7 @@ the `Status:` line of each ADR body.
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](./0001-network-inventory-planning-boundary.md) | Network Inventory Planning Boundary | Accepted |
-| [0002](./0002-phase1-read-models-and-simulation.md) | Phase-1 local read models, fail-closed planning snapshot and advisory simulation | Accepted |
+| [0002](./0002-phase1-read-models-and-simulation.md) | Phase-1 local read models, fail-closed planning snapshot and advisory simulation | Accepted (snapshot staleness and direction rules amended by 0018) |
 | [0003](./0003-transfer-saga.md) | Phase-2 inter-warehouse transfer saga (approval, outbox, allocation replies) | Accepted (per-key ordering amended by 0016) |
 | [0004](./0004-cloudevents-type-catalogue.md) | CloudEvents type catalogue for network-inventory-planning | Accepted |
 | [0005](./0005-work-demand-release-and-fact-transitions.md) | Work-demand release and fact-driven saga transitions | Accepted |
@@ -29,6 +29,10 @@ the `Status:` line of each ADR body.
 | [0014](./0014-site-sku-demand-ordering-guard.md) | Ordering guard on the site_sku_demand read model | Accepted |
 | [0015](./0015-rebalance-policy-and-lane-catalogue.md) | Rebalance Policy and Transfer Lane catalogues | Accepted |
 | [0016](./0016-outbox-relay-attempt-cap.md) | Outbox relay attempt cap: `OUTBOX_MAX_ATTEMPTS` (default 20) excludes a poison row and logs it at ERROR | Accepted |
+| [0017](./0017-case-multiple-transfers.md) | Case-multiple transfers: round to whole cases (nearest, tie up, at least one, capped by the origin), report the signed remainder, local pack-level copy | Accepted |
+| [0018](./0018-per-site-staleness.md) | A stale fact excludes its site from the planning snapshot (never the whole snapshot); approval is refused only when its origin or destination is excluded; direction-disabled sites still participate | Accepted |
+| [0019](./0019-a-dead-consumer-takes-the-process-down.md) | A consumer that stops on its own (not by shutdown) ends the process so the kubelet restarts it, instead of leaving a frozen read model behind a Ready pod | Accepted |
+| [0020](./0020-a2a-inbound-adapter.md) | A2A inbound adapter: a read-only Agent2Agent agent (`transfer_status`, `find_stuck_transfers`) over the same read use cases as REST and MCP, served by `cmd/a2a` on `:8093` | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -50,3 +54,7 @@ the `Status:` line of each ADR body.
 | 0014 | `SiteSkuDemandRepo.Upsert` (`WHERE EXCLUDED.as_of >= site_sku_demand.as_of`), the demand consumer's stale-event INFO line |
 | 0015 | `transfer.RebalancePolicy` / `transfer.TransferLane` (`catalogue.go`), `Planner.PlanFromSnapshot` (`scheduled_planner.go`), `usecases.PutRebalancePolicy` / `PutTransferLane`, `RunScheduledRebalance.loadCatalogue`, `postgres.RebalancePolicyRepo` / `TransferLaneRepo` (migration `0005_rebalance_catalogue`), `PUT/GET /v1/rebalance-policies` and `/v1/transfer-lanes` |
 | 0016 | `postgres.WithMaxAttempts` / `WithRelayLogger` / `DefaultOutboxMaxAttempts` (`outbox.go`), `outboxMaxAttemptsFromEnv` (`cmd/network-inventory-planning/main.go`), `OUTBOX_MAX_ATTEMPTS`, chart `config.outboxMaxAttempts`, `internal/architecture/outbox_relay_cap_fitness_test.go` |
+| 0017 | `transfer.RoundToCases` / `CaseRounding` (`casemultiple.go`), `PACK_LEVEL_CONSUMER_GROUP`, pack-level view (migration 0006), rounding columns (migration 0007) |
+| 0018 | `planning.BuildSnapshot` / `PlanningSnapshot.StaleSites` (`snapshot.go`), `transfer.ValidateApproval` (`approval.go`), `PLANNING_MAX_STALENESS` |
+| 0019 | `startRunners` (`cmd/network-inventory-planning/main.go`) |
+| 0020 | `internal/adapters/inbound/a2a`, `cmd/a2a`, `A2A_AGENT_URL`, chart `a2a` block (`templates/a2a-*.yaml`), `internal/architecture/a2a_fitness_test.go` |

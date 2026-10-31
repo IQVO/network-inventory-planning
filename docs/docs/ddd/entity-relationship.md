@@ -134,9 +134,19 @@ erDiagram
     bigint revision "optimistic-concurrency token"
     timestamptz updated_at
   }
+  pack_levels {
+    text sku PK "no FK"
+    text level PK "EACH INNER CASE PALLET"
+    text gtin
+    bigint units_per_pack "CHECK >= 1"
+    timestamptz effective_from
+    timestamptz effective_to "null while current"
+    bigint version "product-master aggregate version, LWW"
+    timestamptz updated_at
+  }
 ```
 
-Source: `internal/adapters/outbound/postgres/migrations/0001_planning_read_models.up.sql`, `0002_transfer_saga_and_outbox.up.sql`, `0003_work_demand_release.up.sql`, `0004_rebalance_runs.up.sql`, `0005_rebalance_catalogue.up.sql`
+Source: `internal/adapters/outbound/postgres/migrations/0001_planning_read_models.up.sql`, `0002_transfer_saga_and_outbox.up.sql`, `0003_work_demand_release.up.sql`, `0004_rebalance_runs.up.sql`, `0005_rebalance_catalogue.up.sql`, `0006_pack_levels.up.sql` (the local copy of product-master pack levels, its ADR 0017)
 
 Only `transfer_audit` has a foreign key. The read models mirror sibling facts
 and do not reference one another, `processed_events` is a guard keyed by

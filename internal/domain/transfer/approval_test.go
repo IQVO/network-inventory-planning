@@ -187,3 +187,52 @@ func indexOfStr(s, sub string) int {
 	}
 	return -1
 }
+
+// excludeStale removes a site from the snapshot the way BuildSnapshot does
+// for a stale fact, recording the reason.
+func excludeStale(snap *planning.PlanningSnapshot, site, reason string) {
+	delete(snap.Capabilities, site)
+	delete(snap.CapacityBySite, site)
+	delete(snap.DemandBySiteSKU, site+"\x00SKU-1")
+	snap.StaleSites = map[string]string{site: reason}
+}
+
+func TestValidateApprovalNamesTheStaleSiteAndFact(t *testing.T) {
+	const reason = "stale site capability (as of 2026-10-05T10:00:00Z, older than 10m0s)"
+	cases := map[string]struct{ site, role string }{
+		"origin":      {"WH1", "origin"},
+		"destination": {"WH2", "destination"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			snap := approvalSnapshot(t)
+			excludeStale(&snap, tc.site, reason)
+			err := ValidateApproval(approvalInput(), ApprovalFacts{Snapshot: snap, MaxStaleness: 10 * time.Minute})
+			if !errors.Is(err, ErrFactsIncomplete) {
+				t.Fatalf("err = %v, want ErrFactsIncomplete", err)
+			}
+			want := tc.role + " site " + tc.site + " is excluded from the planning snapshot: " + reason
+			if !containsSub(err.Error(), want) {
+				t.Fatalf("err = %q, want it to contain %q", err.Error(), want)
+			}
+		})
+	}
+}
+
+func TestValidateApprovalIgnoresStaleFactsOfOtherSites(t *testing.T) {
+	snap := approvalSnapshot(t)
+	snap.StaleSites = map[string]string{"WH3": "stale published capacity plan plan-3 (as of 2026-10-05T10:00:00Z, older than 10m0s)"}
+	if err := ValidateApproval(approvalInput(), ApprovalFacts{Snapshot: snap, MaxStaleness: 10 * time.Minute}); err != nil {
+		t.Fatalf("a stale third site must not refuse the approval: %v", err)
+	}
+}
+
+func TestValidateApprovalMissingSiteWithoutStaleFactSaysIncomplete(t *testing.T) {
+	snap := approvalSnapshot(t)
+	delete(snap.Capabilities, "WH1")
+	snap.StaleSites = map[string]string{"WH2": "stale site capability"}
+	err := ValidateApproval(approvalInput(), ApprovalFacts{Snapshot: snap, MaxStaleness: 10 * time.Minute})
+	if !errors.Is(err, ErrFactsIncomplete) || !containsSub(err.Error(), "origin site WH1 has no complete facts") {
+		t.Fatalf("err = %v, want the generic incomplete-facts message for WH1", err)
+	}
+}
