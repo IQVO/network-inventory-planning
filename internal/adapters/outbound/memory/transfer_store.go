@@ -160,7 +160,12 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 	}
 	start := min(max(filter.Offset, 0), total)
 	end := min(start+limit, total)
-	items := make([]*transfer.InterWarehouseTransfer, 0, end-start)
+	// Explicit non-negative capacity: make's size argument must provably never
+	// be negative. The clamps above guarantee it, but CodeQL
+	// (go/allocation-size-overflow) cannot see through min/max chains, so the
+	// bound is restated locally.
+	n := max(end-start, 0)
+	items := make([]*transfer.InterWarehouseTransfer, 0, n)
 	for _, snap := range matches[start:end] {
 		items = append(items, transfer.Rehydrate(snap))
 	}
