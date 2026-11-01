@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +235,32 @@ func TestTransferStoreListPaging(t *testing.T) {
 	page, err = s.List(context.Background(), transfer.ListFilter{})
 	if err != nil || len(page.Items) != 3 {
 		t.Fatalf("List(no limit) = (%d items, %v), want all 3 via the default limit", len(page.Items), err)
+	}
+}
+
+func TestTransferStoreListClampsOversizedLimit(t *testing.T) {
+	s := seedListStore(t)
+	// A limit near MaxInt used to overflow start+limit into a negative
+	// slice capacity inside make (CodeQL go/allocation-size-overflow);
+	// it is clamped to transfer.MaxListLimit instead, so the page comes
+	// back intact.
+	page, err := s.List(context.Background(), transfer.ListFilter{Limit: math.MaxInt})
+	if err != nil {
+		t.Fatalf("List(max limit): %v", err)
+	}
+	if len(page.Items) != 3 || page.Total != 3 {
+		t.Fatalf("List(max limit) = %d items, total %d; want 3 items, total 3", len(page.Items), page.Total)
+	}
+	// A huge offset alongside the huge limit stays an empty page instead
+	// of a negative-capacity allocation.
+	page, err = s.List(context.Background(), transfer.ListFilter{Limit: math.MaxInt, Offset: math.MaxInt})
+	if err != nil || len(page.Items) != 0 || page.Total != 3 {
+		t.Fatalf("List(max limit, max offset) = %d items, total %d, err %v; want an empty page, total 3", len(page.Items), page.Total, err)
+	}
+	// A limit above the domain maximum is clamped, never honored verbatim.
+	page, err = s.List(context.Background(), transfer.ListFilter{Limit: transfer.MaxListLimit + 1})
+	if err != nil || len(page.Items) != 3 || page.Total != 3 {
+		t.Fatalf("List(limit %d) = %d items, total %d, err %v; want 3 items, total 3", transfer.MaxListLimit+1, len(page.Items), page.Total, err)
 	}
 }
 

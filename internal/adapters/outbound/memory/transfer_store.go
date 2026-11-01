@@ -152,6 +152,12 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 	if limit <= 0 {
 		limit = transfer.DefaultListLimit
 	}
+	// Clamp the caller-supplied limit to the domain's MaxListLimit: an
+	// unbounded limit makes start+limit below overflow int and feed a
+	// negative capacity to make (CodeQL go/allocation-size-overflow).
+	if limit > transfer.MaxListLimit {
+		limit = transfer.MaxListLimit
+	}
 	start := min(max(filter.Offset, 0), total)
 	end := min(start+limit, total)
 	items := make([]*transfer.InterWarehouseTransfer, 0, end-start)
