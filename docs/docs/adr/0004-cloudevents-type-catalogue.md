@@ -20,7 +20,7 @@ through the transactional outbox). Three on the integration topic
 
 | Type | Dataschema | Subject / Kafka key | Raised when |
 | --- | --- | --- | --- |
-| `com.warehouse.wes.network-inventory-planning.transfer.TransferPlanApproved` | `urn:warehouse:network-inventory-planning:events:TransferPlanApproved:v1` | `transfer_id` | An operator approved an advisory proposal into a transfer plan (POST /v1/transfers:approve; the APPROVED transition). |
+| `com.warehouse.wes.network-inventory-planning.transfer.TransferPlanApproved` | `urn:warehouse:network-inventory-planning:events:TransferPlanApproved:v1` | `transfer_id` | An operator approved an advisory proposal into a transfer plan (POST /v1/transfer-approvals; the APPROVED transition). |
 | `com.warehouse.wes.network-inventory-planning.transfer.TransferAllocationRequested` | `urn:warehouse:network-inventory-planning:events:TransferAllocationRequested:v1` | `transfer_line_id` (`<transfer_id>:1` in v1) | The saga's command to inventory-storage to allocate origin stock (the ALLOCATING transition, same outbox transaction). |
 | `com.warehouse.wes.network-inventory-planning.workdemand.WorkDemandReleased` | `urn:warehouse:network-inventory-planning:events:WorkDemandReleased:v1` | `demand_id` (`<transfer_id>:pick` / `:dispatch`) | The saga's command to WES to work one transfer leg (ADR 0005): the pick leg with the ALLOCATED transition, the dispatch leg with the PICKED transition — each in the same outbox transaction. Note the `workdemand` entity segment: WES's consumed contract names it, not `transfer`. |
 

@@ -96,7 +96,7 @@ approval is persisted in `ALLOCATING`. `RECEIVED`, `UNFULFILLABLE` and
 
 | Command | Entry point | Methods |
 | --- | --- | --- |
-| Approve a proposal | `POST /v1/transfers:approve` | `ProposeTransfer`, `Approve`, `RequestAllocation` |
+| Approve a proposal | `POST /v1/transfer-approvals` | `ProposeTransfer`, `Approve`, `RequestAllocation` |
 | Apply allocation | Kafka `TransferStockAllocated` | `MarkAllocated` |
 | Apply rejection | Kafka `TransferStockAllocationRejected` | `MarkUnfulfillable` |
 | Apply pick | Kafka `TransferPicked` | `MarkPicked` |

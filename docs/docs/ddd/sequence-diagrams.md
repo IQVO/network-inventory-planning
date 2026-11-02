@@ -76,7 +76,7 @@ sequenceDiagram
   participant U as UnitOfWork
   participant T as TransferRepo
   participant O as OutboxWriter
-  Op->>H: POST /v1/transfers:approve with Idempotency-Key
+  Op->>H: POST /v1/transfer-approvals with Idempotency-Key
   H->>A: Execute(input)
   A->>A: check clock, staleness, work-release config, key, as-of
   Note over A: no pick path id or offset is 503 config-incomplete, nothing persisted
@@ -86,7 +86,7 @@ sequenceDiagram
   U->>T: ProposeTransfer, Approve, RequestAllocation in memory
   U->>T: Create(transfer, idempotency key)
   T-->>U: existing transfer or none
-  Note over U: same key and body replays the original, a different body is 409 idempotency-conflict
+  Note over U: same key and body replays the original, a different body is 409 idempotency-key-reused
   U->>O: Publish TransferStateAdvanced x4, TransferPlanApproved, TransferAllocationRequested
   U-->>A: commit
   A-->>H: transfer in ALLOCATING

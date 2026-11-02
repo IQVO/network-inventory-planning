@@ -45,7 +45,7 @@ curl -i http://localhost:8080/healthz          # 204 No Content
 ```
 
 ```bash
-curl -s -X POST http://localhost:8080/v1/transfer-proposals:generate \
+curl -s -X POST http://localhost:8080/v1/transfer-proposal-runs \
   -H 'content-type: application/json' \
   --data '{
     "asOf":"2026-10-05T15:00:00Z",
@@ -143,7 +143,7 @@ partitions. They have no defaults for exactly this reason.
 :::
 
 ```bash
-curl -s -X POST http://localhost:8080/v1/transfers:approve \
+curl -s -X POST http://localhost:8080/v1/transfer-approvals \
   -H 'content-type: application/json' \
   -H 'Idempotency-Key: quickstart-1' \
   --data "{\"originSiteId\":\"WH1\",\"destinationSiteId\":\"WH2\",\"sku\":\"SKU-1\",\"quantity\":20,
@@ -152,10 +152,9 @@ curl -s -X POST http://localhost:8080/v1/transfers:approve \
 ```
 
 The response carries `transferId` (`trf-<uuid>`), `state: ALLOCATING`,
-`transferLineId` (`<transferId>:1`), `expiresAt` (24 h after approval) and
-`replayed: false`. Sending the same body with the same key again answers
-`replayed: true`; a different body under the same key is a 409
-`idempotency-conflict`.
+`transferLineId` (`<transferId>:1`), `expiresAt` (24 h after approval). Sending the same body with the same key again answers
+the stored response with the header `Idempotency-Replayed: true`; a different body under the same key is a 409
+`idempotency-key-reused`.
 
 Read it back:
 

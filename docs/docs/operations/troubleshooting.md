@@ -18,12 +18,12 @@ description: Symptom, cause, check and fix for the failure modes visible in the 
 | `GET /v1/transfer-simulations` → 503 `read-models-unavailable` | The API runs without `DATABASE_URL`. | Startup log `DATABASE_URL unset`. | Configure the database. |
 | `GET /v1/transfer-simulations` → 503 `read-models-incomplete` | `BuildSnapshot` refused: an empty table, a fact older than `PLANNING_MAX_STALENESS`, no site with all three facts, or a participating site disabled for a direction. | The problem `detail` names the reason (for example `stale site capability for WH1`). `SELECT site_id, as_of FROM site_capability;` and the same for `site_sku_demand` / `published_capacity_plan`. | Check the three consumers run (their group ids are set) and the upstream contexts publish; a disabled site must be re-enabled upstream (any disabled participating site refuses the whole snapshot). |
 | Read models never change | The consumer's group variable is empty, `KAFKA_BROKERS` is unset, or the consumer is blocked on one message. | Boot log `consumer disabled name=...`; ERROR lines `... handling failed; retrying the same message` with `partition`/`offset`; consumer lag. | Set the group id; fix the transient cause (usually the database). Deterministic problems are skipped at WARN, so a blocked partition always has an ERROR line. |
-| `POST /v1/transfers:approve` → 503 `saga-unavailable` | No `DATABASE_URL`, or no `KAFKA_BROKERS` (no outbox writer). | Boot WARN `KAFKA_BROKERS not configured`. | Configure both. |
+| `POST /v1/transfer-approvals` → 503 `saga-unavailable` | No `DATABASE_URL`, or no `KAFKA_BROKERS` (no outbox writer). | Boot WARN `KAFKA_BROKERS not configured`. | Configure both. |
 | Approval → 503 `config-incomplete` | `TRANSFER_PICK_PATH_ID` unset or the pick CPT offset not positive (ADR 0005). | Boot WARN `work release not configured`. | Set `config.transferPickPathId`. |
 | Approval → 422 `facts-incomplete` | The current snapshot refuses (stale or missing facts), a site is missing or not enabled for its direction, the destination shows no in-window demand for the SKU, or the origin capacity cannot cover its own demand plus the quantity. | `detail` names the rule. | Refresh the facts or pick another pair; the approval re-validates against current facts by design. |
 | Approval → 422 `invalid-approval` | A missing field, non-positive quantity, origin = destination, missing `proposalAsOf` or empty policy version. | `detail`. | Fix the request. |
 | Approval → 422 `proposal-expired` | The 24h expiry computed at approval is not after "now" (clock problem). | Server clock. | — |
-| Approval → 409 `idempotency-conflict` | The `Idempotency-Key` was used before with a different origin, destination, SKU, quantity, policy version or `proposalAsOf`. | `SELECT transfer_id, idempotency_key FROM inter_warehouse_transfer WHERE idempotency_key = '<key>';` | Send a fresh key per logical approval. A replay with the same body (the operator reason is not compared) answers 200 `replayed: true`. |
+| Approval → 409 `idempotency-key-reused` | The `Idempotency-Key` was used before with a different origin, destination, SKU, quantity, policy version, `proposalAsOf` or operator reason (the fingerprint is method + path + SHA-256 of the whole body). | `SELECT transfer_id, idempotency_key FROM inter_warehouse_transfer WHERE idempotency_key = '<key>';` | Send a fresh key per logical approval. A replay with the byte-identical body answers the stored 200 with the header `Idempotency-Replayed: true`. |
 | Approval → 400 `idempotency-key-required` | Header missing. | — | Send `Idempotency-Key`. |
 | Approval → 503 `approval-unavailable` | Any other failure: reading the read models or writing the transaction. | API logs, Postgres health. | Retry with the same key once the database is healthy. |
 | Transfer stays `ALLOCATING` | inventory-storage never replied, the relay is off, or `TRANSFER_REPLY_CONSUMER_GROUP` is empty. | `outbox_events` row for `TransferAllocationRequested` has `published_at`? Reply consumer running? `find_stuck_transfers` with `state=ALLOCATING`. | Enable the relay / consumer; check inventory-storage's allocation consumer. The health check flags it after 1h. |
@@ -57,27 +57,32 @@ Every REST error is `application/problem+json` with
 
 | Slug | Status | Route(s) |
 | --- | --- | --- |
-| `invalid-request` | 400 | `POST /v1/transfer-proposals:generate`, `POST /v1/transfers:approve`, catalogue PUTs (malformed JSON or unknown field) |
+| `invalid-request` | 400 | `POST /v1/transfer-proposal-runs`, `POST /v1/transfer-approvals`, catalogue PUTs (malformed JSON or unknown field) |
 | `invalid-planning-snapshot` | 422 | generate (missing `asOf`, mixed position snapshot) |
 | `read-models-unavailable` | 503 | `GET /v1/transfer-simulations` |
 | `read-models-incomplete` | 503 | `GET /v1/transfer-simulations` |
 | `saga-unavailable` | 503 | approve |
 | `idempotency-key-required` | 400 | approve |
-| `idempotency-conflict` | 409 | approve |
+| `idempotency-key-reused` | 409 | approve |
 | `config-incomplete` | 503 | approve |
 | `invalid-approval` | 422 | approve |
 | `facts-incomplete` | 422 | approve |
 | `proposal-expired` | 422 | approve |
 | `approval-unavailable` | 503 | approve |
 | `rebalance-runs-unavailable` | 503 | `GET /v1/rebalance-runs` |
-| `invalid-limit` | 400 | `GET /v1/rebalance-runs` (`limit` outside 1–200) |
+| `invalid-limit` | 400 | every paged `GET` (`limit` outside 1–500) |
+| `invalid-cursor` | 400 | every paged `GET` (`cursor` does not decode) |
+| `unknown-query-parameter` | 400 | every paged `GET` (a parameter it does not declare, e.g. the retired `offset`, `after`, `nextToken`) |
+| `idempotency-key-required` / `idempotency-key-invalid` | 400 | every `POST` (missing key; not 1-128 printable ASCII) |
+| `idempotency-key-reused` | 409 | every `POST` (same key, different method/path/body) |
+| `idempotency-unavailable` | 503 | every `POST` on an instance without its idempotency store (no database) |
 | `catalogue-unavailable` | 503 | `GET`/`PUT /v1/rebalance-policies`, `GET`/`PUT /v1/transfer-lanes` (no database, or the store failed) |
 | `invalid-if-match` | 400 | catalogue PUT (`If-Match` is not a revision) |
 | `invalid-catalogue-entry` | 422 | catalogue PUT (missing key, negative value, `TargetStock` below `SafetyStock`, lane to itself) |
 | `version-mismatch` | 412 | catalogue PUT (`If-Match` is not the current revision) |
 | `concurrent-modification` | 409 | catalogue PUT (lost a write race on the same revision) |
 | `read-side-unavailable` | 503 | `GET /v1/transfers`, `GET /v1/transfers/{id}` |
-| `invalid-query` | 400 | `GET /v1/transfers` (unknown state, bad `limit`/`offset`) |
+| `invalid-query` | 400 | `GET /v1/transfers` (unknown state) |
 | `transfer-not-found` | 404 | `GET /v1/transfers/{id}` |
 | `invalid-report-range` | 400 | `nip-reports` `/reports/*` |
 | `invalid-report-limit` | 400 | `/reports/stuck-transfers` |

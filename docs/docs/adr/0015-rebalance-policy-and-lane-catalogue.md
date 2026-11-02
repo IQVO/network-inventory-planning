@@ -13,7 +13,7 @@ proposals. The ticker existed but could never propose anything.
 The planner itself (`transfer.Planner`, ADR 0001) already reasons with a
 `Policy` (site + SKU: safety stock, target stock, unit priority, version) and
 a `Lane` (origin, destination, lead time, unit handling cost, enabled).
-`POST /v1/transfer-proposals:generate` accepts both on every call. No sibling
+`POST /v1/transfer-proposal-runs` accepts both on every call. No sibling
 context owns either concept: NIP is the only bounded context that reasons
 about inter-site transfer economics. So no fact exists to project from, and
 the catalogue has to be NIP's own data, managed by an operator.
