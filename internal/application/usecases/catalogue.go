@@ -50,18 +50,14 @@ type PutRebalancePolicy struct {
 // whatever revision is current. A lost write race surfaces as
 // transfer.ErrCatalogueConcurrentModification.
 func (u PutRebalancePolicy) Execute(ctx context.Context, p transfer.Policy, ifMatch *int64) (PolicyPutResult, error) {
-	if u.Now == nil {
-		return PolicyPutResult{}, fmt.Errorf("put rebalance policy: clock is required")
-	}
-	now := u.Now()
-	entry, outcome, err := putEntry(ifMatch,
+	return putCatalogued(u.Now, ifMatch, "put rebalance policy", policyPutResult,
 		func() (transfer.RebalancePolicy, bool, error) { return u.Policies.Get(ctx, p.Site, p.SKU) },
-		func(e transfer.RebalancePolicy) int64 { return e.Revision },
-		func() (transfer.RebalancePolicy, error) { return transfer.NewRebalancePolicy(p, now) },
-		func(e transfer.RebalancePolicy) (transfer.RebalancePolicy, bool, error) { return e.Revise(p, now) },
-		func(e transfer.RebalancePolicy, expected int64) error { return u.Policies.Save(ctx, e, expected) },
-	)
-	return PolicyPutResult{Entry: entry, Outcome: outcome}, err
+		policyRevision,
+		func(now time.Time) (transfer.RebalancePolicy, error) { return transfer.NewRebalancePolicy(p, now) },
+		func(e transfer.RebalancePolicy, now time.Time) (transfer.RebalancePolicy, bool, error) {
+			return e.Revise(p, now)
+		},
+		func(e transfer.RebalancePolicy, expected int64) error { return u.Policies.Save(ctx, e, expected) })
 }
 
 // ListRebalancePolicies serves GET /v1/rebalance-policies.
@@ -91,18 +87,14 @@ type PutTransferLane struct {
 
 // Execute upserts l; see PutRebalancePolicy.Execute.
 func (u PutTransferLane) Execute(ctx context.Context, l transfer.Lane, ifMatch *int64) (LanePutResult, error) {
-	if u.Now == nil {
-		return LanePutResult{}, fmt.Errorf("put transfer lane: clock is required")
-	}
-	now := u.Now()
-	entry, outcome, err := putEntry(ifMatch,
+	return putCatalogued(u.Now, ifMatch, "put transfer lane", lanePutResult,
 		func() (transfer.TransferLane, bool, error) { return u.Lanes.Get(ctx, l.Origin, l.Destination) },
-		func(e transfer.TransferLane) int64 { return e.Revision },
-		func() (transfer.TransferLane, error) { return transfer.NewTransferLane(l, now) },
-		func(e transfer.TransferLane) (transfer.TransferLane, bool, error) { return e.Revise(l, now) },
-		func(e transfer.TransferLane, expected int64) error { return u.Lanes.Save(ctx, e, expected) },
-	)
-	return LanePutResult{Entry: entry, Outcome: outcome}, err
+		laneRevision,
+		func(now time.Time) (transfer.TransferLane, error) { return transfer.NewTransferLane(l, now) },
+		func(e transfer.TransferLane, now time.Time) (transfer.TransferLane, bool, error) {
+			return e.Revise(l, now)
+		},
+		func(e transfer.TransferLane, expected int64) error { return u.Lanes.Save(ctx, e, expected) })
 }
 
 // ListTransferLanes serves GET /v1/transfer-lanes.
@@ -115,6 +107,48 @@ type ListTransferLanes struct {
 // learn whether a next page exists.
 func (u ListTransferLanes) Execute(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.TransferLane, error) {
 	return u.Lanes.ListPage(ctx, after, limit)
+}
+
+// policyPutResult and lanePutResult wrap putEntry's outcome into each use
+// case's result type; policyRevision and laneRevision read the stored
+// revision each catalogue checks If-Match against.
+func policyPutResult(e transfer.RebalancePolicy, o CatalogueOutcome) PolicyPutResult {
+	return PolicyPutResult{Entry: e, Outcome: o}
+}
+
+func policyRevision(e transfer.RebalancePolicy) int64 { return e.Revision }
+
+func lanePutResult(e transfer.TransferLane, o CatalogueOutcome) LanePutResult {
+	return LanePutResult{Entry: e, Outcome: o}
+}
+
+func laneRevision(e transfer.TransferLane) int64 { return e.Revision }
+
+// putCatalogued runs the shared PUT skeleton of both catalogue use cases:
+// the clock is mandatory and read exactly once (a nil clock is a wiring
+// bug, so it fails closed naming the use case), then the entry flows
+// through putEntry and the outcome is wrapped as R.
+func putCatalogued[E any, R any](clock func() time.Time, ifMatch *int64, useCase string,
+	wrap func(E, CatalogueOutcome) R,
+	get func() (E, bool, error), revision func(E) int64,
+	create func(now time.Time) (E, error),
+	revise func(e E, now time.Time) (E, bool, error),
+	save func(e E, expected int64) error,
+) (R, error) {
+	if clock == nil {
+		var zero R
+		return zero, fmt.Errorf("%s: clock is required", useCase)
+	}
+	now := clock()
+	entry, outcome, err := putEntry(ifMatch, get, revision,
+		func() (E, error) { return create(now) },
+		func(e E) (E, bool, error) { return revise(e, now) },
+		save)
+	if err != nil {
+		var zero R
+		return zero, err
+	}
+	return wrap(entry, outcome), nil
 }
 
 // putEntry is the shared create-or-revise algorithm of both catalogues:
