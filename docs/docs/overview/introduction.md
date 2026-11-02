@@ -82,3 +82,7 @@ WES contexts stay authoritative for executable work.
 | Understand the model | [Use cases](../ddd/use-cases.md), [Domain events](../ddd/domain-events.md), [Ubiquitous language](../ddd/ubiquitous-language.md) |
 | Read the decisions | [ADR index](../adr/about.md) |
 | Call the REST API | [API reference](../api-reference/overview.md) |
+
+:::note[Disclaimer]
+This project is a domain-driven design study. It is not associated with, endorsed by or affiliated with any company, and it uses no company's code, data, logos or trademarks. All names, figures and examples are illustrative or synthetic.
+:::
