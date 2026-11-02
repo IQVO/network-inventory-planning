@@ -130,3 +130,7 @@ helm template charts/network-inventory-planning >/dev/null
 python3 charts/network-inventory-planning/tests/test_env_wiring.py
 python3 charts/network-inventory-planning/tests/test_service_selectors.py
 ```
+
+## Disclaimer
+
+This project is a domain-driven design study. It is not associated with, endorsed by or affiliated with any company, and it uses no company's code, data, logos or trademarks. All names, figures and examples are illustrative or synthetic.

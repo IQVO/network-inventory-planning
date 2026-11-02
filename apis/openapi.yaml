@@ -50,9 +50,17 @@ paths:
       summary: Generate advisory transfer proposals from an explicit snapshot.
       description: |
         Deterministic, explainable proposal generation over a caller-provided
-        coherent planning snapshot. Validation failures return RFC 7807
-        problem+json. Diagnostic boundary: production planning consumes local
-        read models via the simulation endpoint instead.
+        coherent planning snapshot. Idempotency-Key is required (400
+        idempotency-key-required / idempotency-key-invalid when missing or
+        malformed). The body is decoded strictly: an unknown field or
+        malformed JSON is 400 invalid-request; a snapshot the planner refuses
+        is 422 invalid-planning-snapshot. 503 problem+json when the
+        idempotency store is not configured (idempotency-unavailable) or the
+        pack levels cannot be read (pack-levels-unavailable). 2xx and 4xx
+        answers are stored under the key and replayed (Idempotency-Replayed:
+        true); a 5xx is never stored. Diagnostic boundary: production
+        planning consumes local read models via the simulation endpoint
+        instead.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -72,10 +80,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenerateResponse'
         '400':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/KeyedProblem'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
+          $ref: '#/components/responses/Problem'
+        '503':
           $ref: '#/components/responses/Problem'
   /v1/transfer-simulations:
     get:
@@ -122,7 +132,15 @@ paths:
         detail names the site and the stale fact), is disabled for its role, or
         the demand and capacity checks fail. Stale facts of any other site do
         not matter. When no site has complete fresh facts at all the answer is
-        the same 422; unusable (unreadable) read models return 503.
+        the same 422 facts-incomplete; unusable (unreadable) read models
+        return 503. Other 422 problem types: invalid-approval (the request
+        fails the use case's checks), below-one-case (the origin cannot send
+        one whole case of a CASE-level SKU) and proposal-expired. Other 503
+        types: saga-unavailable (no saga persistence), config-incomplete
+        (TRANSFER_PICK_PATH_ID / TRANSFER_PICK_CPT_OFFSET unset),
+        pack-levels-unavailable and approval-unavailable. A body with an
+        unknown field or malformed JSON is 400 invalid-request. 2xx and 4xx
+        answers are stored and replayed; a 5xx is never stored.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -144,7 +162,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApproveTransferResponse'
         '400':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/KeyedProblem'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -216,8 +234,12 @@ paths:
         If-Match to update only that revision (412 when it moved on);
         without If-Match the PUT applies to the current revision. Two
         writers racing on the same revision: one wins, the other gets 409.
-        422 for an entry refused on its face (missing key, negative
-        quantity, TargetStock below SafetyStock).
+        400 for a malformed If-Match (invalid-if-match) or a body with an
+        unknown field or malformed JSON (invalid-request). 422
+        invalid-catalogue-entry for an entry refused on its face (blank
+        Version, Site or SKU, negative quantity or UnitPriority, TargetStock
+        below SafetyStock). 409 concurrent-modification when two writers
+        race. 503 catalogue-unavailable when there is no persistence.
       parameters:
         - $ref: '#/components/parameters/IfMatch'
       requestBody:
@@ -636,7 +658,20 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
     Problem:
-      description: RFC 7807 problem+json error.
+      description: RFC 9457 problem+json error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    KeyedProblem:
+      description: |
+        RFC 9457 problem+json error on a keyed route. A 4xx answer produced
+        by the handler is stored, so a replay carries Idempotency-Replayed:
+        true; a 400 refused by the key check itself is not stored and carries
+        no such header.
+      headers:
+        Idempotency-Replayed:
+          $ref: '#/components/headers/IdempotencyReplayed'
       content:
         application/problem+json:
           schema:
@@ -644,17 +679,18 @@ components:
   schemas:
     Problem:
       type: object
-      required: [type, title, status]
+      required: [type, title, status, detail]
       properties:
         type:
           type: string
-          description: Stable machine-readable problem identifier.
+          description: Stable machine-readable problem identifier, an absolute URI of the form https://warehouse.example/problems/<kind> (for example .../transfer-not-found).
         title:
           type: string
         status:
           type: integer
         detail:
           type: string
+          description: Always present (a human-readable sentence).
     SiteID:
       type: string
       minLength: 1
