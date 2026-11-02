@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
@@ -147,15 +148,52 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 	}
 	sortSnapshots(matches, filter.Order)
 	total := len(matches)
+	if filter.After != nil {
+		at, err := time.Parse(time.RFC3339Nano, filter.After.Sort)
+		if err != nil {
+			return transfer.TransferPage{}, transfer.ErrInvalidPageAfter
+		}
+		// Newest first: continue with rows strictly older, or equally old
+		// with a greater id (the (created_at DESC, id ASC) order).
+		kept := matches[:0:0]
+		for _, snap := range matches {
+			if snap.CreatedAt.Before(at) || (snap.CreatedAt.Equal(at) && string(snap.ID) > filter.After.ID) {
+				kept = append(kept, snap)
+			}
+		}
+		matches = kept
+		total = len(matches)
+	}
 
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = transfer.DefaultListLimit
 	}
+	// Clamp the caller-supplied limit to the domain's MaxListLimit: an
+	// unbounded limit makes start+limit below overflow int and feed a
+	// negative capacity to make (CodeQL go/allocation-size-overflow).
+	if limit > transfer.MaxKeysetFetch {
+		limit = transfer.MaxKeysetFetch
+	}
 	start := min(max(filter.Offset, 0), total)
-	end := min(start+limit, total)
-	items := make([]*transfer.InterWarehouseTransfer, 0, end-start)
-	for _, snap := range matches[start:end] {
+	// Overflow-proof end: start+limit can overflow int when start is large
+	// (CodeQL go/allocation-size-overflow), so compare against the remaining
+	// room instead of adding unconditionally; the addition only runs when the
+	// sum is provably within bounds.
+	end := total
+	if room := total - start; limit < room {
+		end = start + limit
+	}
+	// Capacity comes from the page length, never from arithmetic on
+	// caller input, and is bounded above by a constant immediately before
+	// make (CodeQL go/allocation-size-overflow).
+	page := matches[start:end]
+	capacity := len(page)
+	if capacity > transfer.MaxKeysetFetch {
+		capacity = transfer.MaxKeysetFetch
+	}
+	items := make([]*transfer.InterWarehouseTransfer, 0, capacity)
+	for _, snap := range page {
 		items = append(items, transfer.Rehydrate(snap))
 	}
 	return transfer.TransferPage{Items: items, Total: total}, nil

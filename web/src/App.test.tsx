@@ -44,7 +44,7 @@ function routes() {
     "GET /v1/transfers": json(transferList([transfer()])),
     "GET /v1/transfers/t-1001": json(detail()),
     "GET /v1/transfer-simulations": json(simulation()),
-    "GET /v1/rebalance-runs": json({ runs: [] }),
+    "GET /v1/rebalance-runs": json({ items: [] }),
     "GET /v1/transfer-lanes": json(laneList()),
     "GET /v1/rebalance-policies": json(policyList()),
   });
@@ -150,7 +150,7 @@ describe("App (the exposed ./App)", () => {
     it("the approved-transfer link from the simulation resolves under the mount point", async () => {
       mockApi({
         "GET /v1/transfer-simulations": json(simulation()),
-        "POST /v1/transfers:approve": json(approved()),
+        "POST /v1/transfer-approvals": json(approved()),
       });
       const user = userEvent.setup();
       mountUnderHost("/network-inventory/simulation");

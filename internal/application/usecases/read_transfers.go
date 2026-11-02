@@ -74,6 +74,41 @@ func (u ListTransfers) Execute(ctx context.Context, in ListTransfersInput) (tran
 	return u.Query.List(ctx, filter)
 }
 
+// ListTransfersPageInput is one keyset page of the REST listing: the
+// filters plus the cursor position and the page size (1-500, validated at
+// the REST boundary).
+type ListTransfersPageInput struct {
+	State             string
+	OriginSiteID      string
+	DestinationSiteID string
+	After             *transfer.PageAfter
+	Limit             int
+}
+
+// Page returns up to Limit+1 transfers newest first after the keyset: the
+// extra row only proves a next page exists.
+func (u ListTransfers) Page(ctx context.Context, in ListTransfersPageInput) ([]*transfer.InterWarehouseTransfer, error) {
+	filter := transfer.ListFilter{
+		OriginSiteID:      strings.TrimSpace(in.OriginSiteID),
+		DestinationSiteID: strings.TrimSpace(in.DestinationSiteID),
+		Order:             transfer.OrderNewestFirst,
+		After:             in.After,
+		Limit:             in.Limit + 1,
+	}
+	if state := strings.TrimSpace(in.State); state != "" {
+		parsed, err := parseState(state)
+		if err != nil {
+			return nil, err
+		}
+		filter.States = []transfer.TransferState{parsed}
+	}
+	page, err := u.Query.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+
 // FindStuckInput selects the transfers that have not advanced.
 type FindStuckInput struct {
 	// OlderThan is how long a transfer's state must have been unchanged

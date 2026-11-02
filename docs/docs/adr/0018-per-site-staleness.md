@@ -19,7 +19,7 @@ snapshot.
 
 The producers emit facts on change only, so in a steady cluster some fact is
 always older than `MaxStaleness` (default 10m). Found live: with that default,
-`POST /v1/transfers:approve` answered 422 `facts-incomplete` ("stale site
+`POST /v1/transfer-approvals` answered 422 `facts-incomplete` ("stale site
 capability for ABE8 (as of 2026-10-19...)") and `GET /v1/transfer-simulations`
 answered 503 `read-models-incomplete` for EVERY site pair, including pairs whose
 own facts were fresh.

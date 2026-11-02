@@ -60,13 +60,13 @@ export function TransferLanesScreen() {
           <RequestView
             state={lanes}
             what="transfer lanes"
-            isEmpty={(l) => l.lanes.length === 0}
+            isEmpty={(l) => l.items.length === 0}
             empty="The lane catalogue is empty. Create the first directed lane below."
           >
             {(l) => (
               <DataTable
                 rowKey={(e) => `${e.lane.Origin}→${e.lane.Destination}`}
-                rows={l.lanes}
+                rows={l.items}
                 columns={[
                   { key: "lane", header: "Lane (directed)", render: (e) => `${e.lane.Origin} → ${e.lane.Destination}` },
                   { key: "lead", header: "Lead time", align: "right", render: (e) => leadTimeLabel(e.lane.LeadTime) },

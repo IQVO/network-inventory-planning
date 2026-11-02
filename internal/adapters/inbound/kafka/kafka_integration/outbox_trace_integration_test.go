@@ -136,7 +136,7 @@ func TestOutboxTrace_TraceparentCrossesTheOutboxToKafka(t *testing.T) {
 
 	transferID := fmt.Sprintf("trf-trace-%d", time.Now().UnixNano())
 	outbox := postgres.NewOutboxWriter(pool, outboundkafka.NewTransferEncoder())
-	reqCtx, reqSpan := tracer.Start(ctx, "POST /v1/transfers:approve", trace.WithSpanKind(trace.SpanKindServer))
+	reqCtx, reqSpan := tracer.Start(ctx, "POST /v1/transfer-approvals", trace.WithSpanKind(trace.SpanKindServer))
 	if err := outbox.Publish(reqCtx, transfer.PlanApproved{
 		TransferID: transfer.TransferID(transferID), OriginSiteID: "WH1", DestinationSiteID: "WH2",
 		SKU: "SKU-1", Quantity: 5, PolicyVersion: "policy-v3", OccurredAt: time.Now().UTC(),

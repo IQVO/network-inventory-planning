@@ -150,8 +150,8 @@ inventory ledger and never moves stock itself (ADR 0001).
 | inventory-storage | `TransferStockAllocated`, `TransferStockAllocationRejected` | reply | `ApplyTransferAllocation`, `ApplyTransferRejection` |
 | inventory-storage | `TransferReceiptStaged`, `TransferStockStowed` | fact | `ApplyTransferReceiptStaged`, `ApplyTransferStow` |
 | fulfillment-execution | `TransferPicked`, `TransferDispatched`, `TransferArrived` | fact | `ApplyTransferPick`, `ApplyTransferDispatched`, `ApplyTransferArrival` |
-| operator / console | `POST /v1/transfers:approve` | command | `ApproveTransfer` |
-| operator / console / tools | `POST /v1/transfer-proposals:generate`, `GET /v1/transfer-simulations`, `GET /v1/transfers`, `GET /v1/transfers/{id}`, `GET /v1/rebalance-runs`, `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes` | query | planner, read models, saga store |
+| operator / console | `POST /v1/transfer-approvals` | command | `ApproveTransfer` |
+| operator / console / tools | `POST /v1/transfer-proposal-runs`, `GET /v1/transfer-simulations`, `GET /v1/transfers`, `GET /v1/transfers/{id}`, `GET /v1/rebalance-runs`, `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes` | query | planner, read models, saga store |
 | warehouse-ops-agent | `get_transfer`, `list_transfers`, `find_stuck_transfers`, `simulate_transfer_options` | query (MCP) | read side |
 
 ## Outbound communication
@@ -181,7 +181,7 @@ PublishedCapacityPlan, WorkDemand, StuckTransfer, RebalanceRun.
   deficit; only an enabled directed lane carries a proposal with a positive
   score.
 - Approval is idempotent per `Idempotency-Key`; the same key with a different
-  body is `409 idempotency-conflict`.
+  body is `409 idempotency-key-reused`.
 - Without a configured pick path approval answers `503 config-incomplete` and
   persists nothing.
 - A short pick is recorded and the dispatch leg carries what was picked; a

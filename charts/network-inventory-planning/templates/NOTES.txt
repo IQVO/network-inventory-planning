@@ -17,7 +17,7 @@ zero-config diagnostic service (no read models, simulation answers 503).
 
 {{- if not .Values.kafka.enabled }}
 NOTE: kafka.enabled is false — no read-model ingestion consumers, no outbox
-relay (POST /v1/transfers:approve answers 503; the saga cannot emit its
+relay (POST /v1/transfer-approvals answers 503; the saga cannot emit its
 allocation command without Kafka).
 {{- else }}
 Consumers run ONLY for the group ids you set (each empty group id is its own
@@ -27,7 +27,7 @@ transfer-reply, transfer-fact.
 
 {{- if not .Values.config.transferPickPathId }}
 NOTE: TRANSFER_PICK_PATH_ID is unset — the pick leg's release path is
-unconfigured, so POST /v1/transfers:approve answers 503 config-incomplete
+unconfigured, so POST /v1/transfer-approvals answers 503 config-incomplete
 (fail-closed, ADR 0005).
 {{- end }}
 

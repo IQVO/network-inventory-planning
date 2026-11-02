@@ -124,7 +124,7 @@ curl -i http://localhost:8080/healthz
 Generate an advisory proposal from a coherent planning snapshot:
 
 ```sh
-curl -X POST http://localhost:8080/v1/transfer-proposals:generate \
+curl -X POST http://localhost:8080/v1/transfer-proposal-runs \
   -H 'content-type: application/json' \
   --data '{
     "asOf":"2026-10-05T15:00:00Z",
@@ -140,15 +140,15 @@ curl -X POST http://localhost:8080/v1/transfer-proposals:generate \
   }'
 ```
 
-The response is an explainable, score-ordered advisory proposal. It reserves and moves nothing: an operator approves a transfer separately (`POST /v1/transfers:approve`), and the transfer saga then drives the Inventory Storage reservation, WES work release, pick, dispatch, arrival and stow through Kafka (see [Domain message flow](docs/docs/ddd/domain-message-flow.md)).
+The response is an explainable, score-ordered advisory proposal. It reserves and moves nothing: an operator approves a transfer separately (`POST /v1/transfer-approvals`), and the transfer saga then drives the Inventory Storage reservation, WES work release, pick, dispatch, arrival and stow through Kafka (see [Domain message flow](docs/docs/ddd/domain-message-flow.md)).
 
 ### Configuration
 
 The runtime rule differs from most siblings: **Postgres is required for
 everything beyond diagnostics** (unset `DATABASE_URL` = diagnostic mode: only
-`/healthz` and `POST /v1/transfer-proposals:generate` work, every other route
+`/healthz` and `POST /v1/transfer-proposal-runs` work, every other route
 answers 503), while **Kafka is optional locally** — unset `KAFKA_BROKERS`
-disables the outbox (`POST /v1/transfers:approve` answers 503
+disables the outbox (`POST /v1/transfer-approvals` answers 503
 `saga-unavailable`), the consumers, the saga-health check and the scheduled
 rebalance; when it is set, `PACK_LEVEL_CONSUMER_GROUP` is required with it
 (ADR 0017) and `OUTBOX_RELAY_ENABLED` (any non-empty value) starts the relay.
@@ -247,16 +247,19 @@ the [Observability](docs/docs/operations/observability.md) page.
 
 Contract: [`apis/openapi.yaml`](apis/openapi.yaml). No authentication. Errors are
 RFC 9457 `application/problem+json` (`type` is a slug such as `not-found`,
-`validation-failed`, `saga-unavailable`, `config-incomplete`). The approval
-endpoint is idempotency-keyed: `POST /v1/transfers:approve` requires a fresh
-`Idempotency-Key` header per logical approval; a replayed key replays the first
-response, a key reused with a different request is rejected.
+`validation-failed`, `saga-unavailable`, `config-incomplete`). Every `POST` is
+idempotency-keyed (`Idempotency-Key`, 1-128 printable ASCII, a fresh UUID per
+logical submit): a replay answers the stored response with
+`Idempotency-Replayed: true`, a key reused with a different request is a 409
+`idempotency-key-reused`, a missing key a 400. Collections are keyset-paged:
+`limit` (1-500, default 100) and `cursor`, answered as `{items, nextCursor}`
+([ADR-0021](docs/docs/adr/0021-adopt-the-fleet-rest-api-guideline.md)).
 
 | Method and path | Operation |
 | --- | --- |
-| `POST /v1/transfer-proposals:generate` | deterministic, explainable, score-ordered proposal from a snapshot |
+| `POST /v1/transfer-proposal-runs` | deterministic, explainable, score-ordered proposal from a snapshot |
 | `GET /v1/transfer-simulations` | the simulation catalogue |
-| `POST /v1/transfers:approve` | approve a proposal; starts the transfer saga (`Idempotency-Key` required) |
+| `POST /v1/transfer-approvals` | approve a proposal; starts the transfer saga (`Idempotency-Key` required) |
 | `GET /v1/transfers`, `GET /v1/transfers/{id}` | transfer queries (state, saga trail) |
 | `GET /v1/rebalance-runs` | rebalance run history |
 | `GET /v1/rebalance-policies`, `PUT /v1/rebalance-policies` | read, upsert rebalance policies |

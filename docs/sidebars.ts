@@ -100,6 +100,7 @@ const sidebars: SidebarsConfig = {
         'adr/0018-per-site-staleness',
         'adr/0019-a-dead-consumer-takes-the-process-down',
         'adr/0020-a2a-inbound-adapter',
+        'adr/0021-adopt-the-fleet-rest-api-guideline',
       ],
     },
   ],

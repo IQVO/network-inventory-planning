@@ -79,6 +79,14 @@ async function request<T>(
   path: string,
   opts: { body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<T> {
+  return (await requestWithHeaders<T>(method, path, opts)).data;
+}
+
+async function requestWithHeaders<T>(
+  method: "GET" | "POST" | "PUT",
+  path: string,
+  opts: { body?: unknown; headers?: Record<string, string> } = {},
+): Promise<{ data: T; headers: Headers }> {
   let res: Response;
   try {
     res = await fetch(`${NIP_API_BASE}${path}`, {
@@ -102,12 +110,24 @@ async function request<T>(
     }
     throw new ApiError(res.status, problem, `${res.status} ${res.statusText}`.trim());
   }
-  return (await res.json()) as T;
+  return { data: (await res.json()) as T, headers: res.headers };
+}
+
+/** Follows nextCursor until it is absent (STANDARD 5.2) and returns every item. */
+async function listAll<T>(path: string, query: Query = {}): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  do {
+    const page: { items?: T[]; nextCursor?: string } = await request("GET", withQuery(path, { ...query, cursor }));
+    items.push(...(page.items ?? []));
+    cursor = page.nextCursor || undefined;
+  } while (cursor);
+  return items;
 }
 
 const seg = encodeURIComponent;
 
-/** GET /v1/transfers?state=&originSiteId=&destinationSiteId=&limit=&offset= */
+/** GET /v1/transfers?state=&originSiteId=&destinationSiteId=&limit=&cursor= (keyset pages, newest first) */
 export function listTransfers(q: TransferQuery): Promise<TransferList> {
   return request<TransferList>("GET", withQuery("/v1/transfers", { ...q }));
 }
@@ -127,29 +147,33 @@ export function getSimulation(): Promise<SimulationResponse> {
 }
 
 /**
- * POST /v1/transfers:approve. `idempotencyKey` is REQUIRED by the service:
+ * POST /v1/transfer-approvals. `idempotencyKey` is REQUIRED by the service:
  * replaying the same key with the same payload returns the ORIGINAL transfer
- * (`replayed: true`, still HTTP 200), the same key with another payload is a 409.
+ * (response header `Idempotency-Replayed: true`, still HTTP 200), the same key
+ * with another payload is a 409 `idempotency-key-reused`. `replayed` on the
+ * result is derived from that header.
  */
-export function approveTransfer(
+export async function approveTransfer(
   input: ApproveTransferRequest,
   idempotencyKey: string,
 ): Promise<ApproveTransferResponse> {
-  return request<ApproveTransferResponse>("POST", "/v1/transfers:approve", {
-    body: input,
-    headers: { "Idempotency-Key": idempotencyKey },
-  });
+  const { data, headers } = await requestWithHeaders<Omit<ApproveTransferResponse, "replayed">>(
+    "POST",
+    "/v1/transfer-approvals",
+    { body: input, headers: { "Idempotency-Key": idempotencyKey } },
+  );
+  return { ...data, replayed: headers.get("Idempotency-Replayed") === "true" };
 }
 
 /** GET /v1/rebalance-runs?limit= (newest first). */
 export async function listRebalanceRuns(limit?: number): Promise<RebalanceRun[]> {
   const res = await request<RebalanceRunsResponse>("GET", withQuery("/v1/rebalance-runs", { limit }));
-  return res.runs ?? [];
+  return res.items ?? [];
 }
 
 /** GET /v1/transfer-lanes (every lane, ordered by origin then destination). */
-export function listTransferLanes(): Promise<TransferLaneList> {
-  return request<TransferLaneList>("GET", "/v1/transfer-lanes");
+export async function listTransferLanes(): Promise<TransferLaneList> {
+  return { items: await listAll<TransferLaneEntry>("/v1/transfer-lanes") };
 }
 
 /**
@@ -169,8 +193,8 @@ export function putTransferLane(lane: LaneWire, ifMatch?: string): Promise<Trans
 }
 
 /** GET /v1/rebalance-policies (every entry, ordered by site then SKU). */
-export function listRebalancePolicies(): Promise<RebalancePolicyList> {
-  return request<RebalancePolicyList>("GET", "/v1/rebalance-policies");
+export async function listRebalancePolicies(): Promise<RebalancePolicyList> {
+  return { items: await listAll<RebalancePolicyEntry>("/v1/rebalance-policies") };
 }
 
 /**
@@ -187,7 +211,7 @@ export function putRebalancePolicy(policy: PolicyWire, ifMatch?: string): Promis
 }
 
 /**
- * POST /v1/transfer-proposals:generate — the DIAGNOSTIC planning boundary:
+ * POST /v1/transfer-proposal-runs — the DIAGNOSTIC planning boundary:
  * deterministic, explainable proposal generation over the caller-provided
  * snapshot (production planning consumes the local read models via the
  * simulation endpoint instead). Advisory only — nothing is reserved or moved.
@@ -200,7 +224,7 @@ export function generateTransferProposals(
   input: GenerateRequestWire,
   idempotencyKey: string,
 ): Promise<GenerateResponseWire> {
-  return request<GenerateResponseWire>("POST", "/v1/transfer-proposals:generate", {
+  return request<GenerateResponseWire>("POST", "/v1/transfer-proposal-runs", {
     body: input,
     headers: { "Idempotency-Key": idempotencyKey },
   });

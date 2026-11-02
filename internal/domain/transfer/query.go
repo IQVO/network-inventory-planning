@@ -1,6 +1,9 @@
 package transfer
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // allStates lists every lifecycle state in saga order. It is the closed
 // vocabulary the read side validates a requested state filter against.
@@ -56,6 +59,9 @@ const (
 	DefaultListLimit = 50
 	// MaxListLimit is the largest page a caller may ask for.
 	MaxListLimit = 200
+	// MaxKeysetFetch is the most rows a keyset page asks a store for: the
+	// REST maximum page (500) plus the one extra row that proves a next page.
+	MaxKeysetFetch = 501
 )
 
 // TransferOrder selects the ordering of a transfer listing.
@@ -86,6 +92,24 @@ type ListFilter struct {
 	Order         TransferOrder
 	Limit         int
 	Offset        int
+	// After, when set, is the keyset the listing continues after
+	// (OrderNewestFirst only: Sort is the last row's created_at as
+	// RFC 3339 nano, ID its transfer id). It replaces Offset for REST
+	// paging; the page is then NOT clamped to MaxListLimit by the store.
+	After *PageAfter
+}
+
+// ErrInvalidPageAfter marks a keyset whose Sort or ID cannot belong to the
+// collection it was presented to (a well-formed cursor of another listing,
+// or a tampered one). The REST adapter answers it 400 invalid-cursor.
+var ErrInvalidPageAfter = errors.New("page cursor does not belong to this collection")
+
+// PageAfter is the keyset position a paged listing continues after: the
+// last returned row's sort key and id, as carried by the opaque REST
+// cursor. Each repository documents what Sort holds for its collection.
+type PageAfter struct {
+	Sort string
+	ID   string
 }
 
 // TransferPage is one page of a listing: the transfers (with their audit

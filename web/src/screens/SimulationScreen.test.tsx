@@ -10,7 +10,7 @@ import { json, mockApi, pending, problem } from "../test/fetchMock";
 import { approved, simulation } from "../test/fixtures";
 
 const SIM = simulation();
-const APPROVE = "POST /v1/transfers:approve";
+const APPROVE = "POST /v1/transfer-approvals";
 const SIMULATE = "GET /v1/transfer-simulations";
 
 function mount() {
@@ -183,7 +183,7 @@ describe("SimulationScreen", () => {
     });
 
     it("says so when the key was replayed (the original transfer is shown)", async () => {
-      mockApi({ [SIMULATE]: json(SIM), [APPROVE]: json(approved({ replayed: true })) });
+      mockApi({ [SIMULATE]: json(SIM), [APPROVE]: json(approved(), 200, { "Idempotency-Replayed": "true" }) });
       const user = userEvent.setup();
       mount();
       await fillApproval(user);

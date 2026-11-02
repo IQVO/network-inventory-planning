@@ -58,7 +58,7 @@ describe("TransferLanesScreen", () => {
   });
 
   it("shows an empty state", async () => {
-    mockApi({ [LIST]: json({ lanes: [] }) });
+    mockApi({ [LIST]: json({ items: [] }) });
     mount();
     expect(await screen.findByText(/The lane catalogue is empty/)).toBeInTheDocument();
   });

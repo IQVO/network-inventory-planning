@@ -15,7 +15,7 @@ import (
 // read models (site capability, site/SKU demand, published capacity). It
 // never reserves, moves or promises stock: it answers "what would the
 // network look like" from fail-closed inputs. The explicit-snapshot
-// POST /v1/transfer-proposals:generate endpoint stays as the diagnostic
+// POST /v1/transfer-proposal-runs endpoint stays as the diagnostic
 // path; this use case is the read-model path.
 type SimulateTransferOptions struct {
 	Snapshot ports.PlanningSnapshotRepository

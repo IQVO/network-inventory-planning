@@ -69,9 +69,11 @@ type ListRebalancePolicies struct {
 	Policies ports.RebalancePolicyRepository
 }
 
-// Execute lists every policy ordered by site, then SKU.
-func (u ListRebalancePolicies) Execute(ctx context.Context) ([]transfer.RebalancePolicy, error) {
-	return u.Policies.List(ctx)
+// Execute lists up to limit policies ordered by site, then SKU, after the
+// keyset (nil is page one). The caller asks for one extra row to learn
+// whether a next page exists.
+func (u ListRebalancePolicies) Execute(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.RebalancePolicy, error) {
+	return u.Policies.ListPage(ctx, after, limit)
 }
 
 // LanePutResult is the outcome of PutTransferLane.
@@ -108,9 +110,11 @@ type ListTransferLanes struct {
 	Lanes ports.TransferLaneRepository
 }
 
-// Execute lists every lane ordered by origin, then destination.
-func (u ListTransferLanes) Execute(ctx context.Context) ([]transfer.TransferLane, error) {
-	return u.Lanes.List(ctx)
+// Execute lists up to limit lanes ordered by origin, then destination,
+// after the keyset (nil is page one). The caller asks for one extra row to
+// learn whether a next page exists.
+func (u ListTransferLanes) Execute(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.TransferLane, error) {
+	return u.Lanes.ListPage(ctx, after, limit)
 }
 
 // putEntry is the shared create-or-revise algorithm of both catalogues:

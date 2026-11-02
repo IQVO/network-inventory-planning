@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -237,6 +238,32 @@ func TestTransferStoreListPaging(t *testing.T) {
 	}
 }
 
+func TestTransferStoreListClampsOversizedLimit(t *testing.T) {
+	s := seedListStore(t)
+	// A limit near MaxInt used to overflow start+limit into a negative
+	// slice capacity inside make (CodeQL go/allocation-size-overflow);
+	// it is clamped to transfer.MaxListLimit instead, so the page comes
+	// back intact.
+	page, err := s.List(context.Background(), transfer.ListFilter{Limit: math.MaxInt})
+	if err != nil {
+		t.Fatalf("List(max limit): %v", err)
+	}
+	if len(page.Items) != 3 || page.Total != 3 {
+		t.Fatalf("List(max limit) = %d items, total %d; want 3 items, total 3", len(page.Items), page.Total)
+	}
+	// A huge offset alongside the huge limit stays an empty page instead
+	// of a negative-capacity allocation.
+	page, err = s.List(context.Background(), transfer.ListFilter{Limit: math.MaxInt, Offset: math.MaxInt})
+	if err != nil || len(page.Items) != 0 || page.Total != 3 {
+		t.Fatalf("List(max limit, max offset) = %d items, total %d, err %v; want an empty page, total 3", len(page.Items), page.Total, err)
+	}
+	// A limit above the domain maximum is clamped, never honored verbatim.
+	page, err = s.List(context.Background(), transfer.ListFilter{Limit: transfer.MaxListLimit + 1})
+	if err != nil || len(page.Items) != 3 || page.Total != 3 {
+		t.Fatalf("List(limit %d) = %d items, total %d, err %v; want 3 items, total 3", transfer.MaxListLimit+1, len(page.Items), page.Total, err)
+	}
+}
+
 func TestTransferStoreListStalestFirst(t *testing.T) {
 	s := seedListStore(t)
 	page, err := s.List(context.Background(), transfer.ListFilter{Order: transfer.OrderStalestFirst})
@@ -285,5 +312,15 @@ func TestTransferStoreListNonTerminalOldestUpdatedFirst(t *testing.T) {
 	views, err = s.ListNonTerminal(context.Background(), 1)
 	if err != nil || len(views) != 1 {
 		t.Fatalf("ListNonTerminal(1) = (%d views, %v), want 1", len(views), err)
+	}
+}
+
+func TestTransferStoreListNegativeOffsetAndTinyLimit(t *testing.T) {
+	s := seedListStore(t)
+	// A negative offset is floored to zero and the page capacity derives
+	// from the page length, so the result is the first row only.
+	page, err := s.List(context.Background(), transfer.ListFilter{Limit: 1, Offset: math.MinInt})
+	if err != nil || len(page.Items) != 1 || page.Total != 3 {
+		t.Fatalf("List(min offset, limit 1) = %d items, total %d, err %v; want 1 item, total 3", len(page.Items), page.Total, err)
 	}
 }

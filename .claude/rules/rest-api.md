@@ -7,9 +7,9 @@ paths:
 
 # REST API (inbound adapter)
 
-- `POST /v1/transfer-proposals:generate` -> `GenerateTransferProposals`
+- `POST /v1/transfer-proposal-runs` -> `GenerateTransferProposals`
 - `GET /v1/transfer-simulations` -> `SimulateTransferOptions` (advisory, fail-closed)
-- `POST /v1/transfers:approve` -> `ApproveTransfer` (idempotency-keyed saga start)
+- `POST /v1/transfer-approvals` -> `ApproveTransfer` (idempotency-keyed saga start)
 - `GET /v1/transfers` -> `ListTransfers` (read-only; `state`, `originSiteId`, `destinationSiteId`, `limit` <= 200, `offset`)
 - `GET /v1/transfers/{id}` -> `GetTransfer` (read-only; the transfer plus its audit trail; 404 problem+json when unknown)
 - `GET /healthz` -> process health probe

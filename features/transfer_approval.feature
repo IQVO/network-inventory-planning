@@ -1,5 +1,5 @@
 # Derived from: apis/openapi.yaml (approveTransfer:
-# POST /v1/transfers:approve) and .claude/rules/domain-model.md (Transfer Plan:
+# POST /v1/transfer-approvals) and .claude/rules/domain-model.md (Transfer Plan:
 # the approved, durable orchestration record; TransferPlanApproved and
 # OriginReservationRequested; approval coordinates, it does not own
 # reservations or stock).
@@ -27,7 +27,7 @@ Feature: Approving a transfer proposal starts the allocation saga
     And the JSON field "sku" is "SKU-1"
     And the JSON field "quantity" is 5
     And the JSON field "policyVersion" is "policy-v3"
-    And the JSON field "replayed" is false
+    And the response header "Idempotency-Replayed" is absent
     And the JSON field "expiresAt" is "2026-10-07T15:00:00Z"
     And the JSON field "transferLineId" is "{T1}:1"
     And the JSON field "reservationId" is absent
@@ -68,7 +68,7 @@ Feature: Approving a transfer proposal starts the allocation saga
     Given an approved transfer "T1"
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
     Then the response status is 200
-    And the JSON field "replayed" is true
+    And the response header "Idempotency-Replayed" is true
     And the JSON field "transferId" is "{T1}"
     And the domain event "TransferPlanApproved" was published 1 time
     And the domain event "TransferAllocationRequested" was published 1 time
@@ -77,21 +77,21 @@ Feature: Approving a transfer proposal starts the allocation saga
     Given an approved transfer "T1"
     And I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
     When I request GET "/v1/transfers"
-    Then the JSON field "total" is 1
+    Then the JSON array "items" has 1 element
 
-  Scenario: A replay after the saga advanced returns the persisted state, not the first answer
+  Scenario: A replay after the saga advanced returns the stored first answer, not the new state
     Given a transfer "T1" in state "ALLOCATED"
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
     Then the response status is 200
-    And the JSON field "replayed" is true
-    And the JSON field "state" is "ALLOCATED"
-    And the JSON field "reservationId" is "res-1"
+    And the response header "Idempotency-Replayed" is true
+    And the JSON field "state" is "ALLOCATING"
+    And the JSON field "reservationId" is absent
 
   Scenario Outline: Reusing a key for a different request is a conflict
     Given an approved transfer "T1"
     When I approve a transfer of <quantity> units of SKU "SKU-1" from "WH1" to "WH2" under policy "<policy>" with the idempotency key "T1"
     Then the response status is 409
-    And the problem detail type is "idempotency-conflict"
+    And the problem detail type is "idempotency-key-reused"
     And transfer "T1" is in state "ALLOCATING"
 
     Examples: what differs from the first request
@@ -103,12 +103,12 @@ Feature: Approving a transfer proposal starts the allocation saga
     Given an approved transfer "T1"
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T2"
     Then the response status is 200
-    And the JSON field "replayed" is false
+    And the response header "Idempotency-Replayed" is absent
     When I request GET "/v1/transfers"
-    Then the JSON field "total" is 2
+    Then the JSON array "items" has 2 elements
 
   Scenario: The operator's reason is optional
-    When I send POST "/v1/transfers:approve" with the idempotency key "T1" and this body:
+    When I send POST "/v1/transfer-approvals" with the idempotency key "T1" and this body:
       """
       {"originSiteId":"WH1","destinationSiteId":"WH2","sku":"SKU-1","quantity":5,"policyVersion":"policy-v3","proposalAsOf":"2026-10-06T14:55:00Z"}
       """
@@ -116,7 +116,7 @@ Feature: Approving a transfer proposal starts the allocation saga
     And the JSON field "state" is "ALLOCATING"
 
   Scenario: The Idempotency-Key header is required
-    When I send POST "/v1/transfers:approve" with this body:
+    When I send POST "/v1/transfer-approvals" without an idempotency key and this body:
       """
       {"originSiteId":"WH1","destinationSiteId":"WH2","sku":"SKU-1","quantity":5,"policyVersion":"policy-v3","proposalAsOf":"2026-10-06T14:55:00Z"}
       """
@@ -126,7 +126,7 @@ Feature: Approving a transfer proposal starts the allocation saga
     And no domain events were published
 
   Scenario Outline: A request that is not a valid approval document is a 400
-    When I send POST "/v1/transfers:approve" with the idempotency key "bad" and this body:
+    When I send POST "/v1/transfer-approvals" with the idempotency key "bad" and this body:
       """
       <body>
       """
@@ -142,7 +142,7 @@ Feature: Approving a transfer proposal starts the allocation saga
       | {"originSiteId":"WH1","destinationSiteId":"WH2","sku":"SKU-1","quantity":5,"policyVersion":"p","proposalAsOf":"yesterday"}              | proposalAsOf is not a time |
 
   Scenario Outline: A proposal the domain refuses on its face is a 422
-    When I send POST "/v1/transfers:approve" with the idempotency key "bad" and this body:
+    When I send POST "/v1/transfer-approvals" with the idempotency key "bad" and this body:
       """
       {"originSiteId":"<origin>","destinationSiteId":"<destination>","sku":"SKU-1","quantity":<quantity>,"policyVersion":"<policy>","proposalAsOf":"2026-10-06T14:55:00Z"}
       """
@@ -158,7 +158,7 @@ Feature: Approving a transfer proposal starts the allocation saga
       | WH1    | WH2         | 5        |           | the policy version is missing |
 
   Scenario: A proposal without its snapshot watermark is a 422
-    When I send POST "/v1/transfers:approve" with the idempotency key "bad" and this body:
+    When I send POST "/v1/transfer-approvals" with the idempotency key "bad" and this body:
       """
       {"originSiteId":"WH1","destinationSiteId":"WH2","sku":"SKU-1","quantity":5,"policyVersion":"policy-v3"}
       """
@@ -250,4 +250,4 @@ Feature: Approving a transfer proposal starts the allocation saga
     Given this instance runs without a database
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
     Then the response status is 503
-    And the problem detail type is "saga-unavailable"
+    And the problem detail type is "idempotency-unavailable"
