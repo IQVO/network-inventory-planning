@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -82,10 +83,10 @@ func TestTransferStoreCreateIsIdempotentPerKey(t *testing.T) {
 
 func TestTransferStoreLoadUnknownIsNotFound(t *testing.T) {
 	s := NewTransferStore()
-	if _, err := s.Load(context.Background(), "nope"); err != transfer.ErrTransferNotFound {
+	if _, err := s.Load(context.Background(), "nope"); !errors.Is(err, transfer.ErrTransferNotFound) {
 		t.Fatalf("Load(unknown) = %v, want ErrTransferNotFound", err)
 	}
-	if _, err := s.Get(context.Background(), "nope"); err != transfer.ErrTransferNotFound {
+	if _, err := s.Get(context.Background(), "nope"); !errors.Is(err, transfer.ErrTransferNotFound) {
 		t.Fatalf("Get(unknown) = %v, want ErrTransferNotFound (Get delegates to Load)", err)
 	}
 }
@@ -131,7 +132,7 @@ func TestTransferStoreUpdateStateGuardsVersionAndAudit(t *testing.T) {
 func TestTransferStoreUpdateStateUnknownTransfer(t *testing.T) {
 	s := NewTransferStore()
 	ghost := proposeForStore(t, "trf-ghost", "WH1", unitNow)
-	if err := s.UpdateState(context.Background(), ghost); err != transfer.ErrTransferNotFound {
+	if err := s.UpdateState(context.Background(), ghost); !errors.Is(err, transfer.ErrTransferNotFound) {
 		t.Fatalf("UpdateState(unknown) = %v, want ErrTransferNotFound", err)
 	}
 }

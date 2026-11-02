@@ -118,7 +118,7 @@ func (s *ReportsServer) Routes() http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeReportJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeReportJSON(w, map[string]string{"status": "ok"})
 	})
 	r.Get("/reports/transfer-funnel", s.handleTransferFunnel)
 	r.Get("/reports/state-dwell", s.handleStateDwell)
@@ -128,9 +128,11 @@ func (s *ReportsServer) Routes() http.Handler {
 	return r
 }
 
-func writeReportJSON(w http.ResponseWriter, status int, v any) {
+// writeReportJSON answers every report endpoint, which is read-only and
+// therefore always 200 OK (problems flow through writeProblem instead).
+func writeReportJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
@@ -150,7 +152,7 @@ func (s *ReportsServer) handleFreshness(w http.ResponseWriter, r *http.Request) 
 		writeReportError(w)
 		return
 	}
-	writeReportJSON(w, http.StatusOK, report.ComputeFreshness(asOf, s.now()))
+	writeReportJSON(w, report.ComputeFreshness(asOf, s.now()))
 }
 
 // parseRange validates ?from=&to= (RFC 3339, both optional) and writes the
@@ -187,7 +189,7 @@ func (s *ReportsServer) handleTransferFunnel(w http.ResponseWriter, r *http.Requ
 	for _, d := range days {
 		out.Days = append(out.Days, funnelDayDTO{Day: d.Day.UTC().Format(reportDayLayout), State: d.State, Transfers: d.Transfers})
 	}
-	writeReportJSON(w, http.StatusOK, out)
+	writeReportJSON(w, out)
 }
 
 func (s *ReportsServer) handleStateDwell(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +209,7 @@ func (s *ReportsServer) handleStateDwell(w http.ResponseWriter, r *http.Request)
 			P50AgeSeconds: d.P50Seconds, P95AgeSeconds: d.P95Seconds,
 		})
 	}
-	writeReportJSON(w, http.StatusOK, out)
+	writeReportJSON(w, out)
 }
 
 func (s *ReportsServer) handleStuckTransfers(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +246,7 @@ func (s *ReportsServer) handleStuckTransfers(w http.ResponseWriter, r *http.Requ
 			ThresholdSeconds: o.ThresholdSeconds, DetectedAt: o.DetectedAt.UTC(),
 		})
 	}
-	writeReportJSON(w, http.StatusOK, out)
+	writeReportJSON(w, out)
 }
 
 func (s *ReportsServer) handleRebalanceRuns(w http.ResponseWriter, r *http.Request) {
@@ -265,5 +267,5 @@ func (s *ReportsServer) handleRebalanceRuns(w http.ResponseWriter, r *http.Reque
 			Rejected: d.Rejected, RejectionRate: d.RejectionRate, StaleFacts: d.StaleFacts,
 		})
 	}
-	writeReportJSON(w, http.StatusOK, out)
+	writeReportJSON(w, out)
 }

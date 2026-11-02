@@ -328,7 +328,7 @@ func (u ApproveTransfer) loadSnapshot(ctx context.Context, now time.Time) (plann
 		Now:          func() time.Time { return now },
 	})
 	if err != nil {
-		return planning.PlanningSnapshot{}, fmt.Errorf("%w: %s", transfer.ErrFactsIncomplete, err)
+		return planning.PlanningSnapshot{}, fmt.Errorf("%w: %w", transfer.ErrFactsIncomplete, err)
 	}
 	return snap, nil
 }

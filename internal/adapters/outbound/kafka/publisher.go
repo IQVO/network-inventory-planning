@@ -27,6 +27,13 @@ const TransferTopic = "warehouse.network-inventory-planning.events"
 // entityTransfer is the `type` entity segment of both published types.
 const entityTransfer = "transfer"
 
+// CloudEvents data attribute names shared across the transfer publishers.
+const (
+	attrTransferID = "transfer_id"
+	attrSKU        = "sku"
+	attrQuantity   = "quantity"
+)
+
 // Encoded is one already-encoded, wire-ready Kafka message. The CloudEvents
 // id was minted once at Encode time, persisted with the outbox row, and is
 // carried unchanged on every relay redelivery.
@@ -118,8 +125,8 @@ func (e *TransferEncoder) encodeDemandReleased(ctx context.Context, evt transfer
 		"path_id":      evt.PathID,
 		"site_id":      evt.SiteID,
 		"cpt":          evt.CPT.UTC().Format(time.RFC3339),
-		"sku":          evt.SKU,
-		"quantity":     evt.Quantity,
+		attrSKU:        evt.SKU,
+		attrQuantity:   evt.Quantity,
 	}
 	value, err := cloudevents.New(cloudevents.Spec{
 		ID:        e.mintID(),
@@ -145,11 +152,11 @@ func (e *TransferEncoder) encodeDemandReleased(ctx context.Context, evt transfer
 
 func (e *TransferEncoder) encodePlanApproved(ctx context.Context, evt transfer.PlanApproved) ([]Encoded, error) {
 	payload := map[string]any{
-		"transfer_id":         string(evt.TransferID),
+		attrTransferID:        string(evt.TransferID),
 		"origin_site_id":      evt.OriginSiteID,
 		"destination_site_id": evt.DestinationSiteID,
-		"sku":                 evt.SKU,
-		"quantity":            evt.Quantity,
+		attrSKU:               evt.SKU,
+		attrQuantity:          evt.Quantity,
 		"policy_version":      evt.PolicyVersion,
 		"operator_reason":     evt.OperatorReason,
 		"proposal_as_of":      evt.ProposalAsOf.UTC().Format(time.RFC3339),
@@ -193,11 +200,11 @@ func (e *TransferEncoder) encodeAllocationRequested(ctx context.Context, evt tra
 	// transfer_line_id, origin_site_id, sku, quantity}, subject/key
 	// transfer_line_id.
 	payload := map[string]any{
-		"transfer_id":      string(evt.TransferID),
+		attrTransferID:     string(evt.TransferID),
 		"transfer_line_id": evt.TransferLineID,
 		"origin_site_id":   evt.OriginSiteID,
-		"sku":              evt.SKU,
-		"quantity":         evt.Quantity,
+		attrSKU:            evt.SKU,
+		attrQuantity:       evt.Quantity,
 	}
 	value, err := cloudevents.New(cloudevents.Spec{
 		ID:        e.mintID(),

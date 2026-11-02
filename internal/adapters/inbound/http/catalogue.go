@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,32 +48,46 @@ func catalogueUnavailable(w http.ResponseWriter) {
 		"Rebalance catalogue is not configured", "this instance runs without the persistence the policy and lane catalogues require")
 }
 
+// listCatalogue is the shared GET flow of both catalogue listings: parse
+// the cursor params, fetch one page, then answer with the DTOs and each
+// entry's keyset position. failed names the listing in the 503 problem.
+func listCatalogue[E any, D any](w http.ResponseWriter, r *http.Request,
+	list func(context.Context, *transfer.PageAfter, int) ([]E, error),
+	failed string,
+	toDTO func(E) D,
+	position func(D) page.Position,
+) {
+	limit, after, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	entries, err := list(r.Context(), after, page.FetchSize(limit))
+	if isInvalidCursor(err) {
+		writeInvalidCursor(w, err)
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", failed, err.Error())
+		return
+	}
+	out := make([]D, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, toDTO(e))
+	}
+	writeJSON(w, http.StatusOK, "", page.Of(out, limit, position))
+}
+
 // listPolicies serves GET /v1/rebalance-policies.
 func (h Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 	if h.ListPolicies == nil {
 		catalogueUnavailable(w)
 		return
 	}
-	limit, after, ok := pageParams(w, r)
-	if !ok {
-		return
-	}
-	entries, err := h.ListPolicies.Execute(r.Context(), after, page.FetchSize(limit))
-	if isInvalidCursor(err) {
-		writeInvalidCursor(w, err)
-		return
-	}
-	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", "Rebalance policies could not be listed", err.Error())
-		return
-	}
-	out := make([]rebalancePolicyEntryDTO, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, policyDTO(e, ""))
-	}
-	writeJSON(w, http.StatusOK, "", page.Of(out, limit, func(e rebalancePolicyEntryDTO) page.Position {
-		return page.Position{Sort: string(e.Policy.Site), ID: string(e.Policy.SKU)}
-	}))
+	listCatalogue(w, r, h.ListPolicies.Execute, "Rebalance policies could not be listed",
+		func(e transfer.RebalancePolicy) rebalancePolicyEntryDTO { return policyDTO(e, "") },
+		func(e rebalancePolicyEntryDTO) page.Position {
+			return page.Position{Sort: string(e.Policy.Site), ID: string(e.Policy.SKU)}
+		})
 }
 
 // putPolicy serves PUT /v1/rebalance-policies: an idempotent upsert of
@@ -105,26 +120,11 @@ func (h Handler) listLanes(w http.ResponseWriter, r *http.Request) {
 		catalogueUnavailable(w)
 		return
 	}
-	limit, after, ok := pageParams(w, r)
-	if !ok {
-		return
-	}
-	entries, err := h.ListLanes.Execute(r.Context(), after, page.FetchSize(limit))
-	if isInvalidCursor(err) {
-		writeInvalidCursor(w, err)
-		return
-	}
-	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", "Transfer lanes could not be listed", err.Error())
-		return
-	}
-	out := make([]transferLaneEntryDTO, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, laneDTO(e, ""))
-	}
-	writeJSON(w, http.StatusOK, "", page.Of(out, limit, func(e transferLaneEntryDTO) page.Position {
-		return page.Position{Sort: string(e.Lane.Origin), ID: string(e.Lane.Destination)}
-	}))
+	listCatalogue(w, r, h.ListLanes.Execute, "Transfer lanes could not be listed",
+		func(e transfer.TransferLane) transferLaneEntryDTO { return laneDTO(e, "") },
+		func(e transferLaneEntryDTO) page.Position {
+			return page.Position{Sort: string(e.Lane.Origin), ID: string(e.Lane.Destination)}
+		})
 }
 
 // putLane serves PUT /v1/transfer-lanes: an idempotent upsert of the Lane
