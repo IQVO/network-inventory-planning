@@ -314,3 +314,13 @@ func TestTransferStoreListNonTerminalOldestUpdatedFirst(t *testing.T) {
 		t.Fatalf("ListNonTerminal(1) = (%d views, %v), want 1", len(views), err)
 	}
 }
+
+func TestTransferStoreListNegativeOffsetAndTinyLimit(t *testing.T) {
+	s := seedListStore(t)
+	// A negative offset is floored to zero and the page capacity derives
+	// from the page length, so the result is the first row only.
+	page, err := s.List(context.Background(), transfer.ListFilter{Limit: 1, Offset: math.MinInt})
+	if err != nil || len(page.Items) != 1 || page.Total != 3 {
+		t.Fatalf("List(min offset, limit 1) = %d items, total %d, err %v; want 1 item, total 3", len(page.Items), page.Total, err)
+	}
+}
