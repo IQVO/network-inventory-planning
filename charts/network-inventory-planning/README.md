@@ -48,7 +48,7 @@ helm template network-inventory-planning ./charts/network-inventory-planning
 | `environment` | `local` | `ENVIRONMENT` label on exported telemetry |
 | `config.httpAddr` | `:8080` | `HTTP_ADDR` |
 | `config.maxStaleness` | `""` | `PLANNING_MAX_STALENESS` (Go duration; binary default 10m) |
-| `config.transferPickPathId` | `""` | `TRANSFER_PICK_PATH_ID` — no default on purpose; unset makes `/v1/transfers:approve` answer 503 config-incomplete (ADR 0005, fail-closed) |
+| `config.transferPickPathId` | `""` | `TRANSFER_PICK_PATH_ID` — no default on purpose; unset makes `/v1/transfer-approvals` answer 503 config-incomplete (ADR 0005, fail-closed) |
 | `config.transferPickCptOffset` | `""` | `TRANSFER_PICK_CPT_OFFSET` (binary default 2h) |
 | `config.transferDispatchPathId` | `""` | `TRANSFER_DISPATCH_PATH_ID` |
 | `config.transferDispatchCptOffset` | `""` | `TRANSFER_DISPATCH_CPT_OFFSET` (binary default 3h) |

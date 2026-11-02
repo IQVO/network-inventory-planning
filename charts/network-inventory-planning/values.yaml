@@ -126,7 +126,7 @@ config:
   maxStaleness: ""
   # ADR 0005 work-release configuration. transferPickPathId deliberately
   # has no default: the pick leg's path is site-specific and an unset
-  # TRANSFER_PICK_PATH_ID makes POST /v1/transfers:approve answer 503
+  # TRANSFER_PICK_PATH_ID makes POST /v1/transfer-approvals answer 503
   # config-incomplete (fail-closed) rather than minting transfers whose
   # pick demand could never be released.
   transferPickPathId: ""
