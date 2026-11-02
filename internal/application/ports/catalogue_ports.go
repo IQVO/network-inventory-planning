@@ -14,6 +14,9 @@ type RebalancePolicyRepository interface {
 	Get(ctx context.Context, site transfer.SiteID, sku transfer.SKU) (entry transfer.RebalancePolicy, found bool, err error)
 	// List returns every entry ordered by site, then SKU.
 	List(ctx context.Context) ([]transfer.RebalancePolicy, error)
+	// ListPage returns up to limit entries ordered by (site, SKU),
+	// continuing after the keyset (Sort = site, ID = SKU); nil is page one.
+	ListPage(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.RebalancePolicy, error)
 	// Save writes entry guarded by expectedRevision: 0 creates it (and
 	// fails if it already exists), N updates it only while the stored
 	// revision is still N. A lost race returns
@@ -29,6 +32,10 @@ type TransferLaneRepository interface {
 	Get(ctx context.Context, origin, destination transfer.SiteID) (entry transfer.TransferLane, found bool, err error)
 	// List returns every entry ordered by origin, then destination.
 	List(ctx context.Context) ([]transfer.TransferLane, error)
+	// ListPage returns up to limit entries ordered by (origin,
+	// destination), continuing after the keyset (Sort = origin, ID =
+	// destination); nil is page one.
+	ListPage(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.TransferLane, error)
 	// Save writes entry guarded by expectedRevision (see
 	// RebalancePolicyRepository.Save).
 	Save(ctx context.Context, entry transfer.TransferLane, expectedRevision int64) error

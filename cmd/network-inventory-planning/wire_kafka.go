@@ -38,7 +38,7 @@ type consumerDeps struct {
 func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPublisher, func() error) {
 	brokers := brokersFromEnv()
 	if brokers == nil {
-		logger.Warn("KAFKA_BROKERS not configured; outbox disabled (POST /v1/transfers:approve answers 503)",
+		logger.Warn("KAFKA_BROKERS not configured; outbox disabled (POST /v1/transfer-approvals answers 503)",
 			"enable_with", strings.Join([]string{envKafkaBrokers, envOutboxRelay}, ","))
 		return nil, nil
 	}

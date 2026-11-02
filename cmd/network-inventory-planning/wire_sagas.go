@@ -123,14 +123,14 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 			Now:          time.Now,
 		}
 		if err := approve.Release.Validate(); err != nil {
-			logger.Warn("work release not configured; POST /v1/transfers:approve answers 503 (no transfer may be approved without a releasable pick leg)",
+			logger.Warn("work release not configured; POST /v1/transfer-approvals answers 503 (no transfer may be approved without a releasable pick leg)",
 				"error", err, "enable_with", strings.Join([]string{envPickPathID, envPickCPTOffset}, ","))
 		}
 		// Non-nil even when unconfigured: the endpoint answers the typed 503
 		// with the missing-variable detail.
 		out.approve = approve
 	} else {
-		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers:approve answers 503 (the saga cannot emit its allocation command without the outbox)")
+		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfer-approvals answers 503 (the saga cannot emit its allocation command without the outbox)")
 	}
 
 	replyAllocate := &usecases.ApplyTransferAllocation{

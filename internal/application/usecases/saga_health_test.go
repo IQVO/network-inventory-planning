@@ -249,34 +249,33 @@ func TestRunScheduledRebalanceStaleFactsFailClosed(t *testing.T) {
 	}
 }
 
-func TestListRebalanceRunsClampsLimit(t *testing.T) {
-	runs := &fakeRebalanceRuns{}
-	uc := ListRebalanceRuns{Runs: runs}
-	// Default.
-	got, err := uc.Execute(context.Background(), 0)
-	if err != nil || len(got) != 0 {
-		t.Fatalf("default limit: %v %v", got, err)
-	}
-	// The clamp lives in the use case: 0 -> 50, 999 -> 200. Prove via
-	// what the repo was asked for.
+func TestListRebalanceRunsForwardsKeysetAndLimit(t *testing.T) {
 	probing := &limitProbingRuns{}
-	uc2 := ListRebalanceRuns{Runs: probing}
-	if _, err := uc2.Execute(context.Background(), 0); err != nil || probing.lastLimit != 50 {
-		t.Fatalf("limit 0 -> %d %v, want 50", probing.lastLimit, err)
+	uc := ListRebalanceRuns{Runs: probing}
+	after := &transfer.PageAfter{Sort: "2026-10-05T10:00:00Z", ID: "7"}
+	if _, err := uc.Execute(context.Background(), after, 101); err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if _, err := uc2.Execute(context.Background(), 999); err != nil || probing.lastLimit != 200 {
-		t.Fatalf("limit 999 -> %d %v, want 200", probing.lastLimit, err)
+	if probing.lastLimit != 101 || probing.lastAfter != after {
+		t.Fatalf("repo asked for limit %d after %v, want 101 after %v", probing.lastLimit, probing.lastAfter, after)
 	}
 }
 
-// limitProbingRuns records the limit it was asked for.
-type limitProbingRuns struct{ lastLimit int }
+// limitProbingRuns records the limit and keyset it was asked for.
+type limitProbingRuns struct {
+	lastLimit int
+	lastAfter *transfer.PageAfter
+}
 
 func (f *limitProbingRuns) Record(context.Context, transfer.RebalanceRun) (int64, error) {
 	return 1, nil
 }
 func (f *limitProbingRuns) List(_ context.Context, limit int) ([]transfer.RebalanceRun, error) {
 	f.lastLimit = limit
+	return nil, nil
+}
+func (f *limitProbingRuns) ListPage(_ context.Context, after *transfer.PageAfter, limit int) ([]transfer.RebalanceRun, error) {
+	f.lastLimit, f.lastAfter = limit, after
 	return nil, nil
 }
 
@@ -369,4 +368,8 @@ func TestRunScheduledRebalanceOneStaleSiteStillCompletesTheRun(t *testing.T) {
 	if got := runs.runs[0].Outcome; got != transfer.RebalanceCompleted {
 		t.Fatalf("outcome = %s, want COMPLETED (a stale site must not fail the whole pass)", got)
 	}
+}
+
+func (f *fakeRebalanceRuns) ListPage(ctx context.Context, _ *transfer.PageAfter, limit int) ([]transfer.RebalanceRun, error) {
+	return f.List(ctx, limit)
 }

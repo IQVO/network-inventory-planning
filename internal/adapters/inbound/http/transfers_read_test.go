@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http/page"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
@@ -188,34 +189,39 @@ func TestReadSideUnconfiguredIs503(t *testing.T) {
 }
 
 func TestListTransfersMapsQueryParametersAndPage(t *testing.T) {
-	q := &stubTransferQuery{page: transfer.TransferPage{Items: []*transfer.InterWarehouseTransfer{allocatedTransfer()}, Total: 41}}
-	response := serve(readHandler(q), "/v1/transfers?state=picked&originSiteId=WH1&destinationSiteId=WH2&limit=10&offset=20")
+	q := &stubTransferQuery{page: transfer.TransferPage{Items: []*transfer.InterWarehouseTransfer{allocatedTransfer(), allocatedTransfer()}}}
+	response := serve(readHandler(q), "/v1/transfers?state=picked&originSiteId=WH1&destinationSiteId=WH2&limit=1")
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
 	f := q.gotFilter
-	if len(f.States) != 1 || f.States[0] != transfer.StatePicked || f.OriginSiteID != "WH1" || f.DestinationSiteID != "WH2" || f.Limit != 10 || f.Offset != 20 {
+	// The store is asked for limit+1 rows: the extra one proves a next page.
+	if len(f.States) != 1 || f.States[0] != transfer.StatePicked || f.OriginSiteID != "WH1" || f.DestinationSiteID != "WH2" || f.Limit != 2 || f.After != nil || f.Offset != 0 {
 		t.Fatalf("filter = %+v", f)
 	}
 	var got struct {
-		Items  []map[string]any `json:"items"`
-		Total  int              `json:"total"`
-		Limit  int              `json:"limit"`
-		Offset int              `json:"offset"`
+		Items      []map[string]any `json:"items"`
+		NextCursor string           `json:"nextCursor"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Total != 41 || got.Limit != 10 || got.Offset != 20 || len(got.Items) != 1 || got.Items[0]["id"] != "tr-1" {
+	if len(got.Items) != 1 || got.Items[0]["id"] != "tr-1" || got.NextCursor == "" {
 		t.Fatalf("page = %+v", got)
 	}
 	if _, hasAudit := got.Items[0]["audit"]; hasAudit {
 		t.Fatal("the audit trail belongs to the single-get view only")
 	}
+
+	// The cursor continues exactly after the last returned row.
+	serve(readHandler(q), "/v1/transfers?limit=1&cursor="+got.NextCursor)
+	if q.gotFilter.After == nil || q.gotFilter.After.ID != "tr-1" {
+		t.Fatalf("keyset after = %+v, want id tr-1", q.gotFilter.After)
+	}
 }
 
-func TestListTransfersEmptyPageIsAnEmptyArrayAndEchoesDefaultLimit(t *testing.T) {
+func TestListTransfersLastPageHasNoNextCursor(t *testing.T) {
 	response := serve(readHandler(&stubTransferQuery{}), "/v1/transfers")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
@@ -227,19 +233,25 @@ func TestListTransfersEmptyPageIsAnEmptyArrayAndEchoesDefaultLimit(t *testing.T)
 	if string(raw["items"]) != "[]" {
 		t.Fatalf("items = %s, want []", raw["items"])
 	}
-	if string(raw["limit"]) != "50" {
-		t.Fatalf("limit = %s, want the default 50", raw["limit"])
+	if _, has := raw["nextCursor"]; has {
+		t.Fatalf("nextCursor must be absent on the last page: %s", raw["nextCursor"])
 	}
 }
 
 func TestListTransfersBadQueryIs400Problem(t *testing.T) {
-	for _, target := range []string{
-		"/v1/transfers?state=FLYING",
-		"/v1/transfers?limit=0",
-		"/v1/transfers?limit=201",
-		"/v1/transfers?limit=abc",
-		"/v1/transfers?offset=-1",
-		"/v1/transfers?offset=x",
+	for target, want := range map[string]string{
+		"/v1/transfers?state=FLYING":      "invalid-query",
+		"/v1/transfers?limit=0":           "invalid-limit",
+		"/v1/transfers?limit=501":         "invalid-limit",
+		"/v1/transfers?limit=abc":         "invalid-limit",
+		"/v1/transfers?limit=":            "invalid-limit",
+		"/v1/transfers?limit=1&limit=2":   "invalid-limit",
+		"/v1/transfers?cursor=%21%21":     "invalid-cursor",
+		"/v1/transfers?cursor=a&cursor=b": "invalid-cursor",
+		"/v1/transfers?offset=1":          "unknown-query-parameter",
+		"/v1/transfers?after=x":           "unknown-query-parameter",
+		"/v1/transfers?nextToken=x":       "unknown-query-parameter",
+		"/v1/transfers?site=WH1":          "unknown-query-parameter",
 	} {
 		response := serve(readHandler(&stubTransferQuery{}), target)
 		if response.Code != http.StatusBadRequest {
@@ -248,6 +260,17 @@ func TestListTransfersBadQueryIs400Problem(t *testing.T) {
 		if ct := response.Header().Get("Content-Type"); ct != "application/problem+json" {
 			t.Fatalf("%s Content-Type = %q", target, ct)
 		}
+		if got := problemType(t, response); got != want {
+			t.Fatalf("%s problem = %s, want %s", target, got, want)
+		}
+	}
+}
+
+func TestListTransfersCursorOfAnotherCollectionIsInvalidCursor(t *testing.T) {
+	q := &stubTransferQuery{err: transfer.ErrInvalidPageAfter}
+	response := serve(readHandler(q), "/v1/transfers?cursor="+page.Encode(page.Position{Sort: "not-a-time", ID: "x"}))
+	if response.Code != http.StatusBadRequest || problemType(t, response) != "invalid-cursor" {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
 }
 
@@ -259,10 +282,14 @@ func TestListTransfersStoreFailureIs503(t *testing.T) {
 }
 
 func TestReadRoutesDoNotShadowTheApprovalRoute(t *testing.T) {
-	// POST /v1/transfers:approve must still reach the approval handler (503
+	// POST /v1/transfer-approvals must still reach the approval handler (503
 	// unconfigured), not the GET /v1/transfers/{id} read route.
 	response := httptest.NewRecorder()
-	readHandler(&stubTransferQuery{}).Routes().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/transfers:approve", nil))
+	h := readHandler(&stubTransferQuery{})
+	h.Idempotency = newFakeIdempotency()
+	request := httptest.NewRequest(http.MethodPost, "/v1/transfer-approvals", nil)
+	request.Header.Set("Idempotency-Key", "shadow-1")
+	h.Routes().ServeHTTP(response, request)
 	var p problem
 	if err := json.NewDecoder(response.Body).Decode(&p); err != nil {
 		t.Fatal(err)

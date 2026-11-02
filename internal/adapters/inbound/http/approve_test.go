@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -109,6 +108,7 @@ func httpApproveFacts() planning.Facts {
 
 func httpApproveHandler(transfers *httpFakeTransfers, events *httpFakeEvents, facts planning.Facts) Handler {
 	return Handler{
+		Idempotency: newFakeIdempotency(),
 		Approve: &usecases.ApproveTransfer{
 			Transfers:    transfers,
 			Events:       events,
@@ -140,7 +140,7 @@ func httpApproveBody(policyVersion string) []byte {
 }
 
 func httpPostApprove(h Handler, key string, body []byte) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/v1/transfers:approve", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/transfer-approvals", bytes.NewReader(body))
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
@@ -158,6 +158,7 @@ func TestApproveEndpointPersistsSaga(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
+	firstBody := rec.Body.String()
 	var dto approveTransferDTO
 	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
 		t.Fatal(err)
@@ -175,15 +176,14 @@ func TestApproveEndpointPersistsSaga(t *testing.T) {
 		t.Fatalf("events = %d, want 6 (2 integration + 4 analytics occurrences)", len(events.events))
 	}
 
-	// Same key + payload again: 200 replayed, no second fan-out.
+	// Same key + payload again: the stored answer is replayed byte for byte
+	// with Idempotency-Replayed: true, and there is no second fan-out.
 	rec2 := httpPostApprove(h, "idem-http-1", httpApproveBody("policy-v3"))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("replay status = %d: %s", rec2.Code, rec2.Body.String())
 	}
-	var dto2 approveTransferDTO
-	_ = json.NewDecoder(rec2.Body).Decode(&dto2)
-	if !dto2.Replayed || dto2.TransferID != dto.TransferID {
-		t.Fatalf("replay = %+v", dto2)
+	if rec2.Header().Get("Idempotency-Replayed") != "true" || rec2.Body.String() != firstBody {
+		t.Fatalf("replay header %q, identical body %v", rec2.Header().Get("Idempotency-Replayed"), rec2.Body.String() == firstBody)
 	}
 	if len(events.events) != 6 {
 		t.Fatalf("events after replay = %d, want 6", len(events.events))
@@ -203,7 +203,7 @@ func TestApproveEndpointRequiresIdempotencyKey(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Type == "" || p.Title == "" || p.Status != http.StatusBadRequest {
+	if p.Type != "https://warehouse.example/problems/idempotency-key-required" || p.Title == "" || p.Status != http.StatusBadRequest {
 		t.Fatalf("problem = %+v", p)
 	}
 }
@@ -234,7 +234,7 @@ func TestApproveEndpointStaleFactsYield422(t *testing.T) {
 }
 
 func TestApproveEndpointUnconfiguredYields503(t *testing.T) {
-	h := Handler{}
+	h := Handler{Idempotency: newFakeIdempotency()}
 	rec := httpPostApprove(h, "idem-http-4", httpApproveBody("policy-v3"))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
@@ -260,7 +260,9 @@ func TestApproveEndpointConflictYields409(t *testing.T) {
 	if rec2.Code != http.StatusConflict {
 		t.Fatalf("status = %d: %s", rec2.Code, rec2.Body.String())
 	}
-	if fmt.Sprint(rec2.Code) != "409" {
-		t.Fatal("unreachable")
+	var p problem
+	_ = json.NewDecoder(rec2.Body).Decode(&p)
+	if p.Type != "https://warehouse.example/problems/idempotency-key-reused" {
+		t.Fatalf("problem type = %q, want idempotency-key-reused (never 422)", p.Type)
 	}
 }

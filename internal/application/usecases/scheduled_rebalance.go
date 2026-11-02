@@ -15,8 +15,8 @@ import (
 // SAME planner, persists a rebalance_runs row and publishes one
 // RebalanceRunCompleted analytics occurrence. It NEVER approves anything
 // and NEVER emits an allocation command: proposals are advisory, exactly
-// like POST /v1/transfer-proposals:generate — turning one into a real
-// transfer stays an operator's explicit POST /v1/transfers:approve.
+// like POST /v1/transfer-proposal-runs — turning one into a real
+// transfer stays an operator's explicit POST /v1/transfer-approvals.
 //
 // A fail-closed snapshot build (stale/missing facts) is NOT an error of
 // the pass: the run records outcome FAILED with the refusal as its
@@ -204,13 +204,9 @@ type ListRebalanceRuns struct {
 	Runs ports.RebalanceRunRepository
 }
 
-// Execute lists runs bounded by limit (clamped to [1,200], default 50).
-func (u ListRebalanceRuns) Execute(ctx context.Context, limit int) ([]transfer.RebalanceRun, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	return u.Runs.List(ctx, limit)
+// Execute lists up to limit runs newest-first after the keyset (nil is page
+// one). The caller asks for one extra row to learn whether a next page
+// exists; limit is validated at the REST boundary (1-500).
+func (u ListRebalanceRuns) Execute(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.RebalanceRun, error) {
+	return u.Runs.ListPage(ctx, after, limit)
 }

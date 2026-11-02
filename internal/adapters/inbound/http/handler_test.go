@@ -30,8 +30,9 @@ func TestGenerateReturnsAdvisoryProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := Handler{Generate: usecases.GenerateTransferProposals{}}
-	request := httptest.NewRequest(http.MethodPost, "/v1/transfer-proposals:generate", bytes.NewReader(payload))
+	h := Handler{Generate: usecases.GenerateTransferProposals{}, Idempotency: newFakeIdempotency()}
+	request := httptest.NewRequest(http.MethodPost, "/v1/transfer-proposal-runs", bytes.NewReader(payload))
+	request.Header.Set("Idempotency-Key", "gen-1")
 	response := httptest.NewRecorder()
 	h.Routes().ServeHTTP(response, request)
 
@@ -50,8 +51,9 @@ func TestGenerateReturnsAdvisoryProposal(t *testing.T) {
 }
 
 func TestGenerateReturnsProblemForInvalidSnapshot(t *testing.T) {
-	h := Handler{Generate: usecases.GenerateTransferProposals{}}
-	request := httptest.NewRequest(http.MethodPost, "/v1/transfer-proposals:generate", bytes.NewBufferString(`{"positions":[]}`))
+	h := Handler{Generate: usecases.GenerateTransferProposals{}, Idempotency: newFakeIdempotency()}
+	request := httptest.NewRequest(http.MethodPost, "/v1/transfer-proposal-runs", bytes.NewBufferString(`{"positions":[]}`))
+	request.Header.Set("Idempotency-Key", "gen-2")
 	response := httptest.NewRecorder()
 	h.Routes().ServeHTTP(response, request)
 
