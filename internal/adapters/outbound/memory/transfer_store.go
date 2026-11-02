@@ -184,13 +184,16 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 	if room := total - start; limit < room {
 		end = start + limit
 	}
-	// Explicit non-negative capacity: make's size argument must provably never
-	// be negative. The clamps above guarantee it, but CodeQL
-	// (go/allocation-size-overflow) cannot see through min/max chains, so the
-	// bound is restated locally.
-	n := max(end-start, 0)
-	items := make([]*transfer.InterWarehouseTransfer, 0, n)
-	for _, snap := range matches[start:end] {
+	// Capacity comes from the page length, never from arithmetic on
+	// caller input, and is bounded above by a constant immediately before
+	// make (CodeQL go/allocation-size-overflow).
+	page := matches[start:end]
+	capacity := len(page)
+	if capacity > transfer.MaxKeysetFetch {
+		capacity = transfer.MaxKeysetFetch
+	}
+	items := make([]*transfer.InterWarehouseTransfer, 0, capacity)
+	for _, snap := range page {
 		items = append(items, transfer.Rehydrate(snap))
 	}
 	return transfer.TransferPage{Items: items, Total: total}, nil
