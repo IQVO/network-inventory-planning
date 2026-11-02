@@ -54,7 +54,7 @@ nothing in `web/` talks to any other bounded context, and nothing in
   never an empty simulation; "ready, nothing advisable" is a separate empty state.
 - The simulation has proposals only (no stock levels): the per-site table is
   derived from the options and says so.
-- Approve = `POST /v1/transfers:approve` with an `Idempotency-Key` minted when
+- Approve = `POST /v1/transfer-approvals` with an `Idempotency-Key` minted when
   the form opens and REUSED for retries of the same approval; a different option
   gets a new key. 409 / 422 / 503 problems are shown with title and detail;
   `replayed: true` is stated.

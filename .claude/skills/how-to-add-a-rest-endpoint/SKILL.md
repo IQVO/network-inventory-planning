@@ -12,7 +12,7 @@ this order — domain first, adapter last — never the reverse; writing the
 HTTP handler before the domain invariant it enforces produces handlers
 that validate nothing and use cases that get bypassed.
 
-This walks the exact path `POST /v1/transfers:approve` took
+This walks the exact path `POST /v1/transfer-approvals` took
 (`internal/application/usecases/approve_transfer.go` +
 `internal/adapters/inbound/http/handler.go`'s `approve` handler) as the
 concrete worked example — read those two files alongside this guide.
