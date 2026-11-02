@@ -871,8 +871,8 @@ components:
           description: |
             One advisory view per site, built from the local read models. This
             endpoint does NOT propose transfers; proposals come from
-            POST /v1/transfer-proposals:generate over an explicit snapshot, and
-            an operator approves one with POST /v1/transfers:approve.
+            POST /v1/transfer-proposal-runs over an explicit snapshot, and
+            an operator approves one with POST /v1/transfer-approvals.
           items:
             $ref: '#/components/schemas/SiteSimulation'
     SiteSimulation:
