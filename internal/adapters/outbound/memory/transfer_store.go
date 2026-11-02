@@ -176,7 +176,14 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 		limit = transfer.MaxKeysetFetch
 	}
 	start := min(max(filter.Offset, 0), total)
-	end := min(start+limit, total)
+	// Overflow-proof end: start+limit can overflow int when start is large
+	// (CodeQL go/allocation-size-overflow), so compare against the remaining
+	// room instead of adding unconditionally; the addition only runs when the
+	// sum is provably within bounds.
+	end := total
+	if room := total - start; limit < room {
+		end = start + limit
+	}
 	// Explicit non-negative capacity: make's size argument must provably never
 	// be negative. The clamps above guarantee it, but CodeQL
 	// (go/allocation-size-overflow) cannot see through min/max chains, so the
