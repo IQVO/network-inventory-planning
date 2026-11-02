@@ -176,9 +176,24 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 		limit = transfer.MaxKeysetFetch
 	}
 	start := min(max(filter.Offset, 0), total)
-	end := min(start+limit, total)
-	items := make([]*transfer.InterWarehouseTransfer, 0, end-start)
-	for _, snap := range matches[start:end] {
+	// Overflow-proof end: start+limit can overflow int when start is large
+	// (CodeQL go/allocation-size-overflow), so compare against the remaining
+	// room instead of adding unconditionally; the addition only runs when the
+	// sum is provably within bounds.
+	end := total
+	if room := total - start; limit < room {
+		end = start + limit
+	}
+	// Capacity comes from the page length, never from arithmetic on
+	// caller input, and is bounded above by a constant immediately before
+	// make (CodeQL go/allocation-size-overflow).
+	page := matches[start:end]
+	capacity := len(page)
+	if capacity > transfer.MaxKeysetFetch {
+		capacity = transfer.MaxKeysetFetch
+	}
+	items := make([]*transfer.InterWarehouseTransfer, 0, capacity)
+	for _, snap := range page {
 		items = append(items, transfer.Rehydrate(snap))
 	}
 	return transfer.TransferPage{Items: items, Total: total}, nil
