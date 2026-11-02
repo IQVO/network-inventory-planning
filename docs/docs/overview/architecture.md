@@ -133,9 +133,9 @@ flowchart TB
 
 | Configuration | What runs |
 | --- | --- |
-| `DATABASE_URL` unset | Only `GET /healthz` and `POST /v1/transfer-proposals:generate` work. Every other route answers a 503 problem (`read-models-unavailable`, `saga-unavailable`, `rebalance-runs-unavailable`, `read-side-unavailable`, `catalogue-unavailable`). No migrations, no consumers. |
+| `DATABASE_URL` unset | Only `GET /healthz` and `POST /v1/transfer-proposal-runs` work. Every other route answers a 503 problem (`read-models-unavailable`, `saga-unavailable`, `rebalance-runs-unavailable`, `read-side-unavailable`, `catalogue-unavailable`). No migrations, no consumers. |
 | `DATABASE_URL` set | Migrations run (refuse to boot on failure), the pool is pinged, simulation and the read side are wired. |
-| + `KAFKA_BROKERS` | The outbox writer exists, so `POST /v1/transfers:approve` is wired; each consumer whose `*_CONSUMER_GROUP` is set starts; the saga-health ticker starts (default every 5 m). |
+| + `KAFKA_BROKERS` | The outbox writer exists, so `POST /v1/transfer-approvals` is wired; each consumer whose `*_CONSUMER_GROUP` is set starts; the saga-health ticker starts (default every 5 m). |
 | + `OUTBOX_RELAY_ENABLED` non-empty | The relay drains `outbox_events` onto Kafka. Without it the rows wait. |
 | + `TRANSFER_PICK_PATH_ID` and a valid pick CPT offset | Approval is accepted; otherwise it answers 503 `config-incomplete`. |
 | + `NIP_REBALANCE_SCHEDULE` | The observe-only rebalance ticker starts. |

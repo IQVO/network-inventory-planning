@@ -59,9 +59,7 @@ Feature: Reading transfers and their audit trail
     When I request GET "/v1/transfers"
     Then the response status is 200
     And the JSON array "items" has 0 elements
-    And the JSON field "total" is 0
-    And the JSON field "limit" is 50
-    And the JSON field "offset" is 0
+    And the JSON field "nextCursor" is absent
 
   Scenario: Transfers are listed newest first, without their audit trails
     Given an approved transfer "T1"
@@ -71,7 +69,7 @@ Feature: Reading transfers and their audit trail
     And an approved transfer "T3"
     When I request GET "/v1/transfers"
     Then the response status is 200
-    And the JSON field "total" is 3
+    And the JSON array "items" has 3 elements
     And the JSON field "items.0.id" is "{T3}"
     And the JSON field "items.1.id" is "{T2}"
     And the JSON field "items.2.id" is "{T1}"
@@ -83,7 +81,7 @@ Feature: Reading transfers and their audit trail
     And a transfer "T2" in state "ALLOCATED"
     When I request GET "/v1/transfers?state=<spelling>"
     Then the response status is 200
-    And the JSON field "total" is 1
+    And the JSON array "items" has 1 element
     And the JSON field "items.0.id" is "{T2}"
 
     Examples: spellings of ALLOCATED
@@ -97,13 +95,13 @@ Feature: Reading transfers and their audit trail
     And 1 minute passes
     And an approved transfer "T2" of 3 units of SKU "SKU-1" from "WH2" to "WH1"
     When I request GET "/v1/transfers?originSiteId=WH1"
-    Then the JSON field "total" is 1
+    Then the JSON array "items" has 1 element
     And the JSON field "items.0.id" is "{T1}"
     When I request GET "/v1/transfers?destinationSiteId=WH1"
-    Then the JSON field "total" is 1
+    Then the JSON array "items" has 1 element
     And the JSON field "items.0.id" is "{T2}"
     When I request GET "/v1/transfers?originSiteId=WH1&destinationSiteId=WH1"
-    Then the JSON field "total" is 0
+    Then the JSON array "items" has 0 elements
     And the JSON array "items" has 0 elements
 
   Scenario: Filters combine
@@ -111,42 +109,41 @@ Feature: Reading transfers and their audit trail
     And 1 minute passes
     And a transfer "T2" of 3 units of SKU "SKU-1" from "WH1" to "WH2" in state "ALLOCATED"
     When I request GET "/v1/transfers?originSiteId=WH1&state=ALLOCATING"
-    Then the JSON field "total" is 1
+    Then the JSON array "items" has 1 element
     And the JSON field "items.0.id" is "{T1}"
 
-  Scenario: Paging reports the unpaged total
+  Scenario: Keyset paging walks every transfer once, newest first
     Given an approved transfer "T1"
     And 1 minute passes
     And an approved transfer "T2"
     And 1 minute passes
     And an approved transfer "T3"
     When I request GET "/v1/transfers?limit=2"
-    Then the JSON field "total" is 3
-    And the JSON array "items" has 2 elements
-    And the JSON field "limit" is 2
-    And the JSON field "offset" is 0
-    When I request GET "/v1/transfers?limit=2&offset=2"
+    Then the JSON array "items" has 2 elements
+    And the JSON field "items.0.id" is "{T3}"
+    And the JSON field "items.1.id" is "{T2}"
+    And the JSON field "nextCursor" is present
+    When I request the next page of "/v1/transfers?limit=2"
     Then the JSON array "items" has 1 element
     And the JSON field "items.0.id" is "{T1}"
-    And the JSON field "offset" is 2
-    When I request GET "/v1/transfers?offset=3"
-    Then the JSON field "total" is 3
-    And the JSON array "items" has 0 elements
+    And the JSON field "nextCursor" is absent
 
   Scenario Outline: A query the service cannot honour is a 400
     When I request GET "/v1/transfers?<query>"
     Then the response status is 400
-    And the problem detail type is "invalid-query"
+    And the problem detail type is "<type>"
 
     Examples: invalid queries
-      | query        | why                              |
-      | state=SHIPPED | not a lifecycle state            |
-      | limit=0      | below the minimum page size of 1 |
-      | limit=-1     | negative page size               |
-      | limit=201    | above the maximum page size      |
-      | limit=abc    | not an integer                   |
-      | offset=-1    | negative offset                  |
-      | offset=abc   | not an integer                   |
+      | query         | type                    | why                               |
+      | state=SHIPPED | invalid-query           | not a lifecycle state             |
+      | limit=0       | invalid-limit           | below the minimum page size of 1  |
+      | limit=-1      | invalid-limit           | negative page size                |
+      | limit=501     | invalid-limit           | above the maximum page size       |
+      | limit=abc     | invalid-limit           | not an integer                    |
+      | cursor=!!!!     | invalid-cursor          | a cursor that does not decode     |
+      | offset=1      | unknown-query-parameter | retired paging parameter          |
+      | after=x       | unknown-query-parameter | retired paging parameter          |
+      | nextToken=x   | unknown-query-parameter | retired paging parameter          |
 
   Scenario Outline: An instance without a database cannot read transfers
     Given this instance runs without a database

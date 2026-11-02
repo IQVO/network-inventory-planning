@@ -6,7 +6,7 @@ Status: Accepted
 
 Operators had no screen for this context: transfers, their audit trail and the
 network simulation were reachable only through REST/MCP (ADR-0007) and the
-approval action only by calling `POST /v1/transfers:approve` by hand. Every
+approval action only by calling `POST /v1/transfer-approvals` by hand. Every
 other bounded context with an operator surface ships a Vite + React **Module
 Federation remote** that `warehouse-console` loads at runtime (fleet MFE
 console architecture; reference: `warehouse-planning/web`, container
@@ -39,7 +39,7 @@ console architecture; reference: `warehouse-planning/web`, container
 |---|---|---|
 | `/` Transfers | `GET /v1/transfers` (state, originSiteId, destinationSiteId, limit/offset) | none |
 | `/transfers/:id` Transfer detail | `GET /v1/transfers/{id}` | none |
-| `/simulation` Network simulation | `GET /v1/transfer-simulations` | `POST /v1/transfers:approve` |
+| `/simulation` Network simulation | `GET /v1/transfer-simulations` | `POST /v1/transfer-approvals` |
 | `/rebalance-runs` Rebalance runs | `GET /v1/rebalance-runs` | none |
 
 Behaviours that are contract, not taste:
@@ -66,7 +66,7 @@ Behaviours that are contract, not taste:
   plus the optional operator reason. Problems are rendered with their title,
   detail and HTTP status: 409 (key reused for another payload), 422 (fail-closed
   validation), 503 (configuration incomplete / read models not ready). A
-  `replayed: true` answer is said out loud ("showing the original transfer").
+  `Idempotency-Replayed: true` answer is said out loud ("showing the original transfer").
 - The remote never mutates anything except through that one endpoint.
 
 ### Delivery
@@ -93,7 +93,7 @@ Behaviours that are contract, not taste:
 - **Kong's global CORS plugin must allow the `Idempotency-Key` request header**
   (`warehouse-infra/terraform/kong-cors.tf` currently allows only `Accept`,
   `Content-Type`, `Origin`). Until it does, the browser's preflight for
-  `POST /v1/transfers:approve` is rejected and the Approve action cannot work
+  `POST /v1/transfer-approvals` is rejected and the Approve action cannot work
   from the console; the read screens are unaffected. MSW/fetch-mock tests
   cannot see this; it is a warehouse-infra change tracked outside this repo.
 - `warehouse-infra` (`frontends.tf` `frontend_remotes` and the chart override
@@ -135,7 +135,7 @@ agreed with each other and with nothing real.
   service defines it; no other threshold is introduced. The fail-closed 503
   handling is unchanged.
 - Approve is an **operator-driven form**, not a pick-from-options list. Proposals
-  exist only as the result of `POST /v1/transfer-proposals:generate` over an
+  exist only as the result of `POST /v1/transfer-proposal-runs` over an
   explicit snapshot (positions, policies, lanes) that a browser operator cannot
   reasonably hand-write, so the console does not pretend to offer them. The
   operator chooses the origin (`originEnabled` sites) and the destination

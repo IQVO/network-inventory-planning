@@ -264,7 +264,7 @@ operations:
     description: |
       Published through the transactional outbox in the same transaction
       that persists the saga's APPROVED transition (POST
-      /v1/transfers:approve). Subject and Kafka key are the transfer id.
+      /v1/transfer-approvals). Subject and Kafka key are the transfer id.
   sendTransferAllocationRequested:
     action: send
     channel:

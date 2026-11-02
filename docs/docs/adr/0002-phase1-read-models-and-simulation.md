@@ -7,7 +7,7 @@ Status: Accepted (the staleness and direction rules of "Fail-closed PlanningSnap
 ADR-0001 established network-inventory-planning as a bounded context that
 integrates with siblings exclusively through versioned CloudEvents facts —
 never synchronous calls. Phase 0 shipped the explicit-snapshot diagnostic
-endpoint (`POST /v1/transfer-proposals:generate`), which requires a caller
+endpoint (`POST /v1/transfer-proposal-runs`), which requires a caller
 to assemble a coherent snapshot by hand. Planning anything real needs the
 facts themselves, held locally, with explicit rules for what happens when
 they are missing or stale.
@@ -100,7 +100,7 @@ per-site view (capability directions, window-filtered demand total,
 capacity over window, headroom) with `advisory: true`. It reserves
 nothing, moves nothing, promises nothing. Incomplete/stale read models
 yield `503` with an RFC 7807 problem (`read-models-incomplete`). The
-explicit-snapshot `POST /v1/transfer-proposals:generate` stays unchanged
+explicit-snapshot `POST /v1/transfer-proposal-runs` stays unchanged
 as the diagnostic path.
 
 ## Consequences

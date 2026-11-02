@@ -136,7 +136,7 @@ func TestPutRebalancePolicy_WithoutIfMatchAppliesToTheCurrentRevision(t *testing
 	if err != nil || unconditional.Entry.Revision != 3 {
 		t.Fatalf("a PUT without If-Match applies to the current revision: %+v err=%v", unconditional, err)
 	}
-	list, err := ListRebalancePolicies{Policies: repo}.Execute(ctx)
+	list, err := ListRebalancePolicies{Policies: repo}.Execute(ctx, nil, 100)
 	if err != nil || len(list) != 1 || list[0].Policy.TargetStock != 90 {
 		t.Fatalf("list = %+v err=%v", list, err)
 	}
@@ -202,8 +202,18 @@ func TestPutTransferLane_CreateReviseAndRefusals(t *testing.T) {
 	if _, err := (PutTransferLane{Lanes: repo}).Execute(ctx, lane, nil); err == nil {
 		t.Fatal("a use case without a clock must refuse")
 	}
-	list, err := ListTransferLanes{Lanes: repo}.Execute(ctx)
+	list, err := ListTransferLanes{Lanes: repo}.Execute(ctx, nil, 100)
 	if err != nil || len(list) != 1 || list[0].Lane.Enabled {
 		t.Fatalf("list = %+v err=%v", list, err)
 	}
+}
+
+func (f *fakePolicyRepo) ListPage(ctx context.Context, _ *transfer.PageAfter, limit int) ([]transfer.RebalancePolicy, error) {
+	all, _ := f.List(ctx)
+	return all[:min(limit, len(all))], nil
+}
+
+func (f *fakeLaneRepo) ListPage(ctx context.Context, _ *transfer.PageAfter, limit int) ([]transfer.TransferLane, error) {
+	all, _ := f.List(ctx)
+	return all[:min(limit, len(all))], nil
 }

@@ -9,13 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http/page"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
 
 // rebalancePolicyEntryDTO is the wire shape of one Rebalance Policy
 // catalogue entry (ADR 0015): the EXISTING Policy schema (the same shape
-// POST /v1/transfer-proposals:generate accepts) plus the catalogue's
+// POST /v1/transfer-proposal-runs accepts) plus the catalogue's
 // revision. Outcome is set only on a PUT response.
 type rebalancePolicyEntryDTO struct {
 	Policy    transfer.Policy `json:"policy"`
@@ -52,7 +53,15 @@ func (h Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 		catalogueUnavailable(w)
 		return
 	}
-	entries, err := h.ListPolicies.Execute(r.Context())
+	limit, after, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	entries, err := h.ListPolicies.Execute(r.Context(), after, page.FetchSize(limit))
+	if isInvalidCursor(err) {
+		writeInvalidCursor(w, err)
+		return
+	}
 	if err != nil {
 		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", "Rebalance policies could not be listed", err.Error())
 		return
@@ -61,9 +70,9 @@ func (h Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 	for _, e := range entries {
 		out = append(out, policyDTO(e, ""))
 	}
-	writeJSON(w, http.StatusOK, "", struct {
-		Policies []rebalancePolicyEntryDTO `json:"policies"`
-	}{Policies: out})
+	writeJSON(w, http.StatusOK, "", page.Of(out, limit, func(e rebalancePolicyEntryDTO) page.Position {
+		return page.Position{Sort: string(e.Policy.Site), ID: string(e.Policy.SKU)}
+	}))
 }
 
 // putPolicy serves PUT /v1/rebalance-policies: an idempotent upsert of
@@ -96,7 +105,15 @@ func (h Handler) listLanes(w http.ResponseWriter, r *http.Request) {
 		catalogueUnavailable(w)
 		return
 	}
-	entries, err := h.ListLanes.Execute(r.Context())
+	limit, after, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	entries, err := h.ListLanes.Execute(r.Context(), after, page.FetchSize(limit))
+	if isInvalidCursor(err) {
+		writeInvalidCursor(w, err)
+		return
+	}
 	if err != nil {
 		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", "Transfer lanes could not be listed", err.Error())
 		return
@@ -105,9 +122,9 @@ func (h Handler) listLanes(w http.ResponseWriter, r *http.Request) {
 	for _, e := range entries {
 		out = append(out, laneDTO(e, ""))
 	}
-	writeJSON(w, http.StatusOK, "", struct {
-		Lanes []transferLaneEntryDTO `json:"lanes"`
-	}{Lanes: out})
+	writeJSON(w, http.StatusOK, "", page.Of(out, limit, func(e transferLaneEntryDTO) page.Position {
+		return page.Position{Sort: string(e.Lane.Origin), ID: string(e.Lane.Destination)}
+	}))
 }
 
 // putLane serves PUT /v1/transfer-lanes: an idempotent upsert of the Lane

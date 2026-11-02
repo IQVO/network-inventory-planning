@@ -7,7 +7,7 @@ import { buildGenerateRequest } from "../lib";
 import { json, mockApi, problem } from "../test/fetchMock";
 import { SNAPSHOT_AS_OF, generateResponse, lane, policy, position } from "../test/fixtures";
 
-const POST = "POST /v1/transfer-proposals:generate";
+const POST = "POST /v1/transfer-proposal-runs";
 
 function mount() {
   return render(

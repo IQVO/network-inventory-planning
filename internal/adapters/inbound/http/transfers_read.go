@@ -3,13 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http/page"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
@@ -54,14 +53,6 @@ type auditEntryDTO struct {
 type transferDetailDTO struct {
 	transferDTO
 	Audit []auditEntryDTO `json:"audit"`
-}
-
-// transferListDTO is one page of GET /v1/transfers.
-type transferListDTO struct {
-	Items  []transferDTO `json:"items"`
-	Total  int           `json:"total"`
-	Limit  int           `json:"limit"`
-	Offset int           `json:"offset"`
 }
 
 func toTransferDTO(t *transfer.InterWarehouseTransfer) transferDTO {
@@ -112,63 +103,40 @@ func (h Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 }
 
 // listTransfers serves GET /v1/transfers (newest first), filtered by state,
-// originSiteId and destinationSiteId and paged by limit (<=200) / offset.
+// originSiteId and destinationSiteId and keyset-paged by limit / cursor.
 func (h Handler) listTransfers(w http.ResponseWriter, r *http.Request) {
 	if h.ListTransfers == nil {
 		writeReadSideUnavailable(w)
 		return
 	}
+	limit, after, ok := pageParams(w, r, "state", "originSiteId", "destinationSiteId")
+	if !ok {
+		return
+	}
 	query := r.URL.Query()
-	limit, err := intParam(query.Get("limit"), "limit")
-	if err != nil {
-		writeReadProblem(w, err)
-		return
-	}
-	// The spec's page size starts at 1; intParam's 0 means "absent", so an
-	// explicit limit=0 must be refused here rather than silently defaulted.
-	if query.Has("limit") && limit == 0 {
-		writeReadProblem(w, fmt.Errorf("%w: limit must be between 1 and %d, got 0", usecases.ErrInvalidTransferQuery, transfer.MaxListLimit))
-		return
-	}
-	offset, err := intParam(query.Get("offset"), "offset")
-	if err != nil {
-		writeReadProblem(w, err)
-		return
-	}
-	page, err := h.ListTransfers.Execute(r.Context(), usecases.ListTransfersInput{
+	rows, err := h.ListTransfers.Page(r.Context(), usecases.ListTransfersPageInput{
 		State:             query.Get("state"),
 		OriginSiteID:      query.Get("originSiteId"),
 		DestinationSiteID: query.Get("destinationSiteId"),
+		After:             after,
 		Limit:             limit,
-		Offset:            offset,
 	})
+	if isInvalidCursor(err) {
+		writeInvalidCursor(w, err)
+		return
+	}
 	if err != nil {
 		writeReadProblem(w, err)
 		return
 	}
-	items := make([]transferDTO, 0, len(page.Items))
-	for _, t := range page.Items {
+	items := make([]transferDTO, 0, len(rows))
+	for _, t := range rows {
 		items = append(items, toTransferDTO(t))
 	}
-	if limit == 0 {
-		limit = transfer.DefaultListLimit
-	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(transferListDTO{Items: items, Total: page.Total, Limit: limit, Offset: offset})
-}
-
-// intParam parses an optional non-negative integer query parameter; absent
-// means 0 (the use case applies its default). A malformed value is a
-// client error, reported through the same invalid-query path.
-func intParam(raw, name string) (int, error) {
-	if raw == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %s must be an integer, got %q", usecases.ErrInvalidTransferQuery, name, raw)
-	}
-	return n, nil
+	_ = json.NewEncoder(w).Encode(page.Of(items, limit, func(d transferDTO) page.Position {
+		return page.Position{Sort: d.CreatedAt.UTC().Format(time.RFC3339Nano), ID: d.ID}
+	}))
 }
 
 func writeReadSideUnavailable(w http.ResponseWriter) {

@@ -159,7 +159,7 @@ func TestPolicyCatalogueListsTheCurrentRevision(t *testing.T) {
 		`{"Version":"pv-2","Site":"WH2","SKU":"SKU-1","SafetyStock":5,"TargetStock":80,"UnitPriority":10}`)
 	list := do(t, h, http.MethodGet, "/v1/rebalance-policies", "", "")
 	var body struct {
-		Policies []rebalancePolicyEntryDTO `json:"policies"`
+		Policies []rebalancePolicyEntryDTO `json:"items"`
 	}
 	if err := json.NewDecoder(list.Body).Decode(&body); err != nil || list.Code != http.StatusOK {
 		t.Fatalf("list: %d %v", list.Code, err)
@@ -229,4 +229,12 @@ func TestCatalogueLostRaceIs409(t *testing.T) {
 	if r.Code != http.StatusConflict || problemType(t, r) != "concurrent-modification" {
 		t.Fatalf("lost race: %d %s", r.Code, r.Body.String())
 	}
+}
+
+func (s *stubPolicies) ListPage(_ context.Context, _ *transfer.PageAfter, limit int) ([]transfer.RebalancePolicy, error) {
+	return s.entries[:min(limit, len(s.entries))], nil
+}
+
+func (s *stubLanes) ListPage(_ context.Context, _ *transfer.PageAfter, limit int) ([]transfer.TransferLane, error) {
+	return s.entries[:min(limit, len(s.entries))], nil
 }

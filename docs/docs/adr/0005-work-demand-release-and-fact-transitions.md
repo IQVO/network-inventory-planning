@@ -90,7 +90,7 @@ WES-side replay dedupes onto the same work unit.
 ### Fail-closed at approve time
 
 `TRANSFER_PICK_PATH_ID` has NO default. When it (or a valid
-`TRANSFER_PICK_CPT_OFFSET`) is unset, `POST /v1/transfers:approve`
+`TRANSFER_PICK_CPT_OFFSET`) is unset, `POST /v1/transfer-approvals`
 answers **503 `config-incomplete`** and persists nothing: an approval
 would mint a transfer whose allocation reply has no pick demand to
 release — the "allocated-but-unworked" strand. Configuration gaps are

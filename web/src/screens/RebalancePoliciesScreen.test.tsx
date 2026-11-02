@@ -61,7 +61,7 @@ describe("RebalancePoliciesScreen", () => {
   });
 
   it("shows an empty state", async () => {
-    mockApi({ [LIST]: json({ policies: [] }) });
+    mockApi({ [LIST]: json({ items: [] }) });
     mount();
     expect(await screen.findByText(/The policy catalogue is empty/)).toBeInTheDocument();
   });

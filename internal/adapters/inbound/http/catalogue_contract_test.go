@@ -17,7 +17,12 @@ func TestCatalogueResponsesMatchTheOpenAPISchema(t *testing.T) {
 	check := func(name string, body map[string]any) {
 		t.Helper()
 		props, required, _ := schemaKeys(t, schemas, name)
-		if got := jsonKeys(body); !equalStrings(got, props) {
+		// nextCursor is the one optional member a last page legitimately omits.
+		want := props
+		if _, hasItems := body["items"]; hasItems {
+			want = withoutKey(props, "nextCursor")
+		}
+		if got := jsonKeys(body); !equalStrings(got, want) {
 			t.Fatalf("%s: response keys %v != schema properties %v", name, got, props)
 		}
 		for _, r := range required {
@@ -42,7 +47,7 @@ func TestCatalogueResponsesMatchTheOpenAPISchema(t *testing.T) {
 
 	list := decode(do(t, h, http.MethodGet, "/v1/rebalance-policies", "", "").Body.Bytes())
 	check("RebalancePolicyList", list)
-	listed := list["policies"].([]any)[0].(map[string]any)
+	listed := list["items"].([]any)[0].(map[string]any)
 	delete(entry, "outcome")
 	if got, want := jsonKeys(listed), jsonKeys(entry); !equalStrings(got, want) {
 		t.Fatalf("listed entry keys %v != PUT entry keys without outcome %v", got, want)
@@ -54,4 +59,14 @@ func TestCatalogueResponsesMatchTheOpenAPISchema(t *testing.T) {
 	check("TransferLaneEntry", laneEntry)
 	check("Lane", laneEntry["lane"].(map[string]any))
 	check("TransferLaneList", decode(do(t, h, http.MethodGet, "/v1/transfer-lanes", "", "").Body.Bytes()))
+}
+
+func withoutKey(keys []string, drop string) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != drop {
+			out = append(out, k)
+		}
+	}
+	return out
 }

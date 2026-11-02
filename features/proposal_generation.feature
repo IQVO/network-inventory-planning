@@ -1,5 +1,5 @@
 # Derived from: apis/openapi.yaml (generateTransferProposals:
-# POST /v1/transfer-proposals:generate) and .claude/rules/domain-model.md
+# POST /v1/transfer-proposal-runs) and .claude/rules/domain-model.md
 # (Transfer Proposal aggregate: only known positions participate; source
 # protection remains intact; a route must be allowed; quantity is positive and
 # bounded by source surplus and destination deficit; score must be positive).
@@ -176,7 +176,7 @@ Feature: Advisory transfer proposals from a declared planning snapshot
     Then the response status is 422
     And the problem detail type is "invalid-planning-snapshot"
 
-  Scenario: Generation works on an instance without a database
+  Scenario: A keyed write on an instance without a database is refused, not run unkeyed
     Given this instance runs without a database
     And site "WH1" has 100 available units of SKU "SKU-1"
     And site "WH1" holds policy "policy-v7" for SKU "SKU-1" with safety stock 20, target stock 0 and unit priority 0
@@ -184,11 +184,11 @@ Feature: Advisory transfer proposals from a declared planning snapshot
     And site "WH2" holds policy "policy-v7" for SKU "SKU-1" with safety stock 0, target stock 50 and unit priority 3
     And an enabled lane from "WH1" to "WH2" with lead time 48 hours and unit handling cost 1
     When I generate transfer proposals
-    Then the response status is 200
-    And the JSON field "proposals.0.Quantity" is 40
+    Then the response status is 503
+    And the problem detail type is "idempotency-unavailable"
 
   Scenario Outline: A request that is not a valid snapshot document is a 400
-    When I send POST "/v1/transfer-proposals:generate" with this body:
+    When I send POST "/v1/transfer-proposal-runs" with this body:
       """
       <body>
       """

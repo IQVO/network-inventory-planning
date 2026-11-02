@@ -17,6 +17,7 @@ package main_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -152,6 +153,7 @@ func (w *world) fullHandler() inboundhttp.Handler {
 		ListPolicies:      &usecases.ListRebalancePolicies{Policies: w.policies},
 		PutLane:           &usecases.PutTransferLane{Lanes: w.lanes, Now: w.clock.Now},
 		ListLanes:         &usecases.ListTransferLanes{Lanes: w.lanes},
+		Idempotency:       memory.NewIdempotencyStore(),
 	}
 }
 
@@ -171,6 +173,8 @@ type request struct {
 	path    string
 	headers map[string]string
 	body    []byte
+	// keyless sends a POST/PATCH without the harness-injected Idempotency-Key.
+	keyless bool
 }
 
 // call issues a real net/http request and returns status, body and headers
@@ -203,8 +207,21 @@ func (w *world) call(ctx context.Context, r request) (int, []byte, http.Header, 
 }
 
 // record issues a request and remembers it as the response the Then steps
-// assert against.
+// assert against. The REST guideline requires an Idempotency-Key on every
+// POST and PATCH; the harness never asserts the missing-key error, so a
+// keyless write gets a fresh key here (steps that test keyed behaviour pass
+// their own and keep it).
 func (w *world) record(ctx context.Context, r request) error {
+	if !r.keyless && (r.method == http.MethodPost || r.method == http.MethodPatch) && r.headers["Idempotency-Key"] == "" {
+		buf := make([]byte, 8)
+		if _, err := rand.Read(buf); err != nil {
+			return err
+		}
+		if r.headers == nil {
+			r.headers = map[string]string{}
+		}
+		r.headers["Idempotency-Key"] = fmt.Sprintf("bdd-%x", buf)
+	}
 	status, body, headers, err := w.call(ctx, r)
 	if err != nil {
 		return err
@@ -218,7 +235,7 @@ func (w *world) record(ctx context.Context, r request) error {
 // transfer id it produced, so later steps can say {T1}.
 func (w *world) rememberApproval(r request) {
 	key := r.headers["Idempotency-Key"]
-	if key == "" || w.status != http.StatusOK || r.path != "/v1/transfers:approve" {
+	if key == "" || w.status != http.StatusOK || r.path != "/v1/transfer-approvals" {
 		return
 	}
 	var out struct {
@@ -303,6 +320,26 @@ func (w *world) iRequestTheReport(ctx context.Context, path string) error {
 
 func (w *world) iPostBody(ctx context.Context, path string, body *godog.DocString) error {
 	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: path, body: []byte(w.expand(body.Content))})
+}
+
+func (w *world) iPostBodyKeyless(ctx context.Context, path string, body *godog.DocString) error {
+	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: path, keyless: true, body: []byte(w.expand(body.Content))})
+}
+
+// iRequestNextPage follows nextCursor of the last response: the same path
+// (filters repeated) plus cursor=<nextCursor>.
+func (w *world) iRequestNextPage(ctx context.Context, path string) error {
+	var page struct {
+		NextCursor string `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(w.body, &page); err != nil || page.NextCursor == "" {
+		return fmt.Errorf("the last response has no nextCursor: %s", string(w.body))
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return w.iRequestGET(ctx, path+sep+"cursor="+page.NextCursor)
 }
 
 func (w *world) iPostBodyWithKey(ctx context.Context, path, key string, body *godog.DocString) error {
@@ -473,6 +510,8 @@ func (w *world) registerHTTPSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^I request GET "([^"]*)"$`, w.iRequestGET)
 	sc.Step(`^I request the report "([^"]*)"$`, w.iRequestTheReport)
 	sc.Step(`^I send POST "([^"]*)" with this body:$`, w.iPostBody)
+	sc.Step(`^I send POST "([^"]*)" without an idempotency key and this body:$`, w.iPostBodyKeyless)
+	sc.Step(`^I request the next page of "([^"]*)"$`, w.iRequestNextPage)
 	sc.Step(`^I send POST "([^"]*)" with the idempotency key "([^"]*)" and this body:$`, w.iPostBodyWithKey)
 
 	sc.Step(`^the response status is (\d+)$`, w.theResponseStatusIs)
