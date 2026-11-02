@@ -105,9 +105,24 @@ info:
     transaction commits. Consumer group ids are environment-configured
     (SITE_CAPABILITY_CONSUMER_GROUP, SITE_SKU_DEMAND_CONSUMER_GROUP,
     CAPACITY_PLAN_CONSUMER_GROUP, TRANSFER_REPLY_CONSUMER_GROUP,
-    TRANSFER_FACT_CONSUMER_GROUP); unset means the consumer does not
-    exist. A fact whose transfer_ref names no known transfer is
-    WARN-logged and committed past, never retried.
+    TRANSFER_FACT_CONSUMER_GROUP, PACK_LEVEL_CONSUMER_GROUP); an empty
+    value means the consumer does not exist. A message that can never be
+    applied (not a valid CloudEvent, an undecodable payload) is published
+    raw, with x-dlq-* headers, to `<source topic>.dlq` and committed past;
+    only infrastructure failures are retried. A fact whose transfer_ref
+    names no known transfer is WARN-logged and committed past, never
+    retried.
+
+    Every produced message uses `source` `/warehouse/network-inventory-planning`,
+    the Kafka header `content-type: application/cloudevents+json;
+    charset=UTF-8`, the W3C trace headers when a span is active, and the
+    Kafka key shown per event (hash-partitioned).
+
+    The analytics stream is also CONSUMED by this context's own
+    `nip-projector` binary (group ANALYTICS_CONSUMER_GROUP, default
+    `network-inventory-planning-analytics`; dead letters go to
+    `warehouse.network-inventory-planning.analytics.dlq`), which builds the
+    analytical database behind the nip-reports API.
 
     The consumed payload schemas below are the producers' own contract
     shapes mirrored read-only (each producer's apis/asyncapi.yaml on
@@ -169,7 +184,8 @@ channels:
     title: network-inventory-planning analytics topic
     description: |
       This context's dedicated analytics stream (ADR 0007): saga-health
-      occurrences only, never OLTP commands. Published through the same
+      occurrences only, never OLTP commands. Consumed by this context's own
+      nip-projector. Published through the same
       transactional outbox as the integration events, on separate rows
       with their own topic, so the integration contract and the health
       signal evolve independently.
@@ -403,6 +419,36 @@ operations:
       stowed into destination bins. RECEIVED is terminal; the stow
       allocations are persisted on the aggregate. Consumer group
       TRANSFER_REPLY_CONSUMER_GROUP (env-configured).
+  receiveTransferStateAdvanced:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.analytics'
+    summary: Project a saga transition into the analytical database (nip-projector).
+    description: |
+      Consumed by cmd/nip-projector (group ANALYTICS_CONSUMER_GROUP). The
+      payload is validated (transfer_id must equal the subject, `to` is
+      required, age_seconds is required and not negative); a violation or a
+      database constraint rejection is dead-lettered to
+      warehouse.network-inventory-planning.analytics.dlq, an unknown type is
+      skipped, anything else is retried.
+    messages:
+      - $ref: '#/channels/warehouse.network-inventory-planning.analytics/messages/transferStateAdvanced'
+  receiveTransferStuckDetected:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.analytics'
+    summary: Project a stuck-transfer detection into the analytical database (nip-projector).
+    description: Consumed by cmd/nip-projector, same rules as receiveTransferStateAdvanced.
+    messages:
+      - $ref: '#/channels/warehouse.network-inventory-planning.analytics/messages/transferStuckDetected'
+  receiveRebalanceRunCompleted:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.analytics'
+    summary: Project a rebalance run into the analytical database (nip-projector).
+    description: Consumed by cmd/nip-projector, same rules as receiveTransferStateAdvanced.
+    messages:
+      - $ref: '#/channels/warehouse.network-inventory-planning.analytics/messages/rebalanceRunCompleted'
   receiveProductPackLevelDeclared:
     action: receive
     channel:
@@ -734,6 +780,9 @@ components:
                 site_id:
                   type: string
                   description: Additive Phase-1 field. A legacy event without it is EXCLUDED by this consumer, never defaulted or inferred.
+                warehouse_id:
+                  type: string
+                  description: Legacy warehouse-planning field; read by this consumer but never used to infer the site.
                 location:
                   type: string
                 path_id:
@@ -769,13 +818,15 @@ components:
         - $ref: '#/components/schemas/cloudEvent'
         - type: object
           properties:
+            source:
+              const: /warehouse/network-inventory-planning
             type:
               const: com.warehouse.wes.network-inventory-planning.transfer.TransferPlanApproved
             dataschema:
               const: urn:warehouse:network-inventory-planning:events:TransferPlanApproved:v1
             data:
               type: object
-              required: [transfer_id, origin_site_id, destination_site_id, sku, quantity, policy_version, proposal_as_of]
+              required: [transfer_id, origin_site_id, destination_site_id, sku, quantity, policy_version, operator_reason, proposal_as_of]
               properties:
                 transfer_id:
                   type: string
@@ -810,7 +861,7 @@ components:
                   type: string
                 operator_reason:
                   type: string
-                  description: The operator's captured approval reason (may be empty).
+                  description: The operator's captured approval reason; always present, may be the empty string.
                 proposal_as_of:
                   type: string
                   format: date-time
@@ -824,6 +875,8 @@ components:
         - $ref: '#/components/schemas/cloudEvent'
         - type: object
           properties:
+            source:
+              const: /warehouse/network-inventory-planning
             type:
               const: com.warehouse.wes.network-inventory-planning.transfer.TransferAllocationRequested
             dataschema:
@@ -933,6 +986,8 @@ components:
         - $ref: '#/components/schemas/cloudEvent'
         - type: object
           properties:
+            source:
+              const: /warehouse/network-inventory-planning
             type:
               const: com.warehouse.wes.network-inventory-planning.workdemand.WorkDemandReleased
             dataschema:
@@ -1121,6 +1176,8 @@ components:
         - $ref: '#/components/schemas/cloudEvent'
         - type: object
           properties:
+            source:
+              const: /warehouse/network-inventory-planning
             type:
               const: com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced
             dataschema:
@@ -1148,6 +1205,8 @@ components:
         - $ref: '#/components/schemas/cloudEvent'
         - type: object
           properties:
+            source:
+              const: /warehouse/network-inventory-planning
             type:
               const: com.warehouse.wes.network-inventory-planning.saga.TransferStuckDetected
             dataschema:
@@ -1176,6 +1235,8 @@ components:
         - $ref: '#/components/schemas/cloudEvent'
         - type: object
           properties:
+            source:
+              const: /warehouse/network-inventory-planning
             type:
               const: com.warehouse.wes.network-inventory-planning.saga.RebalanceRunCompleted
             dataschema:
