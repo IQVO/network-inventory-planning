@@ -5,7 +5,7 @@ Status: Accepted
 ## Context
 
 The transfer saga (ADR-0003, ADR-0005) was write-only from the outside: the
-only transfer endpoint was `POST /v1/transfers:approve`, and the persistence
+only transfer endpoint was `POST /v1/transfer-approvals`, and the persistence
 port (`ports.TransferRepository`) only offered `Create` / `Load` /
 `UpdateState` for the saga itself. Operators, the console and the ops-agent
 could not ask "what is the status of transfer X?" or "which transfers are

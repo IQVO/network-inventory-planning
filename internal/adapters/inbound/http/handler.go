@@ -3,10 +3,8 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +12,7 @@ import (
 	"github.com/riandyrn/otelchi"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 
+	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
@@ -47,6 +46,11 @@ type Handler struct {
 	ListPolicies *usecases.ListRebalancePolicies
 	PutLane      *usecases.PutTransferLane
 	ListLanes    *usecases.ListTransferLanes
+	// Idempotency backs the Idempotency-Key middleware of every POST route
+	// (fleet REST guideline section 2). Nil-able like the others:
+	// unconfigured means the keyed routes answer 503, never an unkeyed
+	// execution.
+	Idempotency ports.IdempotencyStore
 }
 
 // DefaultServiceName is the OTel instrumentation scope for the HTTP surface.
@@ -76,9 +80,10 @@ func (h Handler) Routes() http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", h.health)
-	r.Post("/v1/transfer-proposals:generate", h.generate)
+	keyed := h.idempotent()
+	r.With(keyed).Post("/v1/transfer-proposal-runs", h.generate)
 	r.Get("/v1/transfer-simulations", h.simulate)
-	r.Post("/v1/transfers:approve", h.approve)
+	r.With(keyed).Post("/v1/transfer-approvals", h.approve)
 	r.Get("/v1/rebalance-runs", h.rebalanceRuns)
 	r.Get("/v1/transfers", h.listTransfers)
 	r.Get("/v1/transfers/{id}", h.getTransfer)
@@ -182,183 +187,4 @@ func writeProblem(w http.ResponseWriter, status int, kind, title, detail string)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(problem{Type: "https://warehouse.example/problems/" + kind, Title: title, Status: status, Detail: detail})
-}
-
-// approveRequest is the wire shape of POST /v1/transfers:approve: a
-// proposal snapshot plus operator context. The Idempotency-Key HEADER is
-// mandatory (fleet idempotency rule) and is the transfer-level idempotency
-// key.
-type approveRequest struct {
-	OriginSiteID      string    `json:"originSiteId"`
-	DestinationSiteID string    `json:"destinationSiteId"`
-	SKU               string    `json:"sku"`
-	Quantity          int       `json:"quantity"`
-	PolicyVersion     string    `json:"policyVersion"`
-	OperatorReason    string    `json:"operatorReason"`
-	ProposalAsOf      time.Time `json:"proposalAsOf"`
-}
-
-// approveTransferDTO is the response view of the persisted saga state.
-type approveTransferDTO struct {
-	TransferID        string `json:"transferId"`
-	State             string `json:"state"`
-	OriginSiteID      string `json:"originSiteId"`
-	DestinationSiteID string `json:"destinationSiteId"`
-	SKU               string `json:"sku"`
-	Quantity          int    `json:"quantity"`
-	// CaseRounding: see transferDTO (ADR 0017).
-	*transfer.CaseRounding
-	PolicyVersion   string    `json:"policyVersion"`
-	ReservationID   string    `json:"reservationId,omitempty"`
-	RejectionReason string    `json:"rejectionReason,omitempty"`
-	Replayed        bool      `json:"replayed"`
-	ExpiresAt       time.Time `json:"expiresAt"`
-	TransferLineID  string    `json:"transferLineId"`
-}
-
-// approve serves POST /v1/transfers:approve: the Phase-2 saga approval.
-// Fail-closed read models refuse with 422/503; a replayed Idempotency-Key
-// with the same payload answers 200 with replayed: true; a DIFFERENT
-// payload under a reused key is a 409 problem.
-func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
-	if h.Approve == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "saga-unavailable",
-			"Transfer saga is not configured", "this instance runs without the read models and persistence the approval requires")
-		return
-	}
-	idempotencyKey := r.Header.Get("Idempotency-Key")
-	if idempotencyKey == "" {
-		writeProblem(w, http.StatusBadRequest, "idempotency-key-required",
-			"Idempotency-Key header is required", "the approval endpoint is idempotency-keyed; send a fresh key per logical approval")
-		return
-	}
-	defer func() { _ = r.Body.Close() }()
-	var request approveRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
-		return
-	}
-
-	result, err := h.Approve.Execute(r.Context(), usecases.ApproveTransferInput{
-		IdempotencyKey:    idempotencyKey,
-		OriginSiteID:      request.OriginSiteID,
-		DestinationSiteID: request.DestinationSiteID,
-		SKU:               request.SKU,
-		Quantity:          request.Quantity,
-		PolicyVersion:     request.PolicyVersion,
-		OperatorReason:    request.OperatorReason,
-		ProposalAsOf:      request.ProposalAsOf,
-	})
-	if err != nil {
-		writeApproveProblem(w, err)
-		return
-	}
-	dto := approveTransferDTO{
-		TransferID:        string(result.TransferID),
-		State:             string(result.Transfer.State()),
-		OriginSiteID:      result.Transfer.OriginSiteID(),
-		DestinationSiteID: result.Transfer.DestinationSiteID(),
-		SKU:               result.Transfer.SKU(),
-		Quantity:          result.Transfer.Quantity(),
-		CaseRounding:      result.Transfer.CaseRounding(),
-		PolicyVersion:     result.Transfer.PolicyVersion(),
-		ReservationID:     result.Transfer.ReservationID(),
-		RejectionReason:   string(result.Transfer.RejectionReason()),
-		Replayed:          result.Replayed,
-		ExpiresAt:         result.Transfer.ExpiresAt(),
-		TransferLineID:    result.TransferID.LineID(),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(dto)
-}
-
-// writeApproveProblem maps use-case errors onto RFC 7807 statuses.
-func writeApproveProblem(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, usecases.ErrIdempotencyConflict):
-		writeProblem(w, http.StatusConflict, "idempotency-conflict",
-			"Idempotency key reused with a different request", err.Error())
-	case errors.Is(err, usecases.ErrWorkReleaseNotConfigured):
-		writeProblem(w, http.StatusServiceUnavailable, "config-incomplete",
-			"Work release is not configured", "set TRANSFER_PICK_PATH_ID and TRANSFER_PICK_CPT_OFFSET so an approved transfer's pick demand can be released (ADR 0005); approval is refused while unset")
-	case errors.Is(err, transfer.ErrBelowOneCase):
-		writeProblem(w, http.StatusUnprocessableEntity, "below-one-case",
-			"The origin cannot send one whole case", err.Error())
-	case errors.Is(err, usecases.ErrPackLevelsUnavailable):
-		writeProblem(w, http.StatusServiceUnavailable, "pack-levels-unavailable",
-			"Pack levels are unavailable", err.Error())
-	case errors.Is(err, usecases.ErrInvalidApproval):
-		writeProblem(w, http.StatusUnprocessableEntity, "invalid-approval",
-			"Invalid approval request", err.Error())
-	case errors.Is(err, transfer.ErrFactsIncomplete):
-		writeProblem(w, http.StatusUnprocessableEntity, "facts-incomplete",
-			"Planning facts are incomplete or stale for approval", err.Error())
-	case errors.Is(err, transfer.ErrProposalExpired):
-		writeProblem(w, http.StatusUnprocessableEntity, "proposal-expired",
-			"The proposal snapshot has expired", err.Error())
-	default:
-		writeProblem(w, http.StatusServiceUnavailable, "approval-unavailable",
-			"Approval could not be completed", err.Error())
-	}
-}
-
-// rebalanceRuns serves GET /v1/rebalance-runs: the scheduled-rebalance
-// run history, newest first (ADR 0007). ?limit=N bounds the page
-// (default 50, max 200).
-func (h Handler) rebalanceRuns(w http.ResponseWriter, r *http.Request) {
-	if h.ListRebalanceRuns == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "rebalance-runs-unavailable",
-			"Rebalance run history is not configured", "this instance runs without the persistence the run history requires")
-		return
-	}
-	limit := 50
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 200 {
-			writeProblem(w, http.StatusBadRequest, "invalid-limit",
-				"limit must be an integer between 1 and 200", fmt.Sprintf("got %q", raw))
-			return
-		}
-		limit = parsed
-	}
-	runs, err := h.ListRebalanceRuns.Execute(r.Context(), limit)
-	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "rebalance-runs-unavailable",
-			"Rebalance run history could not be read", err.Error())
-		return
-	}
-	dtos := make([]rebalanceRunDTO, 0, len(runs))
-	for _, run := range runs {
-		dto := rebalanceRunDTO{
-			ID:        run.ID,
-			StartedAt: run.StartedAt,
-			Proposals: run.ProposalCount,
-			Rejected:  run.RejectedCount,
-			Outcome:   string(run.Outcome),
-		}
-		if !run.SnapshotAsOf.IsZero() {
-			dto.SnapshotAsOf = &run.SnapshotAsOf
-		}
-		if run.FailClosedReason != nil {
-			dto.FailClosedReason = run.FailClosedReason
-		}
-		dtos = append(dtos, dto)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
-		Runs []rebalanceRunDTO `json:"runs"`
-	}{Runs: dtos})
-}
-
-// rebalanceRunDTO is the wire shape of one run row.
-type rebalanceRunDTO struct {
-	ID               int64      `json:"id"`
-	StartedAt        time.Time  `json:"startedAt"`
-	SnapshotAsOf     *time.Time `json:"snapshotAsOf,omitempty"`
-	Proposals        int        `json:"proposalCount"`
-	Rejected         int        `json:"rejectedCount"`
-	Outcome          string     `json:"outcome"`
-	FailClosedReason *string    `json:"failClosedReason,omitempty"`
 }

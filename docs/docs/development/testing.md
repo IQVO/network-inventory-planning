@@ -28,7 +28,7 @@ on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
 | --- | --- | --- |
 | `features/analytics_reports.feature` | 22 | the five `/reports/*` routes, ranges, redelivery |
 | `features/transfer_approval.feature` | 22 | approval, idempotency, fail-closed refusals, problem types |
-| `features/proposal_generation.feature` | 15 | planner rules on `POST /v1/transfer-proposals:generate` |
+| `features/proposal_generation.feature` | 15 | planner rules on `POST /v1/transfer-proposal-runs` |
 | `features/transfer_lifecycle.feature` | 13 | allocation, rejection, pick, dispatch, arrival, stow |
 | `features/transfer_queries.feature` | 12 | `GET /v1/transfers` filters, paging, 400/404/503 |
 | `features/simulation.feature` | 11 | fail-closed simulation |

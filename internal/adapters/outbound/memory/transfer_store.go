@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
@@ -147,6 +148,22 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 	}
 	sortSnapshots(matches, filter.Order)
 	total := len(matches)
+	if filter.After != nil {
+		at, err := time.Parse(time.RFC3339Nano, filter.After.Sort)
+		if err != nil {
+			return transfer.TransferPage{}, transfer.ErrInvalidPageAfter
+		}
+		// Newest first: continue with rows strictly older, or equally old
+		// with a greater id (the (created_at DESC, id ASC) order).
+		kept := matches[:0:0]
+		for _, snap := range matches {
+			if snap.CreatedAt.Before(at) || (snap.CreatedAt.Equal(at) && string(snap.ID) > filter.After.ID) {
+				kept = append(kept, snap)
+			}
+		}
+		matches = kept
+		total = len(matches)
+	}
 
 	limit := filter.Limit
 	if limit <= 0 {
@@ -155,8 +172,8 @@ func (s *TransferStore) List(_ context.Context, filter transfer.ListFilter) (tra
 	// Clamp the caller-supplied limit to the domain's MaxListLimit: an
 	// unbounded limit makes start+limit below overflow int and feed a
 	// negative capacity to make (CodeQL go/allocation-size-overflow).
-	if limit > transfer.MaxListLimit {
-		limit = transfer.MaxListLimit
+	if limit > transfer.MaxKeysetFetch {
+		limit = transfer.MaxKeysetFetch
 	}
 	start := min(max(filter.Offset, 0), total)
 	end := min(start+limit, total)

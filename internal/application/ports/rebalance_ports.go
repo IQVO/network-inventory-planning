@@ -31,4 +31,8 @@ type RebalanceRunRepository interface {
 	// List returns runs newest-first, bounded by limit (<= 0 means the
 	// adapter's own default).
 	List(ctx context.Context, limit int) ([]transfer.RebalanceRun, error)
+	// ListPage returns up to limit runs newest-first ordered by
+	// (started_at DESC, id DESC), continuing after the keyset (Sort =
+	// started_at RFC 3339 nano, ID = the run id). nil after is page one.
+	ListPage(ctx context.Context, after *transfer.PageAfter, limit int) ([]transfer.RebalanceRun, error)
 }

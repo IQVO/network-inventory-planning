@@ -208,6 +208,7 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 	handler.Simulate = wired.simulate
 	handler.Generate = wired.generate
 	handler.Approve = wired.approve
+	handler.Idempotency = postgres.NewIdempotencyStore(pool)
 	handler.ListRebalanceRuns = wired.runs
 	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)
 	handler.PutPolicy, handler.ListPolicies = wired.putPolicy, wired.listPolicies

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -43,9 +44,13 @@ func (r *TransferQueryRepo) List(ctx context.Context, filter transfer.ListFilter
 	if limit <= 0 {
 		limit = transfer.DefaultListLimit
 	}
-	pageArgs := append(append([]any(nil), args...), limit, filter.Offset)
+	pageWhere, pageArgs, err := withKeyset(where, args, filter.After)
+	if err != nil {
+		return transfer.TransferPage{}, err
+	}
+	pageArgs = append(pageArgs, limit, filter.Offset)
 	query := fmt.Sprintf(`SELECT %s FROM inter_warehouse_transfer%s ORDER BY %s LIMIT $%d OFFSET $%d`,
-		transferColumns, where, transferOrderBy(filter.Order), len(args)+1, len(args)+2)
+		transferColumns, pageWhere, transferOrderBy(filter.Order), len(pageArgs)-1, len(pageArgs))
 	rows, err := q.Query(ctx, query, pageArgs...)
 	if err != nil {
 		return transfer.TransferPage{}, fmt.Errorf("list transfers: %w", err)
@@ -160,4 +165,24 @@ func loadAudits(ctx context.Context, q querier, snaps []transfer.Snapshot) (map[
 		return nil, fmt.Errorf("load audits: %w", err)
 	}
 	return out, nil
+}
+
+// withKeyset appends the newest-first keyset condition (created_at DESC,
+// transfer_id ASC) to a WHERE clause built by transferWhere. The count of
+// matches is taken WITHOUT it, so Total stays the unpaged total.
+func withKeyset(where string, args []any, after *transfer.PageAfter) (string, []any, error) {
+	out := append([]any(nil), args...)
+	if after == nil {
+		return where, out, nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, after.Sort)
+	if err != nil {
+		return "", nil, transfer.ErrInvalidPageAfter
+	}
+	out = append(out, at, after.ID)
+	cond := fmt.Sprintf("(created_at < $%[1]d OR (created_at = $%[1]d AND transfer_id > $%[2]d))", len(out)-1, len(out))
+	if where == "" {
+		return " WHERE " + cond, out, nil
+	}
+	return where + " AND " + cond, out, nil
 }

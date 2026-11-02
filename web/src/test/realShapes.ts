@@ -69,12 +69,13 @@ export const TRANSFER_DETAIL: Shape = { ...TRANSFER, audit: "array" };
 /** GET /v1/transfers. */
 export const TRANSFER_LIST: Shape = {
   items: "array",
-  total: "number",
-  limit: "number",
-  offset: "number",
+  nextCursor: "string?",
 };
 
-/** POST /v1/transfers:approve request (unknown fields are a 400; operatorReason may be left out). */
+/** The shared list envelope every paged GET answers (STANDARD 3.3). */
+export const PAGE_ENVELOPE: Shape = { items: "array", nextCursor: "string?" };
+
+/** POST /v1/transfer-approvals request (unknown fields are a 400; operatorReason may be left out). */
 export const APPROVE_REQUEST: Shape = {
   originSiteId: "string",
   destinationSiteId: "string",
@@ -85,7 +86,7 @@ export const APPROVE_REQUEST: Shape = {
   proposalAsOf: "string",
 };
 
-/** POST /v1/transfers:approve 200 (also a replay of the same key; the service never answers 201). */
+/** POST /v1/transfer-approvals 200 (also a replay of the same key; the service never answers 201). */
 export const APPROVE_RESPONSE: Shape = {
   transferId: "string",
   state: "string",
@@ -96,7 +97,6 @@ export const APPROVE_RESPONSE: Shape = {
   policyVersion: "string",
   reservationId: "string?",
   rejectionReason: "string?",
-  replayed: "boolean",
   expiresAt: "string",
   transferLineId: "string",
 };
@@ -112,7 +112,7 @@ export const REBALANCE_RUN: Shape = {
 };
 
 /** GET /v1/rebalance-runs 200. */
-export const REBALANCE_RUNS: Shape = { runs: "array" };
+export const REBALANCE_RUNS: Shape = { items: "array" };
 
 /** application/problem+json, every error status (handler.go `problem`). */
 export const PROBLEM: Shape = {
@@ -152,7 +152,7 @@ export const LANE_ENTRY: Shape = {
 };
 
 /** GET /v1/transfer-lanes 200. */
-export const LANE_LIST: Shape = { lanes: "array" };
+export const LANE_LIST: Shape = { items: "array" };
 
 /** transfer.Policy (untagged Go struct): versioned guardrails for one SKU at
  *  one site; zero SafetyStock/TargetStock/UnitPriority are legal and present. */
@@ -174,7 +174,7 @@ export const POLICY_ENTRY: Shape = {
 };
 
 /** GET /v1/rebalance-policies 200. */
-export const POLICY_LIST: Shape = { policies: "array" };
+export const POLICY_LIST: Shape = { items: "array" };
 
 /** transfer.Position (untagged Go struct); AsOf must equal the request's asOf. */
 export const POSITION: Shape = {
@@ -207,7 +207,7 @@ export const PROPOSAL: Shape = {
   ScoreBreakdown: "object",
 };
 
-/** generateRequest (handler.go): the POST /v1/transfer-proposals:generate body. */
+/** generateRequest (handler.go): the POST /v1/transfer-proposal-runs body. */
 export const GENERATE_REQUEST: Shape = {
   asOf: "string",
   positions: "array",
@@ -215,7 +215,7 @@ export const GENERATE_REQUEST: Shape = {
   lanes: "array",
 };
 
-/** POST /v1/transfer-proposals:generate 200: ONLY the proposals (no counters). */
+/** POST /v1/transfer-proposal-runs 200: ONLY the proposals (no counters). */
 export const GENERATE_RESPONSE: Shape = { proposals: "array" };
 
 /**
@@ -226,7 +226,7 @@ export const GENERATE_RESPONSE: Shape = { proposals: "array" };
  */
 export const GO_SOURCES: {
   name: string;
-  file: "handler.go" | "transfers_read.go" | "catalogue.go";
+  file: "handler.go" | "transfers_read.go" | "catalogue.go" | "approve.go" | "rebalance_runs.go" | "page/page.go";
   shape: Shape;
   struct?: string;
   anonymousFirstField?: string;
@@ -237,16 +237,13 @@ export const GO_SOURCES: {
   { name: "transferDTO", file: "transfers_read.go", struct: "transferDTO", shape: TRANSFER, optionality: true },
   { name: "auditEntryDTO", file: "transfers_read.go", struct: "auditEntryDTO", shape: AUDIT_ENTRY, optionality: true },
   { name: "transferDetailDTO", file: "transfers_read.go", struct: "transferDetailDTO", shape: TRANSFER_DETAIL, optionality: true },
-  { name: "transferListDTO", file: "transfers_read.go", struct: "transferListDTO", shape: TRANSFER_LIST, optionality: true },
-  { name: "approveRequest", file: "handler.go", struct: "approveRequest", shape: APPROVE_REQUEST, optionality: false },
-  { name: "approveTransferDTO", file: "handler.go", struct: "approveTransferDTO", shape: APPROVE_RESPONSE, optionality: true },
-  { name: "rebalanceRunDTO", file: "handler.go", struct: "rebalanceRunDTO", shape: REBALANCE_RUN, optionality: true },
-  { name: "rebalance-runs envelope", file: "handler.go", anonymousFirstField: "Runs", shape: REBALANCE_RUNS, optionality: true },
+  { name: "approveRequest", file: "approve.go", struct: "approveRequest", shape: APPROVE_REQUEST, optionality: false },
+  { name: "approveTransferDTO", file: "approve.go", struct: "approveTransferDTO", shape: APPROVE_RESPONSE, optionality: true },
+  { name: "rebalanceRunDTO", file: "rebalance_runs.go", struct: "rebalanceRunDTO", shape: REBALANCE_RUN, optionality: true },
+  { name: "page envelope (all four lists)", file: "page/page.go", struct: "Page\\[T any\\]", shape: PAGE_ENVELOPE, optionality: true },
   { name: "problem", file: "handler.go", struct: "problem", shape: PROBLEM, optionality: true },
   { name: "transferLaneEntryDTO", file: "catalogue.go", struct: "transferLaneEntryDTO", shape: LANE_ENTRY, optionality: true },
-  { name: "transfer-lanes envelope", file: "catalogue.go", anonymousFirstField: "Lanes", shape: LANE_LIST, optionality: true },
   { name: "rebalancePolicyEntryDTO", file: "catalogue.go", struct: "rebalancePolicyEntryDTO", shape: POLICY_ENTRY, optionality: true },
-  { name: "rebalance-policies envelope", file: "catalogue.go", anonymousFirstField: "Policies", shape: POLICY_LIST, optionality: true },
   { name: "generateRequest", file: "handler.go", struct: "generateRequest", shape: GENERATE_REQUEST, optionality: false },
   { name: "generate envelope", file: "handler.go", anonymousFirstField: "Proposals", shape: GENERATE_RESPONSE, optionality: true },
 ];

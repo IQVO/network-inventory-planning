@@ -50,7 +50,7 @@ describe("fixtures match the real API shapes", () => {
   });
 
   it("GET /v1/rebalance-runs", () => {
-    expect(diff({ runs: RUNS }, REBALANCE_RUNS)).toEqual([]);
+    expect(diff({ items: RUNS }, REBALANCE_RUNS)).toEqual([]);
     for (const run of RUNS) expect(diff(run, REBALANCE_RUN)).toEqual([]);
   });
 
@@ -72,7 +72,7 @@ describe("fixtures match the real API shapes", () => {
     expect(diff(policyEntry({ outcome: "CREATED" }), POLICY_ENTRY)).toEqual([]);
   });
 
-  it("POST /v1/transfer-proposals:generate (request the form builds, and the answer)", () => {
+  it("POST /v1/transfer-proposal-runs (request the form builds, and the answer)", () => {
     const built = buildGenerateRequest({
       asOf: SNAPSHOT_AS_OF,
       positions: [
@@ -95,9 +95,14 @@ describe("fixtures match the real API shapes", () => {
     }
   });
 
-  it("POST /v1/transfers:approve response", () => {
-    expect(diff(approved(), APPROVE_RESPONSE)).toEqual([]);
-    expect(diff(approved({ replayed: true, reservationId: "res-1" }), APPROVE_RESPONSE)).toEqual([]);
+  it("POST /v1/transfer-approvals response", () => {
+    // `replayed` is derived client-side from the Idempotency-Replayed header; it is not on the wire.
+    const wire = (over = {}) => {
+      const { replayed: _replayed, ...rest } = approved(over);
+      return rest;
+    };
+    expect(diff(wire(), APPROVE_RESPONSE)).toEqual([]);
+    expect(diff(wire({ reservationId: "res-1" }), APPROVE_RESPONSE)).toEqual([]);
   });
 
   it("problem+json bodies", async () => {

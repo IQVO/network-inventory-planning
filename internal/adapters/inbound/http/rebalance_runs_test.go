@@ -54,13 +54,14 @@ func TestRebalanceRunsEndpointListsNewestFirst(t *testing.T) {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
 	var body struct {
-		Runs []rebalanceRunDTO `json:"runs"`
+		Runs       []rebalanceRunDTO `json:"items"`
+		NextCursor string            `json:"nextCursor"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Runs) != 2 {
-		t.Fatalf("runs = %d, want 2", len(body.Runs))
+	if len(body.Runs) != 2 || body.NextCursor != "" {
+		t.Fatalf("runs = %d nextCursor = %q, want 2 and none (last page)", len(body.Runs), body.NextCursor)
 	}
 	if body.Runs[0].ID != 2 || body.Runs[0].Outcome != "COMPLETED" || body.Runs[0].Proposals != 3 {
 		t.Fatalf("newest = %+v, want run 2 COMPLETED with 3 proposals", body.Runs[0])
@@ -89,8 +90,11 @@ func TestRebalanceRunsEndpointLimit(t *testing.T) {
 		{"", 2, http.StatusOK},
 		{"?limit=1", 1, http.StatusOK},
 		{"?limit=0", 0, http.StatusBadRequest},
-		{"?limit=201", 0, http.StatusBadRequest},
+		{"?limit=501", 0, http.StatusBadRequest},
 		{"?limit=abc", 0, http.StatusBadRequest},
+		{"?after=3", 0, http.StatusBadRequest},
+		{"?offset=1", 0, http.StatusBadRequest},
+		{"?cursor=%21", 0, http.StatusBadRequest},
 	} {
 		request := httptest.NewRequest(http.MethodGet, "/v1/rebalance-runs"+tc.query, nil)
 		response := httptest.NewRecorder()
@@ -100,7 +104,7 @@ func TestRebalanceRunsEndpointLimit(t *testing.T) {
 		}
 		if tc.code == http.StatusOK {
 			var body struct {
-				Runs []rebalanceRunDTO `json:"runs"`
+				Runs []rebalanceRunDTO `json:"items"`
 			}
 			_ = json.NewDecoder(response.Body).Decode(&body)
 			if len(body.Runs) != tc.want {
@@ -118,4 +122,8 @@ func TestRebalanceRunsEndpointUnconfiguredIs503(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 (never an empty 200 that fakes a history)", response.Code)
 	}
+}
+
+func (s *stubRebalanceRuns) ListPage(ctx context.Context, _ *transfer.PageAfter, limit int) ([]transfer.RebalanceRun, error) {
+	return s.List(ctx, limit)
 }

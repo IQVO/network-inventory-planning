@@ -158,7 +158,7 @@ func (w *world) planningFactsRefreshed() error {
 
 // ------------------------------------------------- explicit planning snapshot
 
-// proposalSnapshot is the body of POST /v1/transfer-proposals:generate under
+// proposalSnapshot is the body of POST /v1/transfer-proposal-runs under
 // construction: a caller-provided, coherent planning snapshot.
 type proposalSnapshot struct {
 	asOf      string
@@ -236,7 +236,7 @@ func (w *world) iGenerateTransferProposals(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: "/v1/transfer-proposals:generate", body: body})
+	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: "/v1/transfer-proposal-runs", body: body})
 }
 
 func nonNil(items []map[string]any) []map[string]any {

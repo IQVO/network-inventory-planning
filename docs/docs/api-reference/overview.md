@@ -19,9 +19,9 @@ Source: `internal/adapters/inbound/http/handler.go` (`Handler.Routes`).
 | Method | Path | Purpose | Needs |
 | --- | --- | --- | --- |
 | `GET` | `/healthz` | liveness; `204 No Content` | nothing |
-| `POST` | `/v1/transfer-proposals:generate` | advisory proposals from an explicit snapshot in the body (`asOf`, `positions`, `policies`, `lanes`) | nothing |
+| `POST` | `/v1/transfer-proposal-runs` | advisory proposals from an explicit snapshot in the body (`asOf`, `positions`, `policies`, `lanes`) | nothing |
 | `GET` | `/v1/transfer-simulations` | advisory per-site simulation from the local read models | `DATABASE_URL` |
-| `POST` | `/v1/transfers:approve` | operator approval: starts the transfer saga; `Idempotency-Key` header required | `DATABASE_URL`, `KAFKA_BROKERS`, `TRANSFER_PICK_PATH_ID` |
+| `POST` | `/v1/transfer-approvals` | operator approval: starts the transfer saga; `Idempotency-Key` header required | `DATABASE_URL`, `KAFKA_BROKERS`, `TRANSFER_PICK_PATH_ID` |
 | `GET` | `/v1/transfers` | list transfers, newest first; `state`, `originSiteId`, `destinationSiteId`, `limit` (1–200, default 50), `offset` | `DATABASE_URL` |
 | `GET` | `/v1/transfers/{id}` | one transfer with its audit trail | `DATABASE_URL` |
 | `GET` | `/v1/rebalance-runs` | scheduled-rebalance history, newest first; `limit` 1–200, default 50 | `DATABASE_URL` |
@@ -30,8 +30,8 @@ Source: `internal/adapters/inbound/http/handler.go` (`Handler.Routes`).
 | `GET` | `/v1/transfer-lanes` | the Transfer Lane catalogue (`{lanes:[{lane, revision, updatedAt}]}`) | `DATABASE_URL` |
 | `PUT` | `/v1/transfer-lanes` | idempotent upsert of one directed `Lane` (keyed by `Origin` → `Destination`); same rules | `DATABASE_URL` |
 
-The two colon routes (`/v1/transfer-proposals:generate`,
-`/v1/transfers:approve`) are Google-style custom methods; they are in the
+The two colon routes (`/v1/transfer-proposal-runs`,
+`/v1/transfer-approvals`) are Google-style custom methods; they are in the
 OpenAPI spec as written.
 
 The approval response is `{transferId, state, originSiteId, destinationSiteId,

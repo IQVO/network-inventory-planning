@@ -18,8 +18,8 @@ export type Reply = Response | Promise<Response>;
 export type Handler = Reply | ((call: MockCall) => Reply);
 
 /** A 2xx (or any status) application/json reply. */
-export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
 }
 
 /** An RFC 7807 application/problem+json reply, shaped like the service's

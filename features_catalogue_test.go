@@ -52,6 +52,9 @@ func (w *world) iPutBodyIfMatch(ctx context.Context, path, ifMatch string, body 
 }
 
 func (w *world) theResponseHeaderIs(name, expected string) error {
+	if expected == "absent" {
+		expected = ""
+	}
 	if got := w.headers.Get(name); got != expected {
 		return fmt.Errorf("expected header %s = %q, got %q", name, expected, got)
 	}

@@ -93,7 +93,7 @@ separation of OLTP contract from health signal):
   fail_closed_reason nullable) and publishes `RebalanceRunCompleted`.
 - **Observe-only: no approval, no allocation command, ever.** A proposal
   becomes a transfer only through an operator's explicit
-  `POST /v1/transfers:approve`.
+  `POST /v1/transfer-approvals`.
 - A fail-closed snapshot build (stale/missing facts) is a RECORDED
   `FAILED` run carrying the refusal as `fail_closed_reason` — a
   chronically stale read model becomes visible in run history rather

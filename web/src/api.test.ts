@@ -6,13 +6,13 @@ import { LANES, POLICIES, RUNS, SNAPSHOT_AS_OF, generateResponse, lane, laneList
 describe("listTransfers", () => {
   it("sends only the filters that are set", async () => {
     const api = mockApi({ "GET /v1/transfers": json(transferList([transfer()])) });
-    await listTransfers({ state: "ALLOCATING", originSiteId: "", destinationSiteId: "DC-WEST", limit: 25, offset: 0 });
+    await listTransfers({ state: "ALLOCATING", originSiteId: "", destinationSiteId: "DC-WEST", limit: 25, cursor: "c1" });
     const q = api.calls[0].query;
     expect(q.get("state")).toBe("ALLOCATING");
     expect(q.get("destinationSiteId")).toBe("DC-WEST");
     expect(q.has("originSiteId")).toBe(false);
     expect(q.get("limit")).toBe("25");
-    expect(q.get("offset")).toBe("0");
+    expect(q.get("cursor")).toBe("c1");
   });
 });
 
@@ -26,7 +26,7 @@ describe("getTransfer", () => {
 
 describe("approveTransfer", () => {
   it("POSTs the snapshot as JSON with the Idempotency-Key header", async () => {
-    const api = mockApi({ "POST /v1/transfers:approve": json({ transferId: "t-1", replayed: false }) });
+    const api = mockApi({ "POST /v1/transfer-approvals": json({ transferId: "t-1" }) });
     await approveTransfer(
       { originSiteId: "A", destinationSiteId: "B", sku: "S", quantity: 5, policyVersion: "v1", proposalAsOf: "2026-10-07T09:00:00Z" },
       "key-123",
@@ -44,11 +44,34 @@ describe("approveTransfer", () => {
       proposalAsOf: "2026-10-07T09:00:00Z",
     });
   });
+
+  it("derives replayed from the Idempotency-Replayed response header", async () => {
+    mockApi({ "POST /v1/transfer-approvals": json({ transferId: "t-1" }, 200, { "Idempotency-Replayed": "true" }) });
+    const req = { originSiteId: "A", destinationSiteId: "B", sku: "S", quantity: 5, policyVersion: "v1", proposalAsOf: "2026-10-07T09:00:00Z" };
+    expect((await approveTransfer(req, "k")).replayed).toBe(true);
+    mockApi({ "POST /v1/transfer-approvals": json({ transferId: "t-1" }) });
+    expect((await approveTransfer(req, "k")).replayed).toBe(false);
+  });
+});
+
+describe("list pagination", () => {
+  it("follows nextCursor until it is absent", async () => {
+    const api = mockApi({
+      "GET /v1/transfer-lanes": (call) =>
+        call.query.get("cursor") === "p2"
+          ? json({ items: [laneList().items[1]] })
+          : json({ items: [laneList().items[0]], nextCursor: "p2" }),
+    });
+    const list = await listTransferLanes();
+    expect(list.items).toHaveLength(2);
+    expect(api.calls).toHaveLength(2);
+    expect(api.calls[1].query.get("cursor")).toBe("p2");
+  });
 });
 
 describe("putTransferLane", () => {
   it("PUTs the PascalCase lane body with the loaded revision as a strong-ETag If-Match", async () => {
-    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().lanes[0]) });
+    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().items[0]) });
     await putTransferLane(lane(), '"2"');
     const call = api.calls[0];
     expect(call.method).toBe("PUT");
@@ -59,7 +82,7 @@ describe("putTransferLane", () => {
   });
 
   it("omits If-Match when no revision is loaded (create, or apply to current)", async () => {
-    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().lanes[0], 201) });
+    const api = mockApi({ "PUT /v1/transfer-lanes": json(laneList().items[0], 201) });
     await putTransferLane(lane({ Origin: "DC-NORTH" }));
     expect(api.calls[0].headers["If-Match"]).toBeUndefined();
   });
@@ -70,13 +93,13 @@ describe("listTransferLanes", () => {
     const api = mockApi({ "GET /v1/transfer-lanes": json(laneList()) });
     const list = await listTransferLanes();
     expect(api.calls[0].method).toBe("GET");
-    expect(list.lanes).toHaveLength(LANES.length);
+    expect(list.items).toHaveLength(LANES.length);
   });
 });
 
 describe("putRebalancePolicy", () => {
   it("PUTs the PascalCase policy body with the loaded revision as a strong-ETag If-Match", async () => {
-    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().policies[0]) });
+    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().items[0]) });
     await putRebalancePolicy(policy(), '"4"');
     const call = api.calls[0];
     expect(call.method).toBe("PUT");
@@ -86,7 +109,7 @@ describe("putRebalancePolicy", () => {
   });
 
   it("omits If-Match for a create", async () => {
-    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().policies[0], 201) });
+    const api = mockApi({ "PUT /v1/rebalance-policies": json(policyList().items[0], 201) });
     await putRebalancePolicy(policy({ Site: "DC-NORTH", SKU: "SKU-GREEN-1" }));
     expect(api.calls[0].headers["If-Match"]).toBeUndefined();
   });
@@ -97,13 +120,13 @@ describe("listRebalancePolicies", () => {
     const api = mockApi({ "GET /v1/rebalance-policies": json(policyList()) });
     const list = await listRebalancePolicies();
     expect(api.calls[0].method).toBe("GET");
-    expect(list.policies).toHaveLength(POLICIES.length);
+    expect(list.items).toHaveLength(POLICIES.length);
   });
 });
 
 describe("generateTransferProposals", () => {
   it("POSTs the snapshot with an Idempotency-Key, exactly as the approve call does", async () => {
-    const api = mockApi({ "POST /v1/transfer-proposals:generate": json(generateResponse()) });
+    const api = mockApi({ "POST /v1/transfer-proposal-runs": json(generateResponse()) });
     await generateTransferProposals(
       {
         asOf: SNAPSHOT_AS_OF,
@@ -115,7 +138,7 @@ describe("generateTransferProposals", () => {
     );
     const call = api.calls[0];
     expect(call.method).toBe("POST");
-    expect(call.path).toBe("/v1/transfer-proposals:generate");
+    expect(call.path).toBe("/v1/transfer-proposal-runs");
     expect(call.headers["Idempotency-Key"]).toBe("key-abc");
     expect(call.headers["Content-Type"]).toBe("application/json");
     expect(call.body).toEqual({
@@ -157,7 +180,7 @@ describe("errors", () => {
 
 describe("listRebalanceRuns", () => {
   it("returns the runs array and passes the limit", async () => {
-    const api = mockApi({ "GET /v1/rebalance-runs": json({ runs: RUNS }) });
+    const api = mockApi({ "GET /v1/rebalance-runs": json({ items: RUNS }) });
     expect(await listRebalanceRuns(50)).toEqual(RUNS);
     expect(api.calls[0].query.get("limit")).toBe("50");
   });

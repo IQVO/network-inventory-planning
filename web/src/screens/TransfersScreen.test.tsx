@@ -82,7 +82,7 @@ describe("TransfersScreen", () => {
     expect(q.get("state")).toBe("ALLOCATING");
     expect(q.get("originSiteId")).toBe("DC-EAST");
     expect(q.get("destinationSiteId")).toBe("DC-WEST");
-    expect(q.get("offset")).toBe("0");
+    expect(q.has("cursor")).toBe(false);
 
     await user.click(within(form).getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(api.calls.length).toBe(3));
@@ -93,8 +93,9 @@ describe("TransfersScreen", () => {
   it("pages forward and back by the page size", async () => {
     const api = mockApi({
       "GET /v1/transfers": (call) => {
-        const offset = Number(call.query.get("offset"));
-        return json(transferList([transfer({ id: `t-${offset}` })], { total: 51, offset }));
+        const cursor = call.query.get("cursor");
+        const next = { "": "c25", c25: "c50", c50: undefined }[cursor ?? ""];
+        return json(transferList([transfer({ id: `t-${cursor ?? 0}` })], next ? { nextCursor: next } : {}));
       },
     });
     const user = userEvent.setup();
@@ -102,18 +103,18 @@ describe("TransfersScreen", () => {
     await screen.findByRole("link", { name: "t-0" });
     const pager = screen.getByRole("navigation", { name: "Transfers paging" });
     expect(within(pager).getByRole("button", { name: "Previous" })).toBeDisabled();
-    expect(within(pager).getByText("Showing 1–1 of 51")).toBeInTheDocument();
+    expect(within(pager).getByText("Page 1: 1 transfers")).toBeInTheDocument();
 
     await user.click(within(pager).getByRole("button", { name: "Next" }));
-    await screen.findByRole("link", { name: "t-25" });
-    expect(api.calls[1].query.get("offset")).toBe("25");
+    await screen.findByRole("link", { name: "t-c25" });
+    expect(api.calls[1].query.get("cursor")).toBe("c25");
 
     await user.click(within(pager).getByRole("button", { name: "Next" }));
-    await screen.findByRole("link", { name: "t-50" });
+    await screen.findByRole("link", { name: "t-c50" });
     expect(within(pager).getByRole("button", { name: "Next" })).toBeDisabled();
 
     await user.click(within(pager).getByRole("button", { name: "Previous" }));
-    await screen.findByRole("link", { name: "t-25" });
+    await screen.findByRole("link", { name: "t-c25" });
   });
 
   it("refreshes on demand", async () => {

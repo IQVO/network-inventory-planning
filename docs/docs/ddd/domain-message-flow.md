@@ -30,7 +30,7 @@ sequenceDiagram
   Note over NIP: three local read models, each deduplicated on the CloudEvents id
   Op->>NIP: qry: GET /v1/transfer-simulations
   Note over NIP: per-site demand, capacity and headroom, or 503 when no site has complete, fresh facts
-  Op->>NIP: cmd: POST /v1/transfers:approve with Idempotency-Key
+  Op->>NIP: cmd: POST /v1/transfer-approvals with Idempotency-Key
   Note over NIP: validated against the current snapshot, persisted as ALLOCATING, events in the outbox
   Note over NIP: TransferPlanApproved goes to the events topic, no consumer
   NIP->>INV: cmd: TransferAllocationRequested keyed by transfer_line_id
@@ -42,7 +42,7 @@ sequenceDiagram
 Source: `internal/adapters/inbound/kafka/consumers.go`, `internal/adapters/inbound/http/handler.go`, `internal/application/usecases/approve_transfer.go`, `transfer_facts.go`, `internal/adapters/inbound/kafka/transfer_reply_consumer.go`
 
 The simulation is per site; it does not propose quantities. Proposals come
-from `POST /v1/transfer-proposals:generate` with an explicit snapshot.
+from `POST /v1/transfer-proposal-runs` with an explicit snapshot.
 
 ## 2. The physical tail: pick, dispatch, arrival, stow
 
@@ -79,7 +79,7 @@ sequenceDiagram
   actor Op as Operator
   participant NIP as network-inventory-planning
   participant INV as inventory-storage
-  Op->>NIP: cmd: POST /v1/transfers:approve
+  Op->>NIP: cmd: POST /v1/transfer-approvals
   NIP->>INV: cmd: TransferAllocationRequested
   INV->>NIP: evt: TransferStockAllocationRejected with a closed reason
   Note over NIP: ALLOCATING to UNFULFILLABLE, no work is released

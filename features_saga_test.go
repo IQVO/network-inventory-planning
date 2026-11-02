@@ -96,7 +96,7 @@ func (a approval) body() []byte {
 
 func (w *world) approveRequest(a approval, key string) request {
 	return request{
-		server: w.oltp, method: http.MethodPost, path: "/v1/transfers:approve",
+		server: w.oltp, method: http.MethodPost, path: "/v1/transfer-approvals",
 		headers: map[string]string{"Idempotency-Key": key}, body: a.body(),
 	}
 }

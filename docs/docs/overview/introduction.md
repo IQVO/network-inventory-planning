@@ -29,7 +29,7 @@ WES contexts stay authoritative for executable work.
 
 ## What it owns
 
-- **Advisory transfer proposals.** `POST /v1/transfer-proposals:generate`
+- **Advisory transfer proposals.** `POST /v1/transfer-proposal-runs`
   runs the deterministic `transfer.Planner` over an explicit, coherent snapshot
   (positions, policies, lanes) supplied by the caller. A proposal keeps the
   origin's safety stock, never exceeds the destination's deficit, only uses an
@@ -45,7 +45,7 @@ WES contexts stay authoritative for executable work.
   (`GET /v1/transfer-simulations`), approval validation and the scheduled
   rebalance pass.
 - **The `InterWarehouseTransfer` saga** (11 states, `DRAFT` to `RECEIVED`),
-  started only by an operator's `POST /v1/transfers:approve` with an
+  started only by an operator's `POST /v1/transfer-approvals` with an
   `Idempotency-Key`. It emits `TransferAllocationRequested` to
   inventory-storage, releases pick and dispatch `WorkDemandReleased` commands
   to wes-work-planning, and follows fulfillment-execution's and

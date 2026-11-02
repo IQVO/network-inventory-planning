@@ -78,7 +78,7 @@ through the analytics read side:
 
 - **Server spans**: `otelhttp` starts one span per request, named
   `<METHOD> <route>` once the ServeMux pattern is known (for example
-  `POST /v1/transfers:approve`).
+  `POST /v1/transfer-approvals`).
 - **Propagation through Kafka**: the global propagator is W3C Trace Context +
   Baggage. The encoders inject `traceparent`/`tracestate` from the active
   context into each outbox row's headers (`tracedHeaders`,
@@ -105,7 +105,7 @@ The API logs with Go's default `slog` logger (text to stderr). `mcp`,
 | --- | --- | --- | --- |
 | `DATABASE_URL unset: running without read models` | INFO | `enable_with` | Diagnostic mode. |
 | `KAFKA_BROKERS not configured; outbox disabled` | WARN | `enable_with` | Approval answers 503. |
-| `work release not configured; POST /v1/transfers:approve answers 503` | WARN | `error`, `enable_with` | Pick path or offset missing. |
+| `work release not configured; POST /v1/transfer-approvals answers 503` | WARN | `error`, `enable_with` | Pick path or offset missing. |
 | `consumer running` / `consumer disabled` | INFO | `name`, `group_id`, `brokers` | One line per consumer at boot. |
 | `outbox relay running` | INFO | `topic`, `brokers`, `max_attempts` | Relay started. |
 | `outbox relay: send failed, stopping this pass at the failed row` | WARN | `outbox_id`, `topic`, `attempts`, `error` | One failed send below the attempt cap; the next tick retries the row. |

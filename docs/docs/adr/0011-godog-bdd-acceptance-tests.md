@@ -46,9 +46,9 @@ implementation for Go) in `Strict` mode, and gate them in CI as the existing
    | File | Covers |
    | --- | --- |
    | `features/health.feature` | `GET /healthz` |
-   | `features/proposal_generation.feature` | `POST /v1/transfer-proposals:generate` — quantity bounds, lane rules, score ordering, determinism, advisory-only, 400/422 |
+   | `features/proposal_generation.feature` | `POST /v1/transfer-proposal-runs` — quantity bounds, lane rules, score ordering, determinism, advisory-only, 400/422 |
    | `features/simulation.feature` | `GET /v1/transfer-simulations` — headroom view, fail-closed 503 on empty/stale/disabled facts |
-   | `features/transfer_approval.feature` | `POST /v1/transfers:approve` — saga start, idempotency (replay / 409 / required header), 400/422/503, CloudEvents on the wire |
+   | `features/transfer_approval.feature` | `POST /v1/transfer-approvals` — saga start, idempotency (replay / 409 / required header), 400/422/503, CloudEvents on the wire |
    | `features/transfer_lifecycle.feature` | the saga state machine driven by inventory-storage and fulfillment-execution facts: legal steps, illegal transitions refused, short picks, unknown transfers, audit trail |
    | `features/transfer_queries.feature` | `GET /v1/transfers`, `GET /v1/transfers/{id}` — ordering, filters, paging, 404/400/503 |
    | `features/rebalance_runs.feature` | `GET /v1/rebalance-runs` — observe-only COMPLETED/FAILED runs, newest first, limit |

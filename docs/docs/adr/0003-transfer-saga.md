@@ -50,15 +50,15 @@ DRAFT → PROPOSED → APPROVED → ALLOCATING → ALLOCATED
 - **Transfer-level idempotency key**: `inter_warehouse_transfer.
   idempotency_key` is UNIQUE. The approval endpoint's required
   `Idempotency-Key` header becomes it: replaying the same key with the
-  same payload returns the ORIGINAL transfer (`replayed: true`), never a
+  same payload returns the stored ORIGINAL answer (header `Idempotency-Replayed: true`), never a
   second aggregate or a second event fan-out; the same key with a
-  DIFFERENT payload is a 409 `idempotency-conflict`.
+  DIFFERENT payload is a 409 `idempotency-key-reused`.
 - Illegal transitions return a typed `IllegalTransitionError` and mutate
   nothing.
 
 ### The approval endpoint
 
-`POST /v1/transfers:approve` (idempotency-key required, RFC 7807
+`POST /v1/transfer-approvals` (idempotency-key required, RFC 7807
 problems, operator reason captured, 24h expiry in v1) takes a proposal
 snapshot (origin, destination, SKU, quantity, policy version,
 proposal_as_of) and validates it against the CURRENT read models through

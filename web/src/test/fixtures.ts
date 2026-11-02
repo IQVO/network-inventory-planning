@@ -63,7 +63,7 @@ export const UNFULFILLABLE = transfer({
 });
 
 export function transferList(items: TransferView[], over: Partial<TransferList> = {}): TransferList {
-  return { items, total: items.length, limit: 25, offset: 0, ...over };
+  return { items, ...over };
 }
 
 /** The real creation trail of an approval: DRAFT -> PROPOSED -> APPROVED -> ALLOCATING (saga.go). */
@@ -154,7 +154,7 @@ export const LANES: TransferLaneEntry[] = [
 ];
 
 export function laneList(lanes: TransferLaneEntry[] = LANES): TransferLaneList {
-  return { lanes };
+  return { items: lanes };
 }
 
 export function policy(over: Partial<PolicyWire> = {}): PolicyWire {
@@ -184,7 +184,7 @@ export const POLICIES: RebalancePolicyEntry[] = [
 ];
 
 export function policyList(policies: RebalancePolicyEntry[] = POLICIES): RebalancePolicyList {
-  return { policies };
+  return { items: policies };
 }
 
 export const SNAPSHOT_AS_OF = "2026-10-07T09:50:00Z";

@@ -367,7 +367,7 @@ export function catalogueLead(error: ApiError): string | undefined {
 }
 
 /* ------------------------------------------------------------------ *
- * Proposal generation (POST /v1/transfer-proposals:generate): the
+ * Proposal generation (POST /v1/transfer-proposal-runs): the
  * diagnostic planning boundary over an explicit snapshot. The client
  * mirrors the use case's own refusals (generate_transfer_proposals.go):
  * asOf is required and every position's AsOf must equal it.

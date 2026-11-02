@@ -43,7 +43,7 @@ paths:
       responses:
         '204':
           description: The service is up.
-  /v1/transfer-proposals:generate:
+  /v1/transfer-proposal-runs:
     post:
       operationId: generateTransferProposals
       tags: [planning]
@@ -53,6 +53,8 @@ paths:
         coherent planning snapshot. Validation failures return RFC 7807
         problem+json. Diagnostic boundary: production planning consumes local
         read models via the simulation endpoint instead.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -62,17 +64,23 @@ paths:
       responses:
         '200':
           description: Advisory proposals, score-ordered.
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenerateResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/Problem'
   /v1/transfer-simulations:
     get:
       operationId: simulateTransferOptions
+      x-pagination-exempt: view
       tags: [planning]
       summary: Simulate advisory transfer options from local read models.
       description: |
@@ -93,7 +101,7 @@ paths:
                 $ref: '#/components/schemas/SimulationResponse'
         '503':
           $ref: '#/components/responses/Problem'
-  /v1/transfers:approve:
+  /v1/transfer-approvals:
     post:
       operationId: approveTransfer
       tags: [transfers]
@@ -107,24 +115,16 @@ paths:
         transactional outbox; a relay publishes them to Kafka and
         inventory-storage's reply later drives the transfer to ALLOCATED or
         UNFULFILLABLE. Idempotent per the required Idempotency-Key header:
-        replaying the same key with the same payload returns the ORIGINAL
-        transfer (replayed: true); the same key with a different payload is a
-        409. Fail-closed validation failures return 422: the origin or the
+        replaying the same key with the same request replays the ORIGINAL
+        answer (header Idempotency-Replayed: true); the same key with a
+        different request is a 409 idempotency-key-reused. Fail-closed validation failures return 422: the origin or the
         destination is missing or stale in the planning snapshot (the problem
         detail names the site and the stale fact), is disabled for its role, or
         the demand and capacity checks fail. Stale facts of any other site do
         not matter. When no site has complete fresh facts at all the answer is
         the same 422; unusable (unreadable) read models return 503.
       parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          description: |
-            Transfer-level idempotency key; a fresh key per logical approval.
-            Replaying a key replays the FIRST transfer it created.
-          schema:
-            type: string
-            minLength: 1
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -136,6 +136,9 @@ paths:
           description: |
             The persisted saga state (200, not 201: a replay of the same
             idempotency key returns the original transfer).
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
@@ -143,7 +146,7 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '409':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/Problem'
         '503':
@@ -161,18 +164,11 @@ paths:
         carrying its reason, never a hidden error. Runs never approve
         anything and never emit an allocation command.
       parameters:
-        - name: limit
-          in: query
-          required: false
-          description: Page size, clamped to [1, 200]; default 50.
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: The run history, newest first.
+          description: One page of the run history, newest first.
           content:
             application/json:
               schema:
@@ -190,16 +186,21 @@ paths:
       description: |
         The operator-managed Rebalance Policy catalogue (ADR 0015), one entry
         per site + SKU, ordered by site then SKU. Each entry embeds the SAME
-        Policy shape POST /v1/transfer-proposals:generate accepts, plus its
+        Policy shape POST /v1/transfer-proposal-runs accepts, plus its
         revision (the optimistic-concurrency token). The scheduled rebalance
         pass plans from this catalogue.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: Every policy in the catalogue.
+          description: One page of the policy catalogue.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RebalancePolicyList'
+        '400':
+          $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
     put:
@@ -266,13 +267,18 @@ paths:
         endpoint accepts, plus its revision. The scheduled pass uses a lane
         only when it is Enabled AND site_capability lets its origin send and
         its destination receive.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: Every lane in the catalogue.
+          description: One page of the lane catalogue.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransferLaneList'
+        '400':
+          $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
     put:
@@ -333,7 +339,7 @@ paths:
         Read-only page of inter-warehouse transfers from the saga store,
         newest created first, optionally filtered by lifecycle state and by
         origin and/or destination site. Never mutates anything. 400 for an
-        unknown state or out-of-range paging; 503 problem+json when the
+        unknown state, out-of-range limit, undecodable cursor or undeclared query parameter; 503 problem+json when the
         instance runs without a database.
       parameters:
         - name: state
@@ -354,23 +360,8 @@ paths:
           description: Only transfers going to this destination site.
           schema:
             $ref: '#/components/schemas/SiteID'
-        - name: limit
-          in: query
-          required: false
-          description: Page size, 1 to 200 (default 50).
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
-        - name: offset
-          in: query
-          required: false
-          description: Number of matching transfers to skip (default 0).
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: One page of transfers.
@@ -559,6 +550,39 @@ paths:
           $ref: '#/components/responses/Problem'
 components:
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated key (1-128 printable ASCII characters, a UUID per
+        logical submit). A retry reuses it; a new user action mints a new
+        one. Same key and same request replays the stored answer with
+        Idempotency-Replayed: true; the same key with a different request
+        is 409 idempotency-key-reused.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[\x21-\x7e]{1,128}$'
+      example: 3b1c4f3e-6f0b-4a6e-9a63-2c8f3d1e5b7a
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size, 1 to 500 (default 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque keyset cursor from a previous page's nextCursor; repeat the filters on every page.
+      schema:
+        type: string
     ReportFrom:
       name: from
       in: query
@@ -591,12 +615,26 @@ components:
         type: string
       example: '"3"'
   headers:
+    IdempotencyReplayed:
+      description: Present, with the value true, only when the answer is a replay of an earlier request with the same Idempotency-Key.
+      schema:
+        type: string
+        enum: ['true']
     ETag:
       description: The catalogue entry's revision as a strong ETag (send it back in If-Match).
       schema:
         type: string
       example: '"2"'
   responses:
+    Conflict:
+      description: |
+        RFC 9457 problem+json conflict. Problem type idempotency-key-reused
+        means the Idempotency-Key was already used with a different request
+        (method, path or body); any other type is a business conflict.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     Problem:
       description: RFC 7807 problem+json error.
       content:
@@ -702,12 +740,15 @@ components:
           $ref: '#/components/schemas/CatalogueOutcome'
     RebalancePolicyList:
       type: object
-      required: [policies]
+      required: [items]
       properties:
-        policies:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/RebalancePolicyEntry'
+        nextCursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last page.
     TransferLaneEntry:
       type: object
       required: [lane, revision, updatedAt]
@@ -726,12 +767,15 @@ components:
           $ref: '#/components/schemas/CatalogueOutcome'
     TransferLaneList:
       type: object
-      required: [lanes]
+      required: [items]
       properties:
-        lanes:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/TransferLaneEntry'
+        nextCursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last page.
     GenerateRequest:
       type: object
       required: [asOf, positions, policies, lanes]
@@ -827,8 +871,8 @@ components:
           description: |
             One advisory view per site, built from the local read models. This
             endpoint does NOT propose transfers; proposals come from
-            POST /v1/transfer-proposals:generate over an explicit snapshot, and
-            an operator approves one with POST /v1/transfers:approve.
+            POST /v1/transfer-proposal-runs over an explicit snapshot, and
+            an operator approves one with POST /v1/transfer-approvals.
           items:
             $ref: '#/components/schemas/SiteSimulation'
     SiteSimulation:
@@ -892,7 +936,7 @@ components:
           description: The advisory proposal snapshot's as-of watermark.
     ApproveTransferResponse:
       type: object
-      required: [transferId, state, originSiteId, destinationSiteId, sku, quantity, policyVersion, replayed, expiresAt, transferLineId]
+      required: [transferId, state, originSiteId, destinationSiteId, sku, quantity, policyVersion, expiresAt, transferLineId]
       properties:
         transferId:
           type: string
@@ -942,9 +986,6 @@ components:
           type: string
           enum: [ORIGIN_SITE_UNKNOWN, INSUFFICIENT_USABLE, IDEMPOTENCY_CONFLICT]
           description: The closed rejection reason, present once UNFULFILLABLE.
-        replayed:
-          type: boolean
-          description: True when the idempotency key already existed (the original transfer is returned).
         expiresAt:
           type: string
           format: date-time
@@ -980,12 +1021,15 @@ components:
           description: The fail-closed snapshot refusal; present only when outcome is FAILED.
     RebalanceRunsResponse:
       type: object
-      required: [runs]
+      required: [items]
       properties:
-        runs:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/RebalanceRun'
+        nextCursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last page.
     TransferState:
       type: string
       enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
@@ -1090,19 +1134,15 @@ components:
                 $ref: '#/components/schemas/AuditEntry'
     TransferList:
       type: object
-      required: [items, total, limit, offset]
+      required: [items]
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/TransferView'
-        total:
-          type: integer
-          description: Number of transfers matching the filter before paging.
-        limit:
-          type: integer
-        offset:
-          type: integer
+        nextCursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last page.
     ReportsFreshness:
       type: object
       required: [as_of, lag_seconds]
