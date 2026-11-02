@@ -936,7 +936,7 @@ components:
           description: The advisory proposal snapshot's as-of watermark.
     ApproveTransferResponse:
       type: object
-      required: [transferId, state, originSiteId, destinationSiteId, sku, quantity, policyVersion, replayed, expiresAt, transferLineId]
+      required: [transferId, state, originSiteId, destinationSiteId, sku, quantity, policyVersion, expiresAt, transferLineId]
       properties:
         transferId:
           type: string
@@ -986,9 +986,6 @@ components:
           type: string
           enum: [ORIGIN_SITE_UNKNOWN, INSUFFICIENT_USABLE, IDEMPOTENCY_CONFLICT]
           description: The closed rejection reason, present once UNFULFILLABLE.
-        replayed:
-          type: boolean
-          description: True when the idempotency key already existed (the original transfer is returned).
         expiresAt:
           type: string
           format: date-time

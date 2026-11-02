@@ -37,14 +37,14 @@ type approveTransferDTO struct {
 	PolicyVersion   string    `json:"policyVersion"`
 	ReservationID   string    `json:"reservationId,omitempty"`
 	RejectionReason string    `json:"rejectionReason,omitempty"`
-	Replayed        bool      `json:"replayed"`
 	ExpiresAt       time.Time `json:"expiresAt"`
 	TransferLineID  string    `json:"transferLineId"`
 }
 
 // approve serves POST /v1/transfer-approvals: the Phase-2 saga approval.
 // Fail-closed read models refuse with 422/503; a replayed Idempotency-Key
-// with the same payload answers 200 with replayed: true; a DIFFERENT
+// with the same payload answers the stored response with the header
+// Idempotency-Replayed: true; a DIFFERENT
 // payload under a reused key is a 409 problem.
 func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 	if h.Approve == nil {
@@ -89,7 +89,6 @@ func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 		PolicyVersion:     result.Transfer.PolicyVersion(),
 		ReservationID:     result.Transfer.ReservationID(),
 		RejectionReason:   string(result.Transfer.RejectionReason()),
-		Replayed:          result.Replayed,
 		ExpiresAt:         result.Transfer.ExpiresAt(),
 		TransferLineID:    result.TransferID.LineID(),
 	}

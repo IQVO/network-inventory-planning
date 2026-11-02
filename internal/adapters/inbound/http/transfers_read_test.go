@@ -214,7 +214,17 @@ func TestListTransfersMapsQueryParametersAndPage(t *testing.T) {
 		t.Fatal("the audit trail belongs to the single-get view only")
 	}
 
-	// The cursor continues exactly after the last returned row.
+}
+
+func TestListTransfersCursorContinuesAfterTheLastRow(t *testing.T) {
+	q := &stubTransferQuery{page: transfer.TransferPage{Items: []*transfer.InterWarehouseTransfer{allocatedTransfer(), allocatedTransfer()}}}
+	first := serve(readHandler(q), "/v1/transfers?limit=1")
+	var got struct {
+		NextCursor string `json:"nextCursor"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
 	serve(readHandler(q), "/v1/transfers?limit=1&cursor="+got.NextCursor)
 	if q.gotFilter.After == nil || q.gotFilter.After.ID != "tr-1" {
 		t.Fatalf("keyset after = %+v, want id tr-1", q.gotFilter.After)

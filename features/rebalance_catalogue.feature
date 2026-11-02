@@ -23,9 +23,9 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds an enabled lane from "WH1" to "WH2" with lead time 24 hours and unit handling cost 1
     When the scheduled rebalance runs
     And I request GET "/v1/rebalance-runs"
-    Then the JSON field "runs.0.outcome" is "COMPLETED"
-    And the JSON field "runs.0.proposalCount" is 1
-    And the JSON field "runs.0.rejectedCount" is 0
+    Then the JSON field "items.0.outcome" is "COMPLETED"
+    And the JSON field "items.0.proposalCount" is 1
+    And the JSON field "items.0.rejectedCount" is 0
     And the domain event "RebalanceRunCompleted" was published 1 time
 
   Scenario: A pass that proposes still approves, allocates and releases nothing
@@ -48,8 +48,8 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds an enabled lane from "WH1" to "WH3" with lead time 24 hours and unit handling cost 1
     When the scheduled rebalance runs
     And I request GET "/v1/rebalance-runs"
-    Then the JSON field "runs.0.outcome" is "COMPLETED"
-    And the JSON field "runs.0.proposalCount" is 0
+    Then the JSON field "items.0.outcome" is "COMPLETED"
+    And the JSON field "items.0.proposalCount" is 0
 
   Scenario Outline: A site capability that forbids a direction leaves its lanes unused without failing the pass
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
@@ -60,9 +60,9 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds an enabled lane from "WH1" to "WH2" with lead time 24 hours and unit handling cost 1
     When the scheduled rebalance runs
     And I request GET "/v1/rebalance-runs"
-    Then the JSON field "runs.0.outcome" is "COMPLETED"
-    And the JSON field "runs.0.proposalCount" is 0
-    And the JSON field "runs.0.failClosedReason" is absent
+    Then the JSON field "items.0.outcome" is "COMPLETED"
+    And the JSON field "items.0.proposalCount" is 0
+    And the JSON field "items.0.failClosedReason" is absent
 
     Examples: capability gates
       | site | direction |
@@ -77,7 +77,7 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds a disabled lane from "WH1" to "WH2" with lead time 24 hours and unit handling cost 1
     When the scheduled rebalance runs
     And I request GET "/v1/rebalance-runs"
-    Then the JSON field "runs.0.proposalCount" is 0
+    Then the JSON field "items.0.proposalCount" is 0
 
   Scenario: A candidate whose cost outweighs its benefit is counted as rejected
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
@@ -87,9 +87,9 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds an enabled lane from "WH1" to "WH2" with lead time 24 hours and unit handling cost 5
     When the scheduled rebalance runs
     And I request GET "/v1/rebalance-runs"
-    Then the JSON field "runs.0.outcome" is "COMPLETED"
-    And the JSON field "runs.0.proposalCount" is 0
-    And the JSON field "runs.0.rejectedCount" is 1
+    Then the JSON field "items.0.outcome" is "COMPLETED"
+    And the JSON field "items.0.proposalCount" is 0
+    And the JSON field "items.0.rejectedCount" is 1
 
   Scenario: Creating a policy answers 201 with revision 1 as its ETag
     When I send PUT "/v1/rebalance-policies" with this body:
@@ -128,9 +128,9 @@ Feature: Rebalance policy and transfer lane catalogues
     Then the response status is 412
     And the problem detail type is "version-mismatch"
     When I request GET "/v1/rebalance-policies"
-    Then the JSON array "policies" has 1 element
-    And the JSON field "policies.0.policy.TargetStock" is 80
-    And the JSON field "policies.0.revision" is 2
+    Then the JSON array "items" has 1 element
+    And the JSON field "items.0.policy.TargetStock" is 80
+    And the JSON field "items.0.revision" is 2
 
   Scenario: A lane update under If-Match is guarded by its revision
     When I send PUT "/v1/transfer-lanes" with this body:
@@ -154,10 +154,10 @@ Feature: Rebalance policy and transfer lane catalogues
     Then the response status is 412
     And the problem detail type is "version-mismatch"
     When I request GET "/v1/transfer-lanes"
-    Then the JSON array "lanes" has 1 element
-    And the JSON field "lanes.0.lane.LeadTime" is 172800000000000
-    And the JSON field "lanes.0.lane.UnitHandlingCost" is 2
-    And the JSON field "lanes.0.revision" is 2
+    Then the JSON array "items" has 1 element
+    And the JSON field "items.0.lane.LeadTime" is 172800000000000
+    And the JSON field "items.0.lane.UnitHandlingCost" is 2
+    And the JSON field "items.0.revision" is 2
 
   Scenario Outline: A malformed If-Match is refused with 400 and applied nothing
     When I send PUT "<path>" with If-Match <ifMatch> and this body:
@@ -171,10 +171,10 @@ Feature: Rebalance policy and transfer lane catalogues
 
     Examples: malformed If-Match values
       | path                   | ifMatch | list     | body                                                                                                       | why                    |
-      | /v1/rebalance-policies | abc     | policies | {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":0,"TargetStock":10,"UnitPriority":1}              | not a revision         |
-      | /v1/rebalance-policies | 0       | policies | {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":0,"TargetStock":10,"UnitPriority":1}              | revisions start at 1   |
-      | /v1/transfer-lanes     | abc     | lanes    | {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}          | not a revision         |
-      | /v1/transfer-lanes     | -1      | lanes    | {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}          | revisions are positive |
+      | /v1/rebalance-policies | abc     | items | {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":0,"TargetStock":10,"UnitPriority":1}              | not a revision         |
+      | /v1/rebalance-policies | 0       | items | {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":0,"TargetStock":10,"UnitPriority":1}              | revisions start at 1   |
+      | /v1/transfer-lanes     | abc     | items | {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}          | not a revision         |
+      | /v1/transfer-lanes     | -1      | items | {"Origin":"WH1","Destination":"WH2","LeadTime":86400000000000,"UnitHandlingCost":1,"Enabled":true}          | revisions are positive |
 
   Scenario Outline: An entry refused on its face is a 422
     When I send PUT "<path>" with this body:
@@ -196,12 +196,12 @@ Feature: Rebalance policy and transfer lane catalogues
     And the lane catalogue holds a disabled lane from "WH2" to "WH1" with lead time 48 hours and unit handling cost 2
     When I request GET "/v1/transfer-lanes"
     Then the response status is 200
-    And the JSON array "lanes" has 2 elements
-    And the JSON field "lanes.0.lane.Origin" is "WH1"
-    And the JSON field "lanes.0.lane.Enabled" is true
-    And the JSON field "lanes.1.lane.Origin" is "WH2"
-    And the JSON field "lanes.1.lane.Enabled" is false
-    And the JSON field "lanes.1.revision" is 1
+    And the JSON array "items" has 2 elements
+    And the JSON field "items.0.lane.Origin" is "WH1"
+    And the JSON field "items.0.lane.Enabled" is true
+    And the JSON field "items.1.lane.Origin" is "WH2"
+    And the JSON field "items.1.lane.Enabled" is false
+    And the JSON field "items.1.revision" is 1
 
   Scenario Outline: An instance without a database cannot serve the catalogues
     Given this instance runs without a database

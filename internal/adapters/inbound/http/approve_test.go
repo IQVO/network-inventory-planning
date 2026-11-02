@@ -169,8 +169,8 @@ func TestApproveEndpointPersistsSaga(t *testing.T) {
 	if dto.TransferLineID != dto.TransferID+":1" {
 		t.Fatalf("transferLineId = %q (transfer %s)", dto.TransferLineID, dto.TransferID)
 	}
-	if dto.Replayed {
-		t.Fatal("first approval must not report replayed")
+	if rec.Header().Get("Idempotency-Replayed") != "" {
+		t.Fatal("first approval must not carry Idempotency-Replayed")
 	}
 	if len(events.events) != 6 {
 		t.Fatalf("events = %d, want 6 (2 integration + 4 analytics occurrences)", len(events.events))
