@@ -42,9 +42,9 @@ calls it** today.
 | Use case | Trigger | Inputs | Invariants checked | Events raised |
 | --- | --- | --- | --- | --- |
 | `GetTransfer` | `GET /v1/transfers/{id}`; MCP `get_transfer` | id | id not blank; unknown id → `transfer-not-found` | none |
-| `ListTransfers` | `GET /v1/transfers`; MCP `list_transfers` | `state`, `originSiteId`, `destinationSiteId` (REST) or `site` (MCP), `limit`, `offset` | state in the 11-state vocabulary (case-insensitive); `0 ≤ limit ≤ 200` (0 → 50; REST rejects an explicit `limit=0`); `offset ≥ 0` | none |
+| `ListTransfers` | `GET /v1/transfers`; MCP `list_transfers` | `state`, `originSiteId`, `destinationSiteId`, `limit`, `cursor` (REST) or `state`, `site`, `limit`, `offset` (MCP) | state in the 11-state vocabulary (case-insensitive); REST: keyset paging, `limit` 1–500 (default 100), opaque `cursor` from `nextCursor`, an undeclared query parameter is 400; MCP: `0 ≤ limit ≤ 200` (0 → 50), `offset ≥ 0` | none |
 | `FindStuckTransfers` | MCP `find_stuck_transfers` | `older_than_minutes`, `state`, `limit` | threshold positive; state must be non-terminal; ordered stalest first | none |
-| `ListRebalanceRuns` | `GET /v1/rebalance-runs` | `limit` | clamped to 1–200, default 50 (REST rejects out-of-range values with 400) | none |
+| `ListRebalanceRuns` | `GET /v1/rebalance-runs` | `limit`, `cursor` | REST: `limit` 1–500, default 100 (out-of-range is 400 `invalid-limit`), keyset `cursor` (undecodable is 400 `invalid-cursor`) | none |
 | `ListRebalancePolicies` / `ListTransferLanes` | `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes` | none | ordered by key | none |
 
 ## Catalogue management (ADR 0015)
