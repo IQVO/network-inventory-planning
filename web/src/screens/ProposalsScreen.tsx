@@ -29,7 +29,7 @@ let nextRowKey = 0;
 const newRow = <T,>(draft: T): Row<T> => ({ key: ++nextRowKey, draft });
 
 /**
- * Proposal generation (POST /v1/transfer-proposals:generate): the DIAGNOSTIC
+ * Proposal generation (POST /v1/transfer-proposal-runs): the DIAGNOSTIC
  * planning boundary. The endpoint plans deterministically over an explicit,
  * caller-provided snapshot — it never reaches into sibling contexts, and
  * production planning uses the simulation endpoint instead. The form asks for

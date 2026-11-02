@@ -12,7 +12,7 @@ describe("RebalanceRunsScreen", () => {
   });
 
   it("lists runs with outcome pills and the fail-closed reason", async () => {
-    const api = mockApi({ "GET /v1/rebalance-runs": json({ runs: RUNS }) });
+    const api = mockApi({ "GET /v1/rebalance-runs": json({ items: RUNS }) });
     render(<RebalanceRunsScreen />);
     const rows = within(await screen.findByRole("table")).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(2);
@@ -24,7 +24,7 @@ describe("RebalanceRunsScreen", () => {
   });
 
   it("shows an empty state", async () => {
-    mockApi({ "GET /v1/rebalance-runs": json({ runs: [] }) });
+    mockApi({ "GET /v1/rebalance-runs": json({ items: [] }) });
     render(<RebalanceRunsScreen />);
     expect(await screen.findByText(/No rebalance run has been recorded yet/)).toBeInTheDocument();
   });

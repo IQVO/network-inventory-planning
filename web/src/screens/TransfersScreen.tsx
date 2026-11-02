@@ -30,29 +30,31 @@ const NO_FILTERS: Filters = { state: "", origin: "", destination: "" };
 export function TransfersScreen() {
   const [draft, setDraft] = useState<Filters>(NO_FILTERS);
   const [applied, setApplied] = useState<Filters>(NO_FILTERS);
-  const [offset, setOffset] = useState(0);
+  // Keyset paging: cursors[i] is the cursor that opens page i (page 0 has none).
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors[cursors.length - 1];
 
   const query: TransferQuery = {
     state: applied.state,
     originSiteId: applied.origin,
     destinationSiteId: applied.destination,
     limit: PAGE_SIZE,
-    offset,
+    cursor,
   };
-  const key = `transfers|${applied.state}|${applied.origin}|${applied.destination}|${offset}`;
+  const key = `transfers|${applied.state}|${applied.origin}|${applied.destination}|${cursor ?? ""}`;
   const transfers = useRequest(
     async () => ({ page: await listTransfers(query), loadedAt: new Date().toISOString() }),
     key,
   );
 
   const apply = () => {
-    setOffset(0);
+    setCursors([]);
     setApplied({ state: draft.state, origin: draft.origin.trim(), destination: draft.destination.trim() });
   };
   const clear = () => {
     setDraft(NO_FILTERS);
     setApplied(NO_FILTERS);
-    setOffset(0);
+    setCursors([]);
   };
 
   return (
@@ -116,8 +118,9 @@ export function TransfersScreen() {
           )}
           <Pager
             page={transfers.status === "success" ? transfers.data.page : null}
-            offset={offset}
-            onOffset={setOffset}
+            pageNumber={cursors.length}
+            onNext={(next) => setCursors((c) => [...c, next])}
+            onPrevious={() => setCursors((c) => c.slice(0, -1))}
             onRefresh={transfers.reload}
             busy={transfers.status === "loading"}
           />
@@ -166,37 +169,39 @@ function TransfersTable({ page, loadedAt }: { page: TransferList; loadedAt: stri
 
 function Pager({
   page,
-  offset,
-  onOffset,
+  pageNumber,
+  onNext,
+  onPrevious,
   onRefresh,
   busy,
 }: {
   page: TransferList | null;
-  offset: number;
-  onOffset: (offset: number) => void;
+  pageNumber: number;
+  onNext: (cursor: string) => void;
+  onPrevious: () => void;
   onRefresh: () => void;
   busy: boolean;
 }) {
-  const total = page?.total ?? 0;
   const shown = page?.items.length ?? 0;
-  const hasPrev = offset > 0;
-  const hasNext = page !== null && offset + shown < total;
+  const hasPrev = pageNumber > 0;
+  const nextCursor = page?.nextCursor;
+  const hasNext = nextCursor !== undefined && nextCursor !== "";
   return (
     <nav
       aria-label="Transfers paging"
       style={{ display: "flex", gap: "var(--wh-space-3)", alignItems: "center", flexWrap: "wrap" }}
     >
-      <SubmitButton type="button" disabled={!hasPrev || busy} onClick={() => onOffset(Math.max(0, offset - PAGE_SIZE))}>
+      <SubmitButton type="button" disabled={!hasPrev || busy} onClick={onPrevious}>
         Previous
       </SubmitButton>
-      <SubmitButton type="button" disabled={!hasNext || busy} onClick={() => onOffset(offset + PAGE_SIZE)}>
+      <SubmitButton type="button" disabled={!hasNext || busy} onClick={() => nextCursor && onNext(nextCursor)}>
         Next
       </SubmitButton>
       <SubmitButton type="button" disabled={busy} onClick={onRefresh}>
         Refresh
       </SubmitButton>
       <EmptyNote>
-        {page && shown > 0 ? `Showing ${offset + 1}–${offset + shown} of ${formatNumber(total)}` : ""}
+        {page && shown > 0 ? `Page ${pageNumber + 1}: ${formatNumber(shown)} transfers` : ""}
       </EmptyNote>
     </nav>
   );

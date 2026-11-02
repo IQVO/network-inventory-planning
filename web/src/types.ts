@@ -68,18 +68,18 @@ export interface TransferDetail extends TransferView {
 /** transferListDTO. */
 export interface TransferList {
   items: TransferView[];
-  total: number;
-  limit: number;
-  offset: number;
+  /** Opaque keyset cursor; absent on the last page. */
+  nextCursor?: string;
 }
 
 export interface TransferQuery {
   state?: string;
   originSiteId?: string;
   destinationSiteId?: string;
-  /** The service accepts 1..200 and defaults to 50. */
+  /** The service accepts 1..500 and defaults to 100. */
   limit?: number;
-  offset?: number;
+  /** The previous page's nextCursor; filters are repeated on every page. */
+  cursor?: string;
 }
 
 /**
@@ -109,7 +109,7 @@ export interface SimulationResponse {
   sites: SimulationSite[];
 }
 
-/** approveRequest: POST /v1/transfers:approve body (unknown fields are a 400). */
+/** approveRequest: POST /v1/transfer-approvals body (unknown fields are a 400). */
 export interface ApproveTransferRequest {
   originSiteId: string;
   destinationSiteId: string;
@@ -131,7 +131,8 @@ export interface ApproveTransferResponse {
   policyVersion: string;
   reservationId?: string;
   rejectionReason?: RejectionReason;
-  /** True when the Idempotency-Key already existed (the original transfer is returned). */
+  /** Client-derived: true when the response carried `Idempotency-Replayed: true`
+   *  (the stored first answer was replayed). Not part of the wire body. */
   replayed: boolean;
   expiresAt: string;
   transferLineId: string;
@@ -151,7 +152,8 @@ export interface RebalanceRun {
 }
 
 export interface RebalanceRunsResponse {
-  runs: RebalanceRun[];
+  items: RebalanceRun[];
+  nextCursor?: string;
 }
 
 /**
@@ -189,8 +191,9 @@ export interface TransferLaneEntry {
 }
 
 /** GET /v1/transfer-lanes 200 (ordered by origin, then destination). */
+/** Every lane: the client follows nextCursor until absent. */
 export interface TransferLaneList {
-  lanes: TransferLaneEntry[];
+  items: TransferLaneEntry[];
 }
 
 /** transfer.Policy (untagged Go struct): versioned guardrails for one SKU at
@@ -216,8 +219,9 @@ export interface RebalancePolicyEntry {
 }
 
 /** GET /v1/rebalance-policies 200 (ordered by site, then SKU). */
+/** Every entry: the client follows nextCursor until absent. */
 export interface RebalancePolicyList {
-  policies: RebalancePolicyEntry[];
+  items: RebalancePolicyEntry[];
 }
 
 /** transfer.Position (untagged Go struct): the planner's point-in-time view of
@@ -256,7 +260,7 @@ export interface ProposalWire {
 }
 
 /** generateRequest (handler.go, camelCase json tags): the explicit, coherent
- *  snapshot POST /v1/transfer-proposals:generate plans from. The decoder
+ *  snapshot POST /v1/transfer-proposal-runs plans from. The decoder
  *  refuses unknown fields. */
 export interface GenerateRequestWire {
   asOf: string;
@@ -265,7 +269,7 @@ export interface GenerateRequestWire {
   lanes: LaneWire[];
 }
 
-/** POST /v1/transfer-proposals:generate 200: advisory proposals, highest
+/** POST /v1/transfer-proposal-runs 200: advisory proposals, highest
  *  score first (ties by SKU, then origin). The response carries ONLY this —
  *  no considered/rejected counters. */
 export interface GenerateResponseWire {

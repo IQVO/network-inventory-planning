@@ -15,7 +15,7 @@ import type { ApproveTransferResponse, SimulationResponse, SimulationSite } from
  * Network simulation: the service's advisory per-site view served from its
  * local read models (GET /v1/transfer-simulations) -- demand, capacity over the
  * window and headroom per site, short sites first -- and the operator-driven
- * Approve form (POST /v1/transfers:approve).
+ * Approve form (POST /v1/transfer-approvals).
  *
  * The simulation proposes NOTHING: no routes, no SKUs, no quantities. The
  * operator decides the transfer and types it; the service then re-validates it

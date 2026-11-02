@@ -21,7 +21,7 @@ import type { RebalancePolicyEntry } from "../types";
  * Rebalance policies (ADR 0015): the operator-managed target-levels catalogue
  * (GET / PUT /v1/rebalance-policies), one entry per site + SKU. The scheduled
  * rebalance pass plans from this catalogue; each entry embeds the SAME Policy
- * shape POST /v1/transfer-proposals:generate accepts, plus its revision.
+ * shape POST /v1/transfer-proposal-runs accepts, plus its revision.
  *
  * Same edit contract as the lanes screen: an edit PUTs with the loaded
  * revision in If-Match (412 when it moved on), a create PUTs without it, and
@@ -53,13 +53,13 @@ export function RebalancePoliciesScreen() {
           <RequestView
             state={policies}
             what="rebalance policies"
-            isEmpty={(l) => l.policies.length === 0}
+            isEmpty={(l) => l.items.length === 0}
             empty="The policy catalogue is empty. Create the first site + SKU policy below."
           >
             {(l) => (
               <DataTable
                 rowKey={(e) => `${e.policy.Site}/${e.policy.SKU}`}
-                rows={l.policies}
+                rows={l.items}
                 columns={[
                   { key: "site", header: "Site", render: (e) => e.policy.Site },
                   { key: "sku", header: "SKU", render: (e) => e.policy.SKU },
