@@ -53,10 +53,10 @@ func (e *AnalyticsEncoder) Encode(ctx context.Context, event transfer.DomainEven
 
 func (e *AnalyticsEncoder) encodeStateAdvanced(ctx context.Context, evt transfer.StateAdvanced) ([]Encoded, error) {
 	payload := map[string]any{
-		"transfer_id": string(evt.TransferID),
-		"from":        string(evt.From),
-		"to":          string(evt.To),
-		"age_seconds": evt.AgeSeconds,
+		attrTransferID: string(evt.TransferID),
+		"from":         string(evt.From),
+		"to":           string(evt.To),
+		"age_seconds":  evt.AgeSeconds,
 	}
 	value, err := cloudevents.New(cloudevents.Spec{
 		ID:        e.mintID(),
@@ -82,7 +82,7 @@ func (e *AnalyticsEncoder) encodeStateAdvanced(ctx context.Context, evt transfer
 
 func (e *AnalyticsEncoder) encodeStuckDetected(ctx context.Context, evt transfer.StuckDetected) ([]Encoded, error) {
 	payload := map[string]any{
-		"transfer_id":       string(evt.TransferID),
+		attrTransferID:      string(evt.TransferID),
 		"state":             string(evt.State),
 		"age_seconds":       evt.AgeSeconds,
 		"threshold_seconds": evt.ThresholdSeconds,

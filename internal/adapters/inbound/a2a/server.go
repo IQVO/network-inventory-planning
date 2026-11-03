@@ -35,6 +35,9 @@ import (
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 )
 
+// mediaTypeJSON is the structured content type this agent exchanges.
+const mediaTypeJSON = "application/json"
+
 // Config carries the deployment-specific identity of this agent: the absolute
 // URL clients use to reach its JSON-RPC endpoint (advertised on the Agent
 // Card) and the card version. It is supplied by the composition root from
@@ -82,8 +85,8 @@ func Card(cfg Config) *a2a.AgentCard {
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(cfg.AgentURL, a2a.TransportProtocolJSONRPC),
 		},
-		DefaultInputModes:  []string{"application/json", "text/plain"},
-		DefaultOutputModes: []string{"application/json", "text/plain"},
+		DefaultInputModes:  []string{mediaTypeJSON, "text/plain"},
+		DefaultOutputModes: []string{mediaTypeJSON, "text/plain"},
 		Capabilities:       a2a.AgentCapabilities{Streaming: false},
 		Skills: []a2a.AgentSkill{
 			{
@@ -91,7 +94,7 @@ func Card(cfg Config) *a2a.AgentCard {
 				Name:        "Status of one transfer",
 				Description: "Reads one inter-warehouse transfer by id: its current state (DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED), sku, quantity, picked quantity, origin and destination sites, reservation id once allocated, rejection reason once unfulfillable, and the audit trail of state transitions (timestamp and cause of each). Answered as a 404 problem for an unknown id.",
 				Tags:        []string{"transfers", "status", "read"},
-				InputModes:  []string{"application/json"},
+				InputModes:  []string{mediaTypeJSON},
 				Examples: []string{
 					`{"skill":"transfer_status","arguments":{"transferId":"tr-1"}}`,
 				},
@@ -101,7 +104,7 @@ func Card(cfg Config) *a2a.AgentCard {
 				Name:        "Find transfers that are not advancing",
 				Description: "Finds transfers in a NON-terminal state (RECEIVED, UNFULFILLABLE and CANCELLED are finished and never reported) whose state has been unchanged for MORE than olderThanMinutes, stalest first, with the total number of matches before paging. Optionally narrow to one state, e.g. ALLOCATING for an allocation reply that never arrived, and cap the page with limit (1 to 200, default 50).",
 				Tags:        []string{"transfers", "stuck", "read"},
-				InputModes:  []string{"application/json"},
+				InputModes:  []string{mediaTypeJSON},
 				Examples: []string{
 					`{"skill":"find_stuck_transfers","arguments":{"olderThanMinutes":30}}`,
 					`{"skill":"find_stuck_transfers","arguments":{"olderThanMinutes":120,"state":"ALLOCATING","limit":20}}`,

@@ -67,7 +67,7 @@ func (u RunScheduledRebalance) Execute(ctx context.Context) (int64, error) {
 		}
 		id, rerr := u.Runs.Record(ctx, run)
 		if rerr != nil {
-			return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (load error: %v)", rerr, err)
+			return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (load error: %w)", rerr, err)
 		}
 		return id, nil
 	}
@@ -88,7 +88,7 @@ func (u RunScheduledRebalance) Execute(ctx context.Context) (int64, error) {
 		}
 		id, rerr := u.Runs.Record(ctx, run)
 		if rerr != nil {
-			return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (build error: %v)", rerr, err)
+			return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (build error: %w)", rerr, err)
 		}
 		return id, nil
 	}
@@ -178,7 +178,7 @@ func (u RunScheduledRebalance) loadCatalogue(ctx context.Context) ([]transfer.Po
 func (u RunScheduledRebalance) recordFailed(ctx context.Context, run transfer.RebalanceRun, cause error) (int64, error) {
 	id, err := u.Runs.Record(ctx, run)
 	if err != nil {
-		return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (cause: %v)", err, cause)
+		return 0, fmt.Errorf("run scheduled rebalance: record failed run: %w (cause: %w)", err, cause)
 	}
 	return id, nil
 }
