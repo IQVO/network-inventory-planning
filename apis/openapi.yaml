@@ -169,6 +169,79 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/transfers/{transferId}/cancellation:
+    post:
+      operationId: cancelTransfer
+      tags: [transfers]
+      summary: Cancel a transfer — synchronously pre-release, through RELEASING once allocated.
+      description: |
+        The operator cancel of the transfer saga (ADR 0022). Pre-release
+        states (DRAFT/PROPOSED/APPROVED/ALLOCATING) cancel synchronously:
+        200 with state CANCELLED, no hold exists. ALLOCATED answers 202
+        with state RELEASING: the saga outboxes
+        TransferAllocationReleaseRequested in the same transaction and
+        inventory-storage resolves the origin reservation; its
+        TransferStockAllocationReleased fact (outcome RELEASED or
+        ALREADY_RESOLVED — both settle) completes the cancel to CANCELLED.
+        A retried cancel is idempotent on the saga state: RELEASING
+        answers 202 again, CANCELLED answers 200 again. PICKED onwards and
+        UNFULFILLABLE refuse with 409 cancel-refused — the stock is
+        physically in motion or the saga already closed. An unknown
+        transfer is 404; a missing reason is 422 invalid-cancel. A body
+        with an unknown field or malformed JSON is 400 invalid-request.
+        Idempotent per the required Idempotency-Key header like every
+        keyed write: same key and same request replays the stored answer
+        (Idempotency-Replayed: true), a different request under the same
+        key is 409 idempotency-key-reused. 2xx and 4xx answers are
+        stored; a 5xx is never stored.
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The saga aggregate id being cancelled.
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTransferRequest'
+      responses:
+        '200':
+          description: |
+            Cancelled synchronously (a pre-release state, or a replay of an
+            already-settled cancel).
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelTransferResponse'
+        '202':
+          description: |
+            Accepted for compensation: state RELEASING — the origin hold is
+            being released; the saga settles to CANCELLED on
+            inventory-storage's TransferStockAllocationReleased fact.
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelTransferResponse'
+        '400':
+          $ref: '#/components/responses/KeyedProblem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/rebalance-runs:
     get:
       operationId: listRebalanceRuns
@@ -979,11 +1052,14 @@ components:
           description: The saga aggregate id.
         state:
           type: string
-          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
+          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
           description: |
             The persisted saga state at response time — ALLOCATING
             immediately after a fresh approval (awaiting inventory-storage's
-            reply). PICKED/IN_TRANSIT/ARRIVED/RECEIVED are driven later by
+            reply). RELEASING holds between an ALLOCATED cancel and
+            inventory-storage's TransferStockAllocationReleased fact, which
+            settles it to CANCELLED (ADR 0022).
+            PICKED/IN_TRANSIT/ARRIVED/RECEIVED are driven later by
             fulfillment-execution's transfer facts and inventory-storage's
             destination facts (ADR 0005); RECEIVED is terminal.
         originSiteId:
@@ -1066,9 +1142,38 @@ components:
         nextCursor:
           type: string
           description: Opaque cursor of the next page; absent on the last page.
+    CancelTransferRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: The operator's cancellation reason (recorded in the immutable audit trail).
+    CancelTransferResponse:
+      type: object
+      required: [transferId, state, transferLineId]
+      properties:
+        transferId:
+          type: string
+          description: The saga aggregate id.
+        state:
+          $ref: '#/components/schemas/TransferState'
+        transferLineId:
+          type: string
+          description: The v1 single transfer line identifier (`<transfer_id>:1`).
+        reservationId:
+          type: string
+          description: >
+            The origin reservation being released; present while the saga
+            carries one (ALLOCATED and RELEASING answers, ADR 0022).
+        rejectionReason:
+          type: string
+          description: Present only on a transfer inventory-storage refused (UNFULFILLABLE).
     TransferState:
       type: string
-      enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
+      enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
       description: |
         Saga lifecycle state. RECEIVED, UNFULFILLABLE and CANCELLED are
         terminal; every other state is waiting for a next step.

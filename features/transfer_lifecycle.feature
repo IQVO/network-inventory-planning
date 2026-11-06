@@ -198,3 +198,30 @@ Feature: Transfer saga state machine
     When a "TransferStockAllocated" fact arrives for transfer "T1"
     Then transfer "T1" is in state "ALLOCATED"
     And transfer "T2" is in state "ALLOCATING"
+
+  Scenario: Cancelling an ALLOCATED transfer releases the origin hold before closing the saga
+    Given a transfer "T1" in state "ALLOCATED"
+    When I cancel transfer "T1" with reason "wrong lane selected"
+    Then transfer "T1" is in state "RELEASING"
+    And the domain event "TransferAllocationReleaseRequested" was published
+    When a "TransferStockAllocationReleased" fact arrives for transfer "T1"
+    Then the fact is applied
+    And transfer "T1" is in state "CANCELLED"
+
+  Scenario: A picked transfer refuses the cancel — the stock is physically in motion
+    Given a transfer "T1" in state "PICKED"
+    When I cancel transfer "T1" with reason "too late"
+    Then the cancel is refused because the state is not cancellable
+    And the domain event "TransferAllocationReleaseRequested" was not published
+
+  Scenario: A released transfer settles to CANCELLED even when the reservation had already resolved
+    Given a transfer "T1" in state "RELEASING"
+    When a "TransferStockAllocationReleased" fact arrives for transfer "T1"
+    Then the fact is applied
+    And transfer "T1" is in state "CANCELLED"
+
+  Scenario: A pre-release cancel still closes the saga synchronously
+    Given an approved transfer "T1"
+    When I cancel transfer "T1" with reason "operator changed mind"
+    Then transfer "T1" is in state "CANCELLED"
+    And the domain event "TransferAllocationReleaseRequested" was not published
