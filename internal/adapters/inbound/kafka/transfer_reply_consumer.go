@@ -24,17 +24,11 @@ const InventoryTopic = "warehouse.inventory.events"
 const (
 	typeTransferStockAllocated          = "com.warehouse.wms.inventory-storage.reservation.TransferStockAllocated"
 	typeTransferStockAllocationRejected = "com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationRejected"
-	typeTransferStockAllocationReleased = "com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationReleased"
 )
 
 // The two destination facts (the receiving side of the saga, ADR 0005),
 // byte-identical to inventory-storage's apis/asyncapi.yaml — the contract
 // being built in parallel; the strings below are the agreed shape.
-const (
-	typeTransferReceiptStaged = "com.warehouse.wms.inventory-storage.stock.TransferReceiptStaged"
-	typeTransferStockStowed   = "com.warehouse.wms.inventory-storage.stock.TransferStockStowed"
-)
-
 // transferReplyConsumerName namespaces this consumer's processed-event rows.
 const transferReplyConsumerName = "transfer-reply-consumer"
 
@@ -67,101 +61,6 @@ type transferStockAllocationRejectedData struct {
 	SKU               string `json:"sku"`
 	RequestedQuantity int    `json:"requested_quantity"`
 	Reason            string `json:"reason"`
-}
-
-// transferReceiptStagedData mirrors inventory-storage's
-// TransferReceiptStaged payload (data {transfer_id, transfer_line_id,
-// destination_site_id, sku, expected_quantity, received_quantity,
-// variance}; subject/key transfer_line_id).
-type transferReceiptStagedData struct {
-	TransferID        string `json:"transfer_id"`
-	TransferLineID    string `json:"transfer_line_id"`
-	DestinationSiteID string `json:"destination_site_id"`
-	SKU               string `json:"sku"`
-	ExpectedQuantity  int    `json:"expected_quantity"`
-	ReceivedQuantity  int    `json:"received_quantity"`
-	Variance          int    `json:"variance"`
-}
-
-// transferStockStowedData mirrors inventory-storage's
-// TransferStockStowed payload (data {transfer_id, transfer_line_id,
-// destination_site_id, sku, received_quantity, stowed_quantity,
-// allocations:[{stock_unit_id, bin_id, quantity}]}; subject/key
-// transfer_line_id).
-type transferStockStowedData struct {
-	TransferID        string `json:"transfer_id"`
-	TransferLineID    string `json:"transfer_line_id"`
-	DestinationSiteID string `json:"destination_site_id"`
-	SKU               string `json:"sku"`
-	ReceivedQuantity  int    `json:"received_quantity"`
-	StowedQuantity    int    `json:"stowed_quantity"`
-	Allocations       []struct {
-		StockUnitID string `json:"stock_unit_id"`
-		BinID       string `json:"bin_id"`
-		Quantity    int    `json:"quantity"`
-	} `json:"allocations"`
-}
-
-// transferStockAllocationReleasedData mirrors inventory-storage's
-// TransferStockAllocationReleased payload (data {transfer_id,
-// transfer_line_id, reservation_id, origin_site_id, sku, quantity,
-// outcome, reason}, outcome RELEASED | ALREADY_RESOLVED; subject/key
-// transfer_line_id — ADR 0022).
-type transferStockAllocationReleasedData struct {
-	TransferID     string `json:"transfer_id"`
-	TransferLineID string `json:"transfer_line_id"`
-	ReservationID  string `json:"reservation_id"`
-	OriginSiteID   string `json:"origin_site_id"`
-	SKU            string `json:"sku"`
-	Quantity       int    `json:"quantity"`
-	Outcome        string `json:"outcome"`
-	Reason         string `json:"reason"`
-}
-
-// TransferReplyApplier is the application surface the reply consumer
-// drives. implemented by ReplyUseCases (a pair of the two use cases).
-type TransferReplyApplier interface {
-	ApplyAllocation(ctx context.Context, in usecases.ApplyAllocationInput) error
-	ApplyRejection(ctx context.Context, in usecases.ApplyRejectionInput) error
-	// The two destination facts (ADR 0005), same topic, same consumer.
-	ApplyReceiptStaged(ctx context.Context, in usecases.ApplyReceiptStagedInput) error
-	ApplyStowed(ctx context.Context, in usecases.ApplyStowInput) error
-	// The release fact (ADR 0022), same topic, same consumer.
-	ApplyReleased(ctx context.Context, in usecases.ApplyReleasedInput) error
-}
-
-// ReplyUseCases pairs the reply use cases into a TransferReplyApplier.
-type ReplyUseCases struct {
-	Allocate usecases.ApplyTransferAllocation
-	Reject   usecases.ApplyTransferRejection
-	Staged   usecases.ApplyTransferReceiptStaged
-	Stow     usecases.ApplyTransferStow
-	Released usecases.ApplyTransferAllocationReleased
-}
-
-// ApplyAllocation implements TransferReplyApplier.
-func (r ReplyUseCases) ApplyAllocation(ctx context.Context, in usecases.ApplyAllocationInput) error {
-	return r.Allocate.Execute(ctx, in)
-}
-
-// ApplyRejection implements TransferReplyApplier.
-func (r ReplyUseCases) ApplyRejection(ctx context.Context, in usecases.ApplyRejectionInput) error {
-	return r.Reject.Execute(ctx, in)
-}
-
-// ApplyReceiptStaged implements TransferReplyApplier.
-func (r ReplyUseCases) ApplyReceiptStaged(ctx context.Context, in usecases.ApplyReceiptStagedInput) error {
-	return r.Staged.Execute(ctx, in)
-}
-
-// ApplyStowed implements TransferReplyApplier.
-func (r ReplyUseCases) ApplyStowed(ctx context.Context, in usecases.ApplyStowInput) error {
-	return r.Stow.Execute(ctx, in)
-}
-
-// ApplyReleased implements TransferReplyApplier.
-func (r ReplyUseCases) ApplyReleased(ctx context.Context, in usecases.ApplyReleasedInput) error {
-	return r.Released.Execute(ctx, in)
 }
 
 // TransferReplyConsumer consumes inventory-storage's two transfer
@@ -332,93 +231,6 @@ func (c *TransferReplyConsumer) handleRejected(ctx context.Context, msg kafkago.
 	}
 	return c.apply(ctx, msg, e, "TransferStockAllocationRejected", data.TransferID, func(ctx context.Context) error {
 		return c.Applier.ApplyRejection(ctx, in)
-	})
-}
-
-// handleReceiptStaged applies inventory-storage's TransferReceiptStaged
-// destination fact: IN_TRANSIT → ARRIVED (the scan-driven receiving path).
-// The transfer_id (not the line-keyed subject) is the Load key; the
-// variance is informational (recorded in the log, not the aggregate — v1
-// has no variance disposition workflow).
-func (c *TransferReplyConsumer) handleReceiptStaged(ctx context.Context, msg kafkago.Message, e ce.Event) error {
-	var data transferReceiptStagedData
-	if err := e.DataAs(&data); err != nil {
-		//dlq:deterministic e.DataAs decode failure of the TransferReceiptStaged payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
-		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferReceiptStaged payload %s: %w", e.ID(), err))
-	}
-	in := usecases.ApplyReceiptStagedInput{
-		TransferID: transfer.TransferID(data.TransferID),
-		LineID:     data.TransferLineID,
-		OccurredAt: e.Time().UTC(),
-	}
-	return c.apply(ctx, msg, e, "TransferReceiptStaged", data.TransferID, func(ctx context.Context) error {
-		return c.Applier.ApplyReceiptStaged(ctx, in)
-	})
-}
-
-// handleStowed applies inventory-storage's TransferStockStowed destination
-// fact: ARRIVED → RECEIVED (terminal) with the destination stow
-// allocations persisted.
-func (c *TransferReplyConsumer) handleStowed(ctx context.Context, msg kafkago.Message, e ce.Event) error {
-	var data transferStockStowedData
-	if err := e.DataAs(&data); err != nil {
-		//dlq:deterministic e.DataAs decode failure of the TransferStockStowed payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
-		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockStowed payload %s: %w", e.ID(), err))
-	}
-	allocations := make([]transfer.StowAllocation, 0, len(data.Allocations))
-	for _, a := range data.Allocations {
-		allocations = append(allocations, transfer.StowAllocation{StockUnitID: a.StockUnitID, BinID: a.BinID, Quantity: a.Quantity})
-	}
-	in := usecases.ApplyStowInput{
-		TransferID: transfer.TransferID(data.TransferID),
-		Stowed: transfer.Stowed{
-			TransferLineID:   data.TransferLineID,
-			DestinationSite:  data.DestinationSiteID,
-			SKU:              data.SKU,
-			ReceivedQuantity: data.ReceivedQuantity,
-			StowedQuantity:   data.StowedQuantity,
-			Allocations:      allocations,
-		},
-		OccurredAt: e.Time().UTC(),
-	}
-	return c.apply(ctx, msg, e, "TransferStockStowed", data.TransferID, func(ctx context.Context) error {
-		return c.Applier.ApplyStowed(ctx, in)
-	})
-}
-
-// handleReleased applies inventory-storage's
-// TransferStockAllocationReleased fact (ADR 0022): RELEASING → CANCELLED
-// (terminal). The outcome (RELEASED | ALREADY_RESOLVED) settles the saga
-// either way; the aggregate's own fact checks refuse anything that does
-// not match the transfer being released.
-func (c *TransferReplyConsumer) handleReleased(ctx context.Context, msg kafkago.Message, e ce.Event) error {
-	var data transferStockAllocationReleasedData
-	if err := e.DataAs(&data); err != nil {
-		//dlq:deterministic e.DataAs decode failure of the TransferStockAllocationReleased payload bytes (pure JSON unmarshal, no ctx, no I/O): the same bytes always fail, cancellation cannot produce it
-		return c.dlq().send(ctx, msg, fmt.Errorf("malformed TransferStockAllocationReleased payload %s: %w", e.ID(), err))
-	}
-	outcome := transfer.ReleaseOutcome(data.Outcome)
-	if !outcome.Valid() {
-		// Same condition, same treatment as the aggregate's own
-		// checkReleaseFact: a contract break, dead-lettered.
-		//dlq:deterministic ReleaseOutcome.Valid() is a pure check against the closed set (transfer.ErrFactRefused): the same bytes always fail, cancellation cannot produce it
-		return c.dlq().send(ctx, msg, fmt.Errorf("%w: TransferStockAllocationReleased %s outcome %q", transfer.ErrFactRefused, e.ID(), data.Outcome))
-	}
-	in := usecases.ApplyReleasedInput{
-		TransferID: transfer.TransferID(data.TransferID),
-		Released: transfer.StockAllocationReleased{
-			TransferLineID: data.TransferLineID,
-			ReservationID:  data.ReservationID,
-			OriginSiteID:   data.OriginSiteID,
-			SKU:            data.SKU,
-			Quantity:       data.Quantity,
-			Outcome:        outcome,
-			Reason:         data.Reason,
-		},
-		OccurredAt: e.Time().UTC(),
-	}
-	return c.apply(ctx, msg, e, "TransferStockAllocationReleased", data.TransferID, func(ctx context.Context) error {
-		return c.Applier.ApplyReleased(ctx, in)
 	})
 }
 
