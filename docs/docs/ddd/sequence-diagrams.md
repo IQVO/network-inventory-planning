@@ -53,7 +53,7 @@ sequenceDiagram
   S->>R: Load capabilities, demands, plans
   R-->>S: facts
   S->>D: BuildSnapshot(facts, MaxStaleness, now)
-  Note over D: refuses on an empty model or when no site survives; a stale or missing fact excludes only its site (ADR-0018)
+  Note over D: refuses on an empty model or when no site survives, and a stale or missing fact excludes only its site (ADR-0018)
   D-->>S: PlanningSnapshot or error
   S-->>H: per-site demand, capacity, headroom
   H-->>Client: 200, or 503 problem+json read-models-incomplete
