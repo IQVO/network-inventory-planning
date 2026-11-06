@@ -15,13 +15,16 @@ import (
 //	                                              -> RECEIVED (terminal)
 //	                                        \-> UNFULFILLABLE
 //	Any pre-release state              -> CANCELLED
+//	ALLOCATED  -> RELEASING -> CANCELLED            (ADR 0022)
 //
 // CANCELLED is allowed only BEFORE the origin reservation exists (in v1,
 // from DRAFT, PROPOSED, APPROVED or ALLOCATING): once stock is ALLOCATED
 // the saga must not silently forget a hold inventory-storage is keeping;
-// releasing it needs the explicit revocation path of a later phase. The
-// fact-driven tail (PICKED onwards, ADR 0005) is likewise not cancellable:
-// the stock is physically in motion.
+// releasing it goes through RELEASING — the explicit revocation path of
+// ADR 0022 — and settles to CANCELLED only on inventory-storage's
+// TransferStockAllocationReleased fact. The fact-driven tail (PICKED
+// onwards, ADR 0005) is likewise not cancellable: the stock is physically
+// in motion.
 type TransferState string
 
 const (
@@ -30,6 +33,7 @@ const (
 	StateApproved      TransferState = "APPROVED"
 	StateAllocating    TransferState = "ALLOCATING"
 	StateAllocated     TransferState = "ALLOCATED"
+	StateReleasing     TransferState = "RELEASING"
 	StatePicked        TransferState = "PICKED"
 	StateInTransit     TransferState = "IN_TRANSIT"
 	StateArrived       TransferState = "ARRIVED"
@@ -252,6 +256,34 @@ func (t *InterWarehouseTransfer) MarkUnfulfillable(lineID string, reason Rejecti
 	t.rejectionReason = reason
 	t.transition(StateUnfulfillable, "TransferStockAllocationRejected", string(reason), now.UTC())
 	return nil
+}
+
+// CancelAfterAllocation is the ALLOCATED transfer's cancel path (ADR 0022):
+// it moves the saga to RELEASING and raises the
+// TransferAllocationReleaseRequested command for inventory-storage, which
+// resolves the origin reservation and answers
+// TransferStockAllocationReleased; that fact settles the saga to CANCELLED
+// (MarkReleased). The transfer itself never releases stock directly —
+// inventory-storage owns the hold.
+func (t *InterWarehouseTransfer) CancelAfterAllocation(reason string, now time.Time) (ReleaseRequested, error) {
+	if t.state != StateAllocated {
+		return ReleaseRequested{}, &IllegalTransitionError{ID: t.id, From: t.state, Action: "cancel after allocation"}
+	}
+	if strings.TrimSpace(reason) == "" {
+		return ReleaseRequested{}, fmt.Errorf("transfer %s: cancel reason is required", t.id)
+	}
+	occurred := now.UTC()
+	t.transition(StateReleasing, "TransferAllocationReleaseRequested", reason, occurred)
+	return ReleaseRequested{
+		TransferID:     t.id,
+		TransferLineID: t.id.LineID(),
+		ReservationID:  t.reservationID,
+		OriginSiteID:   t.originSiteID,
+		SKU:            t.sku,
+		Quantity:       t.quantity,
+		Reason:         reason,
+		OccurredAt:     occurred,
+	}, nil
 }
 
 // Cancel abandons the transfer. Legal only BEFORE the origin reservation

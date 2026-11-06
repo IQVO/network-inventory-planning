@@ -34,6 +34,7 @@ the `Status:` line of each ADR body.
 | [0019](./0019-a-dead-consumer-takes-the-process-down.md) | A consumer that stops on its own (not by shutdown) ends the process so the kubelet restarts it, instead of leaving a frozen read model behind a Ready pod | Accepted |
 | [0020](./0020-a2a-inbound-adapter.md) | A2A inbound adapter: a read-only Agent2Agent agent (`transfer_status`, `find_stuck_transfers`) over the same read use cases as REST and MCP, served by `cmd/a2a` on `:8093` | Accepted |
 | [0021](./0021-adopt-the-fleet-rest-api-guideline.md) | Adopt the fleet REST API guideline: noun routes, idempotent `POST`s (409 `idempotency-key-reused`, `Idempotency-Replayed`), keyset `{items,nextCursor}` lists | Accepted |
+| [0022](./0022-cancel-after-allocation-compensation.md) | Cancel-after-allocation compensation: `RELEASING` state, `TransferAllocationReleaseRequested` command, `TransferStockAllocationReleased` reply, `POST /v1/transfers/{id}/cancellation` — closes ADR-0003's stranded-reservation gap | Accepted |
 
 ## Where each decision shows up in the code
 

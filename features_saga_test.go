@@ -144,6 +144,8 @@ var pathTo = map[string][]string{
 	"ALLOCATING":    nil,
 	"ALLOCATED":     {"TransferStockAllocated"},
 	"UNFULFILLABLE": {"TransferStockAllocationRejected"},
+	"RELEASING":     {"TransferStockAllocated", "CancelAfterAllocation"},
+	"CANCELLED":     {"TransferStockAllocated", "CancelAfterAllocation", "TransferStockAllocationReleased"},
 	"PICKED":        {"TransferStockAllocated", "TransferPicked"},
 	"IN_TRANSIT":    {"TransferStockAllocated", "TransferPicked", "TransferDispatched"},
 	"ARRIVED":       {"TransferStockAllocated", "TransferPicked", "TransferDispatched", "TransferReceiptStaged"},
@@ -214,9 +216,34 @@ func (w *world) applyFact(ctx context.Context, fact, id string, args factArgs) e
 			usecases.ApplyReceiptStagedInput{TransferID: tid, LineID: tid.LineID(), OccurredAt: now})
 	case "TransferStockStowed":
 		return w.applyStowed(ctx, tid, t, known, args)
+	case "CancelAfterAllocation":
+		uc := usecases.CancelTransfer{Transfers: w.transfers, Events: w.bus, UoW: uow, Now: w.clock.Now}
+		_, err := uc.Execute(ctx, usecases.CancelTransferInput{TransferID: tid, Reason: "operator changed mind"})
+		return err
+	case "TransferStockAllocationReleased":
+		return w.applyReleasedFact(ctx, tid, t, known, uow, now)
 	default:
 		return fmt.Errorf("unknown fact %q", fact)
 	}
+}
+
+// applyReleasedFact applies inventory-storage's TransferStockAllocationReleased
+// fact (ADR 0022): RELEASING → CANCELLED.
+func (w *world) applyReleasedFact(ctx context.Context, tid transfer.TransferID, t *transfer.InterWarehouseTransfer, known bool, uow memory.UnitOfWork, now time.Time) error {
+	released := transfer.StockAllocationReleased{
+		TransferLineID: tid.LineID(), ReservationID: "res-1",
+		OriginSiteID: "WH1", SKU: defaultSKU,
+		Outcome: transfer.ReleaseOutcomeReleased, Reason: "revoked for cancelled transfer",
+	}
+	if known {
+		released.OriginSiteID, released.SKU, released.Quantity = t.OriginSiteID(), t.SKU(), t.Quantity()
+		released.ReservationID = t.ReservationID()
+	}
+	if released.ReservationID == "" {
+		released.ReservationID = "res-1"
+	}
+	return usecases.ApplyTransferAllocationReleased{Transfers: w.transfers, Events: w.bus, UoW: uow}.Execute(ctx,
+		usecases.ApplyReleasedInput{TransferID: tid, Released: released, OccurredAt: now})
 }
 
 func (w *world) applyAllocated(ctx context.Context, tid transfer.TransferID, t *transfer.InterWarehouseTransfer, known bool) error {
@@ -302,6 +329,26 @@ func (w *world) theFactIsRefusedAsInconsistent() error {
 
 func (w *world) theFactIsSkippedAsUnknown() error {
 	return w.refusal(func(err error) bool { return errors.Is(err, transfer.ErrTransferNotFound) }, "an unknown transfer")
+}
+
+// iCancelTransfer runs the operator cancel use case (ADR 0022) exactly as
+// POST /v1/transfers/{id}/cancellation does.
+func (w *world) iCancelTransfer(ctx context.Context, alias, reason string) error {
+	w.clock.Advance(time.Minute)
+	uc := usecases.CancelTransfer{Transfers: w.transfers, Events: w.bus, UoW: memory.UnitOfWork{}, Now: w.clock.Now}
+	_, err := uc.Execute(ctx, usecases.CancelTransferInput{TransferID: transfer.TransferID(w.resolve(alias)), Reason: reason})
+	w.lastErr = err
+	return nil
+}
+
+func (w *world) theCancelIsRefusedAsNotCancellable() error {
+	if w.lastErr == nil {
+		return fmt.Errorf("expected the cancel to be refused, but it was applied")
+	}
+	if !errors.Is(w.lastErr, usecases.ErrCancelRefused) {
+		return fmt.Errorf("expected the cancel to be refused as not cancellable, got: %w", w.lastErr)
+	}
+	return nil
 }
 
 func (w *world) theFactIsAppliedButDispatchCannotBeReleased() error {
@@ -532,6 +579,8 @@ func (w *world) registerSagaSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the fact is refused as an illegal transition$`, w.theFactIsRefusedAsIllegal)
 	sc.Step(`^the fact is refused as inconsistent with the transfer$`, w.theFactIsRefusedAsInconsistent)
 	sc.Step(`^the fact is skipped because the transfer is unknown$`, w.theFactIsSkippedAsUnknown)
+	sc.Step(`^I cancel transfer "([^"]*)" with reason "([^"]*)"$`, w.iCancelTransfer)
+	sc.Step(`^the cancel is refused because the state is not cancellable$`, w.theCancelIsRefusedAsNotCancellable)
 	sc.Step(`^the fact is applied but the dispatch work cannot be released$`, w.theFactIsAppliedButDispatchCannotBeReleased)
 	sc.Step(`^transfer "([^"]*)" is in state "([A-Z_]+)"$`, w.theTransferIsInState)
 

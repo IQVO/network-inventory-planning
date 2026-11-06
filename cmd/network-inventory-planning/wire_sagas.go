@@ -9,6 +9,7 @@ import (
 
 	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
+	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -64,6 +65,7 @@ type sagaWiring struct {
 	simulate *usecases.SimulateTransferOptions
 	generate usecases.GenerateTransferProposals
 	approve  *usecases.ApproveTransfer
+	cancel   *usecases.CancelTransfer
 	runs     *usecases.ListRebalanceRuns
 	// The operator-managed rebalance catalogues (ADR 0015).
 	putPolicy    *usecases.PutRebalancePolicy
@@ -129,26 +131,24 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 		// Non-nil even when unconfigured: the endpoint answers the typed 503
 		// with the missing-variable detail.
 		out.approve = approve
+		// Cancel (ADR 0022) needs the outbox for the ALLOCATED path's
+		// TransferAllocationReleaseRequested command — without it a
+		// transfer could enter RELEASING with no command ever sent. The
+		// pre-release path shares the same use case, so unconfigured
+		// means the whole endpoint answers 503 (fail-closed, exactly
+		// like approval).
+		out.cancel = &usecases.CancelTransfer{
+			Transfers: transfers,
+			Events:    outboxPublisher,
+			UoW:       uow,
+			Now:       time.Now,
+		}
 	} else {
 		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfer-approvals answers 503 (the saga cannot emit its allocation command without the outbox)")
+		logger.Warn("KAFKA_BROKERS not configured; POST /v1/transfers/{id}/cancellation answers 503 (an ALLOCATED cancel cannot emit its release command without the outbox)")
 	}
 
-	replyAllocate := &usecases.ApplyTransferAllocation{
-		Transfers: transfers,
-		Events:    outboxPublisher,
-		UoW:       uow,
-		Release:   release,
-		Now:       time.Now,
-	}
-	replyReject := &usecases.ApplyTransferRejection{Transfers: transfers, Events: outboxPublisher, UoW: uow}
-	replyStaged := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, Events: outboxPublisher, UoW: uow}
-	replyStow := &usecases.ApplyTransferStow{Transfers: transfers, Events: outboxPublisher, UoW: uow}
-	replyApplier := inboundkafka.ReplyUseCases{Allocate: *replyAllocate, Reject: *replyReject, Staged: *replyStaged, Stow: *replyStow}
-
-	factPick := &usecases.ApplyTransferPick{Transfers: transfers, Events: outboxPublisher, UoW: uow, Release: release}
-	factDispatched := &usecases.ApplyTransferDispatched{Transfers: transfers, Events: outboxPublisher, UoW: uow}
-	factArrival := &usecases.ApplyTransferArrival{Transfers: transfers, Events: outboxPublisher, UoW: uow}
-	factApplier := inboundkafka.FactUseCases{Pick: *factPick, Dispatched: *factDispatched, Arrival: *factArrival}
+	replyApplier, factApplier := wireTransferConsumers(transfers, outboxPublisher, uow, release)
 
 	consumerRunners, consumerClosers, err := startConsumers(logger, consumerDeps{
 		uow:             uow,
@@ -176,4 +176,29 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	wireHealthTicker(logger, pool, outboxPublisher, &out)
 	wireRebalanceTicker(logger, snapshots, packLevels, rebalanceRuns, catalogue, outboxPublisher, maxStaleness, &out)
 	return out, nil
+}
+
+// wireTransferConsumers builds the reply consumer's use cases (the
+// inventory-storage replies incl. the release fact, ADR 0022) and the
+// fulfillment-execution fact consumer's, over the same transfers store,
+// outbox publisher and UnitOfWork.
+func wireTransferConsumers(transfers *postgres.TransferRepo, outboxPublisher ports.TransferEventPublisher, uow ports.UnitOfWork, release usecases.WorkReleaseConfig) (inboundkafka.ReplyUseCases, inboundkafka.FactUseCases) {
+	replyAllocate := &usecases.ApplyTransferAllocation{
+		Transfers: transfers,
+		Events:    outboxPublisher,
+		UoW:       uow,
+		Release:   release,
+		Now:       time.Now,
+	}
+	replyReject := &usecases.ApplyTransferRejection{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	replyStaged := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	replyStow := &usecases.ApplyTransferStow{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	replyReleased := &usecases.ApplyTransferAllocationReleased{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	replyApplier := inboundkafka.ReplyUseCases{Allocate: *replyAllocate, Reject: *replyReject, Staged: *replyStaged, Stow: *replyStow, Released: *replyReleased}
+
+	factPick := &usecases.ApplyTransferPick{Transfers: transfers, Events: outboxPublisher, UoW: uow, Release: release}
+	factDispatched := &usecases.ApplyTransferDispatched{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	factArrival := &usecases.ApplyTransferArrival{Transfers: transfers, Events: outboxPublisher, UoW: uow}
+	factApplier := inboundkafka.FactUseCases{Pick: *factPick, Dispatched: *factDispatched, Arrival: *factArrival}
+	return replyApplier, factApplier
 }

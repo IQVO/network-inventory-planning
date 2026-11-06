@@ -1,0 +1,89 @@
+---
+id: cancel-transfer
+title: "Cancel a transfer — synchronously pre-release, through RELEASING once allocated."
+description: "The operator cancel of the transfer saga (ADR 0022). Pre-release"
+sidebar_label: "Cancel a transfer — synchronously pre-release, through RELEASING once allocated."
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: "post api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Cancel a transfer — synchronously pre-release, through RELEASING once allocated."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"post"}
+  path={"/v1/transfers/{transferId}/cancellation"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+The operator cancel of the transfer saga (ADR 0022). Pre-release
+states (DRAFT/PROPOSED/APPROVED/ALLOCATING) cancel synchronously:
+200 with state CANCELLED, no hold exists. ALLOCATED answers 202
+with state RELEASING: the saga outboxes
+TransferAllocationReleaseRequested in the same transaction and
+inventory-storage resolves the origin reservation; its
+TransferStockAllocationReleased fact (outcome RELEASED or
+ALREADY_RESOLVED — both settle) completes the cancel to CANCELLED.
+A retried cancel is idempotent on the saga state: RELEASING
+answers 202 again, CANCELLED answers 200 again. PICKED onwards and
+UNFULFILLABLE refuse with 409 cancel-refused — the stock is
+physically in motion or the saga already closed. An unknown
+transfer is 404; a missing reason is 422 invalid-cancel. A body
+with an unknown field or malformed JSON is 400 invalid-request.
+Idempotent per the required Idempotency-Key header like every
+keyed write: same key and same request replays the stored answer
+(Idempotency-Replayed: true), a different request under the same
+key is 409 idempotency-key-reused. 2xx and 4xx answers are
+stored; a 5xx is never stored.
+
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./cancel-transfer.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./cancel-transfer.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./cancel-transfer.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      
