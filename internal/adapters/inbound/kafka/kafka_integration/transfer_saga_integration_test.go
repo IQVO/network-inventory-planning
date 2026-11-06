@@ -276,8 +276,9 @@ func TestTransferSagaIntegration(t *testing.T) {
 	reject := &usecases.ApplyTransferRejection{Transfers: transfers, UoW: uow}
 	stagedUse := &usecases.ApplyTransferReceiptStaged{Transfers: transfers, UoW: uow}
 	stowUse := &usecases.ApplyTransferStow{Transfers: transfers, UoW: uow}
+	releasedUse := &usecases.ApplyTransferAllocationReleased{Transfers: transfers, UoW: uow}
 	replyConsumer := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply"),
-		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse, Released: *releasedUse}, processedEvents, uow, nil)
 	runConsumerUntil(t, replyConsumer, 15*time.Second)
 
 	loaded, err = transfers.Load(ctx, result.TransferID)
@@ -338,7 +339,7 @@ func TestTransferSagaIntegration(t *testing.T) {
 	//    audit entry for the allocation, deduped on the CE id, and the
 	//    pick demand is never re-relayed.
 	replayConsumer := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply-replay"),
-		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse, Released: *releasedUse}, processedEvents, uow, nil)
 	runConsumerUntil(t, replayConsumer, 15*time.Second)
 
 	loaded, err = transfers.Load(ctx, result.TransferID)
@@ -425,7 +426,7 @@ func TestTransferSagaIntegration(t *testing.T) {
 		}, processedEvents, uow, nil)
 	runConsumerUntil(t, secondFactConsumer, 15*time.Second)
 	finalReplyConsumer := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply-final"),
-		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse, Released: *releasedUse}, processedEvents, uow, nil)
 	runConsumerUntil(t, finalReplyConsumer, 15*time.Second)
 
 	loaded, err = transfers.Load(ctx, result.TransferID)
@@ -460,7 +461,7 @@ func TestTransferSagaIntegration(t *testing.T) {
 		}, processedEvents, uow, nil)
 	runConsumerUntil(t, replayFacts, 15*time.Second)
 	replayReplies := inboundkafka.NewTransferReplyConsumer(brokers, uniqueGroupID("transfer-reply-replay2"),
-		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse}, processedEvents, uow, nil)
+		inboundkafka.ReplyUseCases{Allocate: *allocate, Reject: *reject, Staged: *stagedUse, Stow: *stowUse, Released: *releasedUse}, processedEvents, uow, nil)
 	runConsumerUntil(t, replayReplies, 15*time.Second)
 
 	loaded, err = transfers.Load(ctx, result.TransferID)

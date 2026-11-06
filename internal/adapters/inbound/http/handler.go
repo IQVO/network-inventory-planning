@@ -30,6 +30,10 @@ type Handler struct {
 	// meaning as Simulate: unconfigured means 503, never a fabricated
 	// approval).
 	Approve *usecases.ApproveTransfer
+	// Cancel is the operator cancel path of the saga (ADR 0022): the
+	// pre-release synchronous cancel and the ALLOCATED transfer's
+	// RELEASING compensation. Nil-able with the same meaning.
+	Cancel *usecases.CancelTransfer
 	// ListRebalanceRuns serves GET /v1/rebalance-runs (nil-able: an
 	// instance without persistence answers 503, never an empty 200 that
 	// would look like a real run history).
@@ -84,6 +88,7 @@ func (h Handler) Routes() http.Handler {
 	r.With(keyed).Post("/v1/transfer-proposal-runs", h.generate)
 	r.Get("/v1/transfer-simulations", h.simulate)
 	r.With(keyed).Post("/v1/transfer-approvals", h.approve)
+	r.With(keyed).Post("/v1/transfers/{transferId}/cancellation", h.cancelTransfer)
 	r.Get("/v1/rebalance-runs", h.rebalanceRuns)
 	r.Get("/v1/transfers", h.listTransfers)
 	r.Get("/v1/transfers/{id}", h.getTransfer)
