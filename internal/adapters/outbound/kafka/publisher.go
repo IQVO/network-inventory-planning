@@ -237,7 +237,7 @@ func (e *TransferEncoder) encodeAllocationRequested(ctx context.Context, evt tra
 
 func (e *TransferEncoder) encodeReleaseRequested(ctx context.Context, evt transfer.ReleaseRequested) ([]Encoded, error) {
 	// EXACTLY inventory-storage's consumed contract (its apis/asyncapi.yaml,
-	// ADR 0050 / this context's ADR 0022): data {transfer_id,
+	// ADR 0051 / this context's ADR 0022): data {transfer_id,
 	// transfer_line_id, reservation_id, origin_site_id, sku, quantity,
 	// reason}, subject/key transfer_line_id — mirroring
 	// TransferAllocationRequested.

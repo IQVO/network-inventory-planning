@@ -43,7 +43,7 @@ ALLOCATED --CancelAfterAllocation--> RELEASING --TransferStockAllocationReleased
   `{..., outcome, reason}` with outcome the closed set
   `RELEASED | ALREADY_RESOLVED`): settles the saga RELEASING → CANCELLED.
   Both outcomes are success — either way the hold is gone. inventory-storage
-  (its ADR 0050) resolves the reservation through its existing
+  (its ADR 0051) resolves the reservation through its existing
   RevokeReservation logic and owns a `transfer_allocation_releases`
   ledger for database-level replay safety.
 - **`POST /v1/transfers/{transferId}/cancellation`** (keyed, ADR-0021):
@@ -67,6 +67,6 @@ ALLOCATED --CancelAfterAllocation--> RELEASING --TransferStockAllocationReleased
 - The release exchange is idempotent end to end: NIP's cancel replays on
   the saga state, inventory-storage's release replays on its ledger, and
   the reply consumer dedupes on the CloudEvents id.
-- Cross-references: inventory-storage ADR 0050 (the provider side),
+- Cross-references: inventory-storage ADR 0051 (the provider side),
   ADR 0003 (the original saga), ADR 0005 (the fact-driven tail's
   discipline), ADR 0013 (deterministic refusal handling).
