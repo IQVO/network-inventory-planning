@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -94,6 +95,85 @@ func (t *InterWarehouseTransfer) MarkPicked(p Picked, now time.Time) error {
 	}
 	t.pickedQuantity = p.PickedQuantity
 	t.transition(StatePicked, "TransferPicked", fmt.Sprintf("picked %d of %d", p.PickedQuantity, t.quantity), now.UTC())
+	return nil
+}
+
+// ReleaseOutcome is inventory-storage's closed answer set for a
+// TransferStockAllocationReleased fact. Both settle the saga's release as
+// success — either way the hold is gone.
+type ReleaseOutcome string
+
+const (
+	// ReleaseOutcomeReleased: the reservation still held the stock and the
+	// release command revoked it — the quantity is back in usable.
+	ReleaseOutcomeReleased ReleaseOutcome = "RELEASED"
+	// ReleaseOutcomeAlreadyResolved: the reservation had already been
+	// resolved (expired, confirmed or revoked) before the release command
+	// arrived, so there was nothing left to release.
+	ReleaseOutcomeAlreadyResolved ReleaseOutcome = "ALREADY_RESOLVED"
+)
+
+// Valid reports whether o is one of the closed outcomes.
+func (o ReleaseOutcome) Valid() bool {
+	switch o {
+	case ReleaseOutcomeReleased, ReleaseOutcomeAlreadyResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// StockAllocationReleased mirrors inventory-storage's
+// TransferStockAllocationReleased payload (ADR 0022): the fields this
+// aggregate needs to prove the fact settles THIS transfer's hold.
+type StockAllocationReleased struct {
+	TransferLineID string
+	ReservationID  string
+	OriginSiteID   string
+	SKU            string
+	Quantity       int
+	Outcome        ReleaseOutcome
+	Reason         string
+}
+
+// MarkReleased applies inventory-storage's TransferStockAllocationReleased
+// fact (ADR 0022): state RELEASING -> CANCELLED. Both outcomes (RELEASED,
+// ALREADY_RESOLVED) settle the saga as success — either way the hold is
+// gone. Every mismatch between the fact and the transfer it claims to
+// settle is a deterministic error (the consumer skips the message), never
+// a best-effort write — the MarkAllocated/MarkStowed discipline.
+func (t *InterWarehouseTransfer) MarkReleased(r StockAllocationReleased, now time.Time) error {
+	if t.state != StateReleasing {
+		return &IllegalTransitionError{ID: t.id, From: t.state, Action: "mark released"}
+	}
+	if err := t.checkReleaseFact(r); err != nil {
+		return err
+	}
+	t.transition(StateCancelled, "TransferStockAllocationReleased",
+		fmt.Sprintf("%s (%s)", r.Outcome, strings.TrimSpace(r.Reason)), now.UTC())
+	return nil
+}
+
+// checkReleaseFact proves the released fact settles THIS transfer's hold.
+func (t *InterWarehouseTransfer) checkReleaseFact(r StockAllocationReleased) error {
+	if r.TransferLineID != t.id.LineID() {
+		return fmt.Errorf("%w: transfer %s: released fact is for line %q, want %q", ErrFactRefused, t.id, r.TransferLineID, t.id.LineID())
+	}
+	if r.ReservationID != t.reservationID {
+		return fmt.Errorf("%w: transfer %s: released fact reservation %q, want %q", ErrFactRefused, t.id, r.ReservationID, t.reservationID)
+	}
+	if r.OriginSiteID != t.originSiteID {
+		return fmt.Errorf("%w: transfer %s: released fact origin %q, want %q", ErrFactRefused, t.id, r.OriginSiteID, t.originSiteID)
+	}
+	if r.SKU != t.sku {
+		return fmt.Errorf("%w: transfer %s: released fact sku %q, want %q", ErrFactRefused, t.id, r.SKU, t.sku)
+	}
+	if r.Quantity != t.quantity {
+		return fmt.Errorf("%w: transfer %s: released fact quantity %d, want the allocated %d", ErrFactRefused, t.id, r.Quantity, t.quantity)
+	}
+	if !r.Outcome.Valid() {
+		return fmt.Errorf("%w: transfer %s: released fact outcome %q is outside the closed set", ErrFactRefused, t.id, r.Outcome)
+	}
 	return nil
 }
 

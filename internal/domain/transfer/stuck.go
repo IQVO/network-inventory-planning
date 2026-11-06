@@ -20,6 +20,7 @@ const DefaultStuckThreshold = 24 * time.Hour
 func DefaultStuckThresholds() map[TransferState]time.Duration {
 	return map[TransferState]time.Duration{
 		StateAllocating: time.Hour,
+		StateReleasing:  time.Hour,
 		StatePicked:     24 * time.Hour,
 		StateInTransit:  72 * time.Hour,
 	}
@@ -78,11 +79,11 @@ func ParseStuckThresholds(raw string) (StuckThresholds, error) {
 	return out, nil
 }
 
-// validState reports whether s is one of the eleven saga states.
+// validState reports whether s is one of the twelve saga states.
 func validState(s TransferState) bool {
 	switch s {
 	case StateDraft, StateProposed, StateApproved, StateAllocating, StateAllocated,
-		StatePicked, StateInTransit, StateArrived, StateReceived,
+		StateReleasing, StatePicked, StateInTransit, StateArrived, StateReceived,
 		StateUnfulfillable, StateCancelled:
 		return true
 	default:
