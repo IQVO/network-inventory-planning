@@ -45,7 +45,7 @@ positions, policies or lanes).
 
 **Model complexity is high (x = 0.68).** Evidence in the code:
 
-- one saga aggregate with eleven states, an append-only audit trail,
+- one saga aggregate with twelve states, an append-only audit trail,
   optimistic concurrency (`version`) and a unique idempotency key;
 - a fail-closed `BuildSnapshot` over three read models with three different
   supersede rules and half-open window arithmetic that never zero-fills;

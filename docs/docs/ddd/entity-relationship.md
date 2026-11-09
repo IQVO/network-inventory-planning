@@ -12,7 +12,7 @@ Postgres databases:
 
 - the **OLTP** database (`DATABASE_URL`), migrated by
   `cmd/network-inventory-planning` and `cmd/mcp` from
-  `internal/adapters/outbound/postgres/migrations` `0001` to `0004`;
+  `internal/adapters/outbound/postgres/migrations` `0001` to `0009`;
 - the **analytical** database (`ANALYTICS_DATABASE_URL`), migrated and written
   only by `cmd/nip-projector` from `analytics/migrations/0001`
   ([ADR 0009](../adr/0009-analytics-read-side.md)).
@@ -38,13 +38,15 @@ erDiagram
     text operator_reason
     timestamptz proposal_as_of
     timestamptz expires_at
-    text state "CHECK eleven states"
+    text state "CHECK twelve states, 0009 adds RELEASING"
     text reservation_id "nullable, only from ALLOCATED on"
     jsonb allocations
     timestamptz allocation_expires_at "nullable"
     text rejection_reason "nullable, closed vocabulary"
     integer picked_quantity "nullable, 0003"
     jsonb stow_allocations "0003"
+    integer case_multiple "nullable, 0007, both-or-none with requested_qty_eaches"
+    integer requested_qty_eaches "nullable, 0007"
     timestamptz created_at
     timestamptz updated_at
     bigint version "optimistic concurrency"
@@ -74,6 +76,15 @@ erDiagram
     text consumer PK
     text event_id PK
     timestamptz processed_at
+  }
+  idempotency_keys {
+    text idempotency_key PK "global, not per route, 0008"
+    text fingerprint "method + path + sha256 of the body"
+    integer status "0 while the request is in flight"
+    text content_type "stored answer"
+    text location "stored answer"
+    bytea body "stored answer"
+    timestamptz created_at "indexed, retention at least 24 hours"
   }
   site_capability {
     text site_id PK
@@ -146,7 +157,7 @@ erDiagram
   }
 ```
 
-Source: `internal/adapters/outbound/postgres/migrations/0001_planning_read_models.up.sql`, `0002_transfer_saga_and_outbox.up.sql`, `0003_work_demand_release.up.sql`, `0004_rebalance_runs.up.sql`, `0005_rebalance_catalogue.up.sql`, `0006_pack_levels.up.sql` (the local copy of product-master pack levels, its ADR 0017)
+Source: `internal/adapters/outbound/postgres/migrations/0001_planning_read_models.up.sql`, `0002_transfer_saga_and_outbox.up.sql`, `0003_work_demand_release.up.sql`, `0004_rebalance_runs.up.sql`, `0005_rebalance_catalogue.up.sql`, `0006_pack_levels.up.sql` (the local copy of product-master pack levels, its ADR 0017), `0007_transfer_case_rounding.up.sql` (two columns on `inter_warehouse_transfer`), `0008_idempotency_keys.up.sql` and `0009_transfer_release_state.up.sql` (widens two CHECKs on `inter_warehouse_transfer`)
 
 Only `transfer_audit` has a foreign key. The read models mirror sibling facts
 and do not reference one another, `processed_events` is a guard keyed by
@@ -154,7 +165,10 @@ consumer and event id, and `outbox_events` is a queue.
 
 What the columns do not show:
 
-- Migration 0003 widened the state CHECK to eleven states, re-created the
+- Migration 0003 widened the state CHECK to eleven states and migration 0009 to twelve
+  by adding `RELEASING` (ADR 0022); 0009 also admits `RELEASING` in the `reservation_id`
+  CHECK, because a releasing transfer still carries the reservation it is releasing.
+  0003 re-created the
   constraints under stable names (`inter_warehouse_transfer_state_check`,
   `_quantity_check`, `_origin_dest_check`, `_reservation_id_check`) and added
   `transfer_picked_quantity_check`: a picked quantity exists only from
@@ -163,7 +177,23 @@ What the columns do not show:
   `idx_outbox_events_unpublished (id) WHERE published_at IS NULL`,
   `idx_site_sku_demand_site_due (site_id, due_at)`,
   `idx_published_capacity_plan_site_window (site_id, window_start)`,
-  `rebalance_runs_started_at_idx (started_at DESC)`.
+  `rebalance_runs_started_at_idx (started_at DESC)`,
+  `idempotency_keys_created_at_idx (created_at)`.
+- Migration 0007 added `case_multiple` and `requested_qty_eaches`, both NULL for
+  every earlier transfer and for a SKU without an active CASE level. Two CHECKs keep
+  them consistent: both set or both null, and when set `case_multiple >= 2`,
+  `requested_qty_eaches >= 1` and `quantity` a multiple of `case_multiple`.
+- `idempotency_keys` (migration 0008, fleet REST guideline section 2) holds one row per
+  `Idempotency-Key` of a `POST`. The key alone is the primary key, so it is global and
+  not scoped to a route; `fingerprint` is the method, the escaped path and the SHA-256
+  of the body. The store inserts the row with `ON CONFLICT DO NOTHING` (status 0) in the
+  same transaction as the aggregate change and its outbox rows, then fills `status`,
+  `content_type`, `location` and `body` with the answer. The same key and fingerprint
+  replays that answer with `Idempotency-Replayed: true`; the same key with another
+  fingerprint is 409 `idempotency-key-reused`. Answers 2xx and 4xx are stored; a 5xx or
+  a panic rolls the transaction back, so no key is left behind. Retention is at least
+  24 hours; no code in the repository deletes rows (ADR 0021 lists the sweep by
+  `created_at` as future work), so the table grows until a sweep exists.
 - `outbox_events.topic` is per row, so one approval writes rows for both the
   integration and the analytics topic.
 - `site_sku_demand.as_of` is the applied event's CloudEvents `time` and is
@@ -219,5 +249,5 @@ tables. `nip-reports` reads it through a read-only pool.
 Only `inter_warehouse_transfer` with its `transfer_audit` rows maps to an
 aggregate (see [Aggregate design canvas](./aggregate-design-canvas.md)). The
 three planning tables are local copies of sibling facts, `rebalance_runs` is a
-record of scheduled passes, `outbox_events` and `processed_events` are
+record of scheduled passes, `outbox_events`, `processed_events` and `idempotency_keys` are
 infrastructure, and the analytical tables are projections.

@@ -17,7 +17,7 @@ Everything below is read from `cmd/*/main.go`, the Dockerfile and
 
 | Layer | Package | What lives there |
 | --- | --- | --- |
-| Domain | `internal/domain/transfer` | The `InterWarehouseTransfer` saga aggregate (11 states), the deterministic `Planner`, `ValidateApproval`, the stuck-transfer check and the domain events (`TransferPlanApproved`, `TransferAllocationRequested`, `WorkDemandReleased`, the three saga-health occurrences). |
+| Domain | `internal/domain/transfer` | The `InterWarehouseTransfer` saga aggregate (12 states), the deterministic `Planner`, `ValidateApproval`, the stuck-transfer check and the domain events (`TransferPlanApproved`, `TransferAllocationRequested`, `WorkDemandReleased`, the three saga-health occurrences). |
 | Domain | `internal/domain/planning` | The three local facts (`SiteCapability`, `SiteSkuDemand`, `PublishedCapacityPlan`) and the fail-closed `BuildSnapshot`. |
 | Domain-like read model | `internal/analytics/report` | Pure report rules for the analytics read side: half-open ranges, percentiles, rejection rates, freshness. |
 | Application | `internal/application/usecases`, `internal/application/ports` | One use case per trigger (see [Use cases](../ddd/use-cases.md)); ports for repositories, the query side, the unit of work and the event publisher. |
@@ -144,7 +144,7 @@ flowchart TB
 
 | Store | Owner binary | Tables | Migrations |
 | --- | --- | --- | --- |
-| OLTP Postgres (`DATABASE_URL`) | `network-inventory-planning` (writes), `mcp` (reads) | `processed_events`, `site_capability`, `site_sku_demand`, `published_capacity_plan`, `inter_warehouse_transfer`, `transfer_audit`, `outbox_events`, `rebalance_runs`, `rebalance_policies`, `transfer_lanes` | `internal/adapters/outbound/postgres/migrations/0001`–`0005`, applied at startup by both `network-inventory-planning` and `mcp` (golang-migrate's advisory lock serialises concurrent starts) |
+| OLTP Postgres (`DATABASE_URL`) | `network-inventory-planning` (writes), `mcp` (reads) | `processed_events`, `site_capability`, `site_sku_demand`, `published_capacity_plan`, `inter_warehouse_transfer`, `transfer_audit`, `outbox_events`, `rebalance_runs`, `rebalance_policies`, `transfer_lanes`, `pack_levels`, `idempotency_keys` | `internal/adapters/outbound/postgres/migrations/0001`–`0009`, applied at startup by both `network-inventory-planning` and `mcp` (golang-migrate's advisory lock serialises concurrent starts) |
 | Analytical Postgres (`ANALYTICS_DATABASE_URL`) | `nip-projector` (only writer), `nip-reports` (read-only pool, `default_transaction_read_only=on`) | `analytics_processed_events`, `transfer_state_advances`, `transfer_stuck_detections`, `rebalance_run_facts` | `analytics/migrations/0001_saga_facts`, applied at startup by `nip-projector` only |
 
 The entity-relationship view is on [Entity relationship](../ddd/entity-relationship.md).

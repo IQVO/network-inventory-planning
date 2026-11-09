@@ -53,6 +53,17 @@ up to 10s on SIGTERM.
 | OLTP | `internal/adapters/outbound/postgres/migrations` (`/app/migrations` in the image) | `network-inventory-planning` and `mcp` | At every start, before the server listens, through golang-migrate. A failure refuses the boot. |
 | Analytical | `analytics/migrations` | `nip-projector` only | At every start, under boot retry. |
 
+The OLTP migrations are `0001` to `0009`: `0001` planning read models (`processed_events`,
+`site_capability`, `site_sku_demand`, `published_capacity_plan`), `0002` transfer saga and outbox
+(`inter_warehouse_transfer`, `transfer_audit`, `outbox_events`), `0003` `picked_quantity` and
+`stow_allocations` plus named CHECKs, `0004` `rebalance_runs`, `0005` rebalance catalogue
+(`rebalance_policies`, `transfer_lanes`), `0006` `pack_levels`, `0007` case-rounding columns on the
+transfer, `0008` `idempotency_keys` and `0009` the `RELEASING` state. The analytical database has one
+migration, `0001_saga_facts`. `idempotency_keys` gets one row per `POST` and nothing in the repository
+prunes it (retention is at least 24 hours, the sweep is future work per ADR 0021), so watch its size;
+the `created_at` index exists for that sweep. The columns are in
+[Entity-relationship](../ddd/entity-relationship.md).
+
 `MIGRATIONS_DATABASE_URL` (secret key `database.migrationsExistingSecretKey`,
 optional) gives the migration step a direct connection when `DATABASE_URL`
 goes through PgBouncer (ADR 0006). There is no separate migration Job: a
