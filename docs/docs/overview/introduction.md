@@ -44,7 +44,7 @@ WES contexts stay authoritative for executable work.
   zero-filling. It backs the advisory simulation
   (`GET /v1/transfer-simulations`), approval validation and the scheduled
   rebalance pass.
-- **The `InterWarehouseTransfer` saga** (11 states, `DRAFT` to `RECEIVED`),
+- **The `InterWarehouseTransfer` saga** (12 states, `DRAFT` to `RECEIVED`),
   started only by an operator's `POST /v1/transfer-approvals` with an
   `Idempotency-Key`. It emits `TransferAllocationRequested` to
   inventory-storage, releases pick and dispatch `WorkDemandReleased` commands
