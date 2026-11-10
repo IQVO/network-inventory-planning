@@ -208,6 +208,28 @@ Feature: Transfer saga state machine
     Then the fact is applied
     And transfer "T1" is in state "CANCELLED"
 
+  Scenario: A transfer cancelled after allocation no longer holds a reservation
+    Given a transfer "T1" in state "ALLOCATED"
+    When I request GET "/v1/transfers/{T1}"
+    Then the JSON field "reservationId" is "res-1"
+    When I cancel transfer "T1" with reason "wrong lane selected"
+    And I request GET "/v1/transfers/{T1}"
+    Then the JSON field "state" is "RELEASING"
+    And the JSON field "reservationId" is "res-1"
+    When a "TransferStockAllocationReleased" fact arrives for transfer "T1"
+    And I request GET "/v1/transfers/{T1}"
+    Then the JSON field "state" is "CANCELLED"
+    And the JSON field "reservationId" is absent
+    And the audit trail states read "DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, CANCELLED"
+
+  Scenario: A redelivered release fact leaves the cancelled transfer as it was
+    Given a transfer "T1" in state "RELEASING"
+    When a "TransferStockAllocationReleased" fact arrives for transfer "T1"
+    Then the fact is applied
+    When a "TransferStockAllocationReleased" fact arrives for transfer "T1"
+    Then the fact is refused as an illegal transition
+    And transfer "T1" is in state "CANCELLED"
+
   Scenario: A picked transfer refuses the cancel — the stock is physically in motion
     Given a transfer "T1" in state "PICKED"
     When I cancel transfer "T1" with reason "too late"
