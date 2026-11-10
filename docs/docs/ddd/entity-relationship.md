@@ -39,7 +39,7 @@ erDiagram
     timestamptz proposal_as_of
     timestamptz expires_at
     text state "CHECK twelve states, 0009 adds RELEASING"
-    text reservation_id "nullable, only from ALLOCATED on"
+    text reservation_id "nullable, only ALLOCATED to RECEIVED, never CANCELLED"
     jsonb allocations
     timestamptz allocation_expires_at "nullable"
     text rejection_reason "nullable, closed vocabulary"
@@ -168,6 +168,8 @@ What the columns do not show:
 - Migration 0003 widened the state CHECK to eleven states and migration 0009 to twelve
   by adding `RELEASING` (ADR 0022); 0009 also admits `RELEASING` in the `reservation_id`
   CHECK, because a releasing transfer still carries the reservation it is releasing.
+  CANCELLED stays outside that CHECK: the release settle clears the reservation id
+  (ADR 0023), so a cancelled transfer persists with `reservation_id` NULL.
   0003 re-created the
   constraints under stable names (`inter_warehouse_transfer_state_check`,
   `_quantity_check`, `_origin_dest_check`, `_reservation_id_check`) and added
