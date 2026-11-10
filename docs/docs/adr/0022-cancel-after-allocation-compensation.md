@@ -28,7 +28,8 @@ ALLOCATED --CancelAfterAllocation--> RELEASING --TransferStockAllocationReleased
 ```
 
 - **New state RELEASING** (non-terminal; the reservation_id and
-  allocation fields stay on the aggregate). The stuck ticker's default
+  allocation fields stay on the aggregate until the release settles, when
+  ADR 0023 clears them). The stuck ticker's default
   threshold for RELEASING is 1h, the ALLOCATING class — it waits only
   for inventory-storage's reply. Migration 0009 widens the state and
   reservation_id CHECK constraints.

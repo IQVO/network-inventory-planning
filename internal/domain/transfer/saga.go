@@ -17,6 +17,10 @@ import (
 //	Any pre-release state              -> CANCELLED
 //	ALLOCATED  -> RELEASING -> CANCELLED            (ADR 0022)
 //
+// A reservation id (with its allocations and expiry) exists only from
+// ALLOCATED through RECEIVED; migration 0009's CHECK enforces it. The release
+// settle clears it on the way to CANCELLED (ADR 0023).
+//
 // CANCELLED is allowed only BEFORE the origin reservation exists (in v1,
 // from DRAFT, PROPOSED, APPROVED or ALLOCATING): once stock is ALLOCATED
 // the saga must not silently forget a hold inventory-storage is keeping;
