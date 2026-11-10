@@ -9,11 +9,9 @@ import (
 	"testing"
 	"time"
 
-	kafkago "github.com/segmentio/kafka-go"
-
+	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
-	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
@@ -115,7 +113,7 @@ func TestCancelledAllocatedTransferSettlesOnceAndARedeliveryIsANoOp(t *testing.T
 	}
 
 	// The reply consumer, wired exactly like the composition root minus the
-	// Kafka reader: HandleKafkaMessage is the unit the consume loop retries.
+	// Kafka reader: HandleMessage is the unit the consume loop retries.
 	consumer := &inboundkafka.TransferReplyConsumer{
 		Applier: inboundkafka.ReplyUseCases{
 			Allocate: usecases.ApplyTransferAllocation{Transfers: transfers, Events: outbox, UoW: uow, Release: release, Now: func() time.Time { return itNow }},
@@ -126,7 +124,7 @@ func TestCancelledAllocatedTransferSettlesOnceAndARedeliveryIsANoOp(t *testing.T
 		Logger:          slog.Default(),
 	}
 
-	if err := consumer.HandleKafkaMessage(ctx, kafkago.Message{Topic: inboundkafka.InventoryTopic, Value: syntheticInventoryReply(t, result.TransferID, itNow.Add(time.Minute))}); err != nil {
+	if err := consumer.HandleMessage(ctx, syntheticInventoryReply(t, result.TransferID, itNow.Add(time.Minute))); err != nil {
 		t.Fatalf("apply allocation reply: %v", err)
 	}
 	cancel := usecases.CancelTransfer{Transfers: transfers, Events: outbox, UoW: uow, Now: func() time.Time { return itNow.Add(2 * time.Minute) }}
@@ -143,9 +141,8 @@ func TestCancelledAllocatedTransferSettlesOnceAndARedeliveryIsANoOp(t *testing.T
 	}
 
 	// The message that used to fail forever with SQLSTATE 23514.
-	msg := kafkago.Message{Topic: inboundkafka.InventoryTopic, Key: []byte(result.TransferID.LineID()),
-		Value: syntheticAllocationReleased(t, "itest-released-1", result.TransferID, itNow.Add(3*time.Minute))}
-	if err := consumer.HandleKafkaMessage(ctx, msg); err != nil {
+	msg := syntheticAllocationReleased(t, "itest-released-1", result.TransferID, itNow.Add(3*time.Minute))
+	if err := consumer.HandleMessage(ctx, msg); err != nil {
 		t.Fatalf("the release fact must apply (was a retried-forever SQLSTATE 23514): %v", err)
 	}
 	settled, err := transfers.Load(ctx, result.TransferID)
@@ -158,14 +155,13 @@ func TestCancelledAllocatedTransferSettlesOnceAndARedeliveryIsANoOp(t *testing.T
 	version, auditLen := settled.Version(), len(settled.Audit())
 
 	// Redelivery of the SAME CloudEvent: the processed-event claim dedupes.
-	if err := consumer.HandleKafkaMessage(ctx, msg); err != nil {
+	if err := consumer.HandleMessage(ctx, msg); err != nil {
 		t.Fatalf("redelivered fact must be a no-op, got %v", err)
 	}
 	// A re-emitted fact (new event id): an illegal transition, skipped
 	// deterministically (nil), never retried.
-	reemitted := kafkago.Message{Topic: inboundkafka.InventoryTopic, Key: msg.Key,
-		Value: syntheticAllocationReleased(t, "itest-released-2", result.TransferID, itNow.Add(4*time.Minute))}
-	if err := consumer.HandleKafkaMessage(ctx, reemitted); err != nil {
+	reemitted := syntheticAllocationReleased(t, "itest-released-2", result.TransferID, itNow.Add(4*time.Minute))
+	if err := consumer.HandleMessage(ctx, reemitted); err != nil {
 		t.Fatalf("re-emitted fact must be skipped, got %v", err)
 	}
 
