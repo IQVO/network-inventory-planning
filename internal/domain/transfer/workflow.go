@@ -137,9 +137,11 @@ type StockAllocationReleased struct {
 }
 
 // MarkReleased applies inventory-storage's TransferStockAllocationReleased
-// fact (ADR 0022): state RELEASING -> CANCELLED. Both outcomes (RELEASED,
-// ALREADY_RESOLVED) settle the saga as success — either way the hold is
-// gone. Every mismatch between the fact and the transfer it claims to
+// fact (ADR 0022, amended by ADR 0023): state RELEASING -> CANCELLED, and the
+// transfer lets go of the reservation it was releasing (reservation id,
+// allocations, expiry) — a CANCELLED transfer holds nothing. Both outcomes
+// (RELEASED, ALREADY_RESOLVED) settle the saga as success — either way the
+// hold is gone. Every mismatch between the fact and the transfer it claims to
 // settle is a deterministic error (the consumer skips the message), never
 // a best-effort write — the MarkAllocated/MarkStowed discipline.
 func (t *InterWarehouseTransfer) MarkReleased(r StockAllocationReleased, now time.Time) error {
@@ -149,6 +151,14 @@ func (t *InterWarehouseTransfer) MarkReleased(r StockAllocationReleased, now tim
 	if err := t.checkReleaseFact(r); err != nil {
 		return err
 	}
+	// The hold is gone (either outcome): a CANCELLED transfer references no
+	// reservation. The persistence CHECK
+	// inter_warehouse_transfer_reservation_id_check admits a reservation id
+	// only from ALLOCATED to RECEIVED, and CANCELLED is not in that range.
+	// The audit entry written by MarkAllocated keeps which reservation was held.
+	t.reservationID = ""
+	t.allocations = nil
+	t.allocationExpiresAt = time.Time{}
 	t.transition(StateCancelled, "TransferStockAllocationReleased",
 		fmt.Sprintf("%s (%s)", r.Outcome, strings.TrimSpace(r.Reason)), now.UTC())
 	return nil
