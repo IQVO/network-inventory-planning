@@ -201,7 +201,7 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 		return handler, nil, closeAll, err
 	}
 
-	wired, err := wireSagas(logger, pool, maxStaleness)
+	wired, err := wireSagas(ctx, logger, pool, maxStaleness)
 	if err != nil {
 		return handler, nil, closeAll, err
 	}
