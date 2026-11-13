@@ -33,9 +33,7 @@ Kafka through the relay.
 | `ApplyTransferReceiptStaged` | `TransferReceiptStaged` on `warehouse.inventory.events` | transfer id, line id | state is `IN_TRANSIT` | none in production (same reason) |
 | `ApplyTransferStow` | `TransferStockStowed` | transfer id, line id, destination, SKU, quantities, stow allocations | state is `ARRIVED`; same line, destination and SKU; stowed quantity > 0; at least one stow allocation | none in production (same reason) |
 
-`InterWarehouseTransfer.Cancel` exists in the domain (legal from `DRAFT`,
-`PROPOSED`, `APPROVED`, `ALLOCATING` with a reason) but **no use case or route
-calls it** today.
+| `CancelTransfer` | `POST /v1/transfers/{id}/cancellation` (ADR 0022) | `reason` (required, else 422 `invalid-cancel`) | unknown id → 404; `PICKED` onwards and `UNFULFILLABLE` → 409 `cancel-refused` (the stock is physically in motion or the saga already closed); `DRAFT`/`PROPOSED`/`APPROVED`/`ALLOCATING` cancel synchronously; `ALLOCATED` moves to `RELEASING`; `RELEASING`/`CANCELLED` are idempotent replays answered with the current state | outbox (an `ALLOCATED` cancel, same transaction as the transition): `TransferAllocationReleaseRequested`; the `TransferStockAllocationReleased` fact from inventory-storage then settles the saga to `CANCELLED` (ADR 0023: while `RELEASING` the reservation holds no stock) |
 
 ## Read side
 

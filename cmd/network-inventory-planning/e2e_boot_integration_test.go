@@ -235,23 +235,16 @@ func (s *service) stop() error {
 
 // itAssertCleanDrain checks run()'s shutdown outcome. ADR 0019's contract:
 // a stop caused by the context's cancellation is a clean shutdown and run()
-// returns nil. Known deviation (observed deterministically in these tests,
-// reported in the PR body, fix left to its own change): the outbox-relay
-// runner returns nil the instant ITS OWN signal context cancels, which can
-// win the race against run()'s root context reaching startRunners' checker
-// — the clean stop is then misread as "consumer stopped: returned without
-// an error while the service was still running" and run() returns that
-// error instead of nil. Until that race is fixed, exactly that one error
-// is accepted as a drain outcome; anything else fails the test.
+// returns nil. Since the runner contexts derive from run()'s root signal
+// context (no private signal.NotifyContext anywhere), a SIGTERM reaches the
+// root first and every runner stop reads as clean — the earlier accepted
+// deviation ("returned without an error while the service was still
+// running" on a clean stop) is gone and must stay gone.
 func itAssertCleanDrain(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		return
+	if err != nil {
+		t.Fatalf("the binary must drain cleanly on SIGTERM, got %v", err)
 	}
-	if strings.Contains(err.Error(), "returned without an error while the service was still running") {
-		return
-	}
-	t.Fatalf("the binary must drain cleanly on SIGTERM, got %v", err)
 }
 
 func freeAddr(t *testing.T) string {

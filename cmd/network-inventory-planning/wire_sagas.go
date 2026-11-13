@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -78,7 +79,7 @@ type sagaWiring struct {
 
 // wireSagas wires the Phase-1 simulation, the Phase-2 approval saga, the
 // transactional outbox relay and every inbound consumer over the pool.
-func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Duration) (sagaWiring, error) {
+func wireSagas(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Duration) (sagaWiring, error) {
 	var out sagaWiring
 
 	uow := postgres.NewUnitOfWork(pool)
@@ -98,7 +99,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	// since ADR 0007, the analytics occurrences onto
 	// warehouse.network-inventory-planning.analytics — the same relay,
 	// the rows carry their own topic).
-	outboxPublisher, relayRunner := wireOutbox(logger, pool)
+	outboxPublisher, relayRunner := wireOutbox(ctx, logger, pool)
 	if relayRunner != nil {
 		out.runners = append(out.runners, relayRunner)
 	}
@@ -150,7 +151,7 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 
 	replyApplier, factApplier := wireTransferConsumers(transfers, outboxPublisher, uow, release)
 
-	consumerRunners, consumerClosers, err := startConsumers(logger, consumerDeps{
+	consumerRunners, consumerClosers, err := startConsumers(ctx, logger, consumerDeps{
 		uow:             uow,
 		processedEvents: processedEvents,
 		capabilities:    postgres.NewSiteCapabilityRepo(pool),
@@ -173,8 +174,8 @@ func wireSagas(logger *slog.Logger, pool *pgxpool.Pool, maxStaleness time.Durati
 	rebalanceRuns := postgres.NewRebalanceRunRepo(pool)
 	out.runs = &usecases.ListRebalanceRuns{Runs: rebalanceRuns}
 	catalogue := wireCatalogue(pool, &out)
-	wireHealthTicker(logger, pool, outboxPublisher, &out)
-	wireRebalanceTicker(logger, snapshots, packLevels, rebalanceRuns, catalogue, outboxPublisher, maxStaleness, &out)
+	wireHealthTicker(ctx, logger, pool, outboxPublisher, &out)
+	wireRebalanceTicker(ctx, logger, snapshots, packLevels, rebalanceRuns, catalogue, outboxPublisher, maxStaleness, &out)
 	return out, nil
 }
 

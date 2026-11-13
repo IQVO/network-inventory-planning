@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/postgres"
@@ -45,7 +43,7 @@ func optionalIntervalFromEnv(name string, def time.Duration) (d time.Duration, o
 // non-terminal transfers and publishes TransferStuckDetected occurrences
 // for those past their per-state threshold (NIP_STUCK_THRESHOLDS). The
 // loop ONLY reads and publishes — it never mutates saga state.
-func wireHealthTicker(logger *slog.Logger, pool *pgxpool.Pool, events ports.TransferEventPublisher, out *sagaWiring) {
+func wireHealthTicker(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, events ports.TransferEventPublisher, out *sagaWiring) {
 	interval, ok, err := optionalIntervalFromEnv(envHealthInterval, defaultHealthInterval)
 	if err != nil {
 		logger.Error("invalid health check interval; check disabled", "error", err)
@@ -81,7 +79,9 @@ func wireHealthTicker(logger *slog.Logger, pool *pgxpool.Pool, events ports.Tran
 		},
 		Logger: logger,
 	}
-	hcCtx, hcStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Derived from run()'s root signal context (ADR 0019 clean-stop; see
+	// wireOutbox for the race a private signal context creates).
+	hcCtx, hcStop := context.WithCancel(ctx)
 	out.runners = append(out.runners, func() error { defer hcStop(); return runner.Run(hcCtx) })
 	logger.Info("saga health check running",
 		"interval", interval.String(), "thresholds_env", envStuckThresholds)
@@ -115,6 +115,7 @@ func wireCatalogue(pool *pgxpool.Pool, out *sagaWiring) rebalanceCatalogue {
 // rebalance_runs row and publishes a RebalanceRunCompleted occurrence.
 // Observe-only: no approval, no allocation command — ever.
 func wireRebalanceTicker(
+	ctx context.Context,
 	logger *slog.Logger,
 	snapshots ports.PlanningSnapshotRepository,
 	packLevels ports.PackLevelView,
@@ -159,7 +160,9 @@ func wireRebalanceTicker(
 		},
 		Logger: logger,
 	}
-	rbCtx, rbStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Derived from run()'s root signal context (ADR 0019 clean-stop; see
+	// wireOutbox for the race a private signal context creates).
+	rbCtx, rbStop := context.WithCancel(ctx)
 	out.runners = append(out.runners, func() error { defer rbStop(); return runner.Run(rbCtx) })
 	logger.Info("scheduled rebalance running", "interval", interval.String())
 }
