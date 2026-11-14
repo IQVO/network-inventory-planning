@@ -443,8 +443,11 @@ func (w *world) theWorkDemandWasReleasedAt(kind, demand, site, path, cpt string)
 // entered exactly once, by the named event.
 func (w *world) theTransferEnteredOnce(ctx context.Context, alias, state, event string) error {
 	status, body, _, err := w.call(ctx, request{server: w.oltp, method: http.MethodGet, path: "/v1/transfers/" + w.resolve(alias)})
-	if err != nil || status != http.StatusOK {
-		return fmt.Errorf("reading transfer %q: status %d, err %v", alias, status, err)
+	if err != nil {
+		return fmt.Errorf("reading transfer %q: %w", alias, err)
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("reading transfer %q: status %d: %s", alias, status, string(body))
 	}
 	var view struct {
 		Audit []struct {
@@ -506,8 +509,11 @@ func (w *world) skuPackedInCases(sku string, units int, from, until string) erro
 
 func (w *world) skuCaseLevelRetired(ctx context.Context, sku string) error {
 	level, found, err := w.packs.Get(ctx, sku, packlevel.Case)
-	if err != nil || !found {
-		return fmt.Errorf("SKU %s has no case level to retire (found %t, err %v)", sku, found, err)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("SKU %s has no case level to retire", sku)
 	}
 	now := w.clock.Now()
 	level.EffectiveTo = &now
@@ -663,7 +669,9 @@ func (w *world) theResponseIsTheRememberedOne() error {
 
 // ------------------------------------------------------------- catalogue ----
 
-type brokenPolicies struct{ ports.RebalancePolicyRepository }
+type brokenPolicies struct {
+	ports.RebalancePolicyRepository
+}
 
 func (brokenPolicies) List(context.Context) ([]transfer.RebalancePolicy, error) {
 	return nil, errors.New("catalogue store is down")
