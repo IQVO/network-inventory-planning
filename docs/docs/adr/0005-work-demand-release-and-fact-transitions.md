@@ -133,3 +133,10 @@ arrival task contributes the same transition.
 - Deployment requires `TRANSFER_PICK_PATH_ID` (and the WES PathCatalogue
   to contain that path) before approvals are accepted; the Helm values /
   warehouse-infra `local.services` entry must set it.
+
+## Addendum 2026-11-13: current state
+
+Cancellation is no longer pre-release only. [ADR 0022](./0022-cancel-after-allocation-compensation.md) (PR #103) lets an
+`ALLOCATED` transfer cancel through `RELEASING` (`cancel_transfer.go:122-138`).
+From `PICKED` onwards a cancel is still refused with 409 `cancel-refused`
+(`cancel_transfer.go:139-142`).

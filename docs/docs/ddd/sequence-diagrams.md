@@ -147,7 +147,7 @@ sequenceDiagram
 
 Source: `internal/application/usecases/transfer_facts.go`, `internal/adapters/inbound/kafka/transfer_reply_consumer.go`
 `TransferStockAllocationRejected` follows the same shape, calls
-`MarkUnfulfillable` and releases nothing.
+`MarkUnfulfillable` and publishes only `TransferStateAdvanced`, no work demand.
 
 ## 6. Pick, dispatch, arrival and stow facts
 
@@ -166,12 +166,15 @@ sequenceDiagram
   K->>C: TransferDispatched
   C->>A: ApplyTransferDispatched
   A->>T: MarkDispatched, UpdateState
+  A->>O: Publish TransferStateAdvanced
   K->>C: TransferReceiptStaged on warehouse.inventory.events
   C->>A: ApplyTransferReceiptStaged
   A->>T: MarkArrived, UpdateState
+  A->>O: Publish TransferStateAdvanced
   K->>C: TransferStockStowed
   C->>A: ApplyTransferStow
   A->>T: MarkStowed with the stow allocations, UpdateState
+  A->>O: Publish TransferStateAdvanced
   Note over A: each fact is one transaction with its claim, an unknown transfer, illegal transition or refused fact is logged and committed past
 ```
 

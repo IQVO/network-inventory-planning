@@ -43,7 +43,7 @@ flowchart LR
   E1 --> P1[Whenever a capability revision is newer, replace the site row]:::policy
   P1 --> R1[site_capability]:::readmodel
   OM[order-management]:::external --> E2[SiteSkuDemandChanged]:::event
-  E2 --> P2[Whenever an order line changes, upsert it, REMOVED tombstones it]:::policy
+  E2 --> P2[Whenever an order line changes, upsert it unless the stored row is newer, REMOVED tombstones it]:::policy
   P2 --> R2[site_sku_demand]:::readmodel
   WPL[warehouse-planning]:::external --> E3[CapacityPlanPublished]:::event
   E3 --> P3[Whenever a plan with a site_id is published, keep the newest per plan]:::policy
@@ -54,7 +54,7 @@ flowchart LR
   OP([Operator]):::actor --> Q1[Read the simulation]:::command
   S1 --> Q1
   Q1 --> R4[Per-site demand, capacity and headroom]:::readmodel
-  H1[Demand upserts have no ordering guard]:::hotspot -.- P2
+  H1[Demand ordering rests on the CloudEvents time, there is no sequence number, and an equal time applies]:::hotspot -.- P2
   H2[The planner needs positions, policies and lanes that nothing projects]:::hotspot -.- R4
   classDef actor fill:#fff7a8,stroke:#b8a400,color:#000
   classDef command fill:#4aa3df,stroke:#1f6fa3,color:#fff
@@ -67,7 +67,7 @@ flowchart LR
 
 Source: `internal/adapters/inbound/kafka/consumers.go`, `internal/adapters/outbound/postgres/planning_repositories.go`, `internal/domain/planning/snapshot.go`, `internal/application/usecases/simulate_transfer_options.go`
 
-## 2. Approve, reserve, release the pick
+## 2. Approve, reserve, release the pick, cancel
 
 ```mermaid
 flowchart LR
@@ -84,9 +84,15 @@ flowchart LR
   E5 --> X2[wes-work-planning]:::external
   E4 --> P2[Whenever allocation is rejected, mark the transfer unfulfillable]:::policy
   P2 --> G1
+  OP --> C2[CancelTransfer with a reason]:::command
+  C2 --> G1
+  G1 --> E6[TransferAllocationReleaseRequested, ALLOCATED only]:::event
+  E6 --> X1
+  X1 --> E7[TransferStockAllocationReleased]:::event
+  E7 --> P3[Whenever the hold is released, mark the transfer cancelled]:::policy
+  P3 --> G1
   H1[Approval is 503 until TRANSFER_PICK_PATH_ID is set]:::hotspot -.- C1
-  H2[No cancel or revocation once the reservation exists]:::hotspot -.- G1
-  H3[A mismatched reply is retried forever]:::hotspot -.- E3
+  H2[Cancel is refused from PICKED onwards, a physical exception flow is out of scope]:::hotspot -.- C2
   classDef actor fill:#fff7a8,stroke:#b8a400,color:#000
   classDef command fill:#4aa3df,stroke:#1f6fa3,color:#fff
   classDef aggregate fill:#f7d84a,stroke:#b39b12,color:#000
@@ -96,7 +102,7 @@ flowchart LR
   classDef hotspot fill:#e74c3c,stroke:#8e1f14,color:#fff
 ```
 
-Source: `internal/application/usecases/approve_transfer.go`, `transfer_facts.go`, `internal/domain/transfer/saga.go`, `approval.go`, `internal/adapters/inbound/kafka/transfer_reply_consumer.go`
+Source: `internal/application/usecases/approve_transfer.go`, `transfer_facts.go`, `cancel_transfer.go`, `apply_transfer_released.go`, `internal/domain/transfer/saga.go`, `approval.go`, `workflow.go`, `internal/adapters/inbound/kafka/transfer_reply_consumer.go`, `transfer_reply_released.go`
 
 ## 3. Floor and destination facts close the transfer
 
@@ -119,10 +125,10 @@ flowchart LR
   E6 --> P4[Whenever the stow is confirmed, mark received]:::policy
   P4 --> G1
   G1 --> R1[Audit trail]:::readmodel
+  G1 --> E8[TransferStateAdvanced, every transition]:::event
   T1[Health ticker]:::policy --> E7[TransferStuckDetected]:::event
   H1[TransferArrived may never fire]:::hotspot -.- E5
-  H2[No TransferStateAdvanced for these transitions]:::hotspot -.- R1
-  H3[Missing dispatch path withholds the dispatch demand with no re-release]:::hotspot -.- P1
+  H2[Missing dispatch path withholds the dispatch demand with no re-release]:::hotspot -.- P1
   classDef aggregate fill:#f7d84a,stroke:#b39b12,color:#000
   classDef event fill:#f6a04d,stroke:#b8661c,color:#000
   classDef policy fill:#c39bd3,stroke:#7d4f91,color:#000
@@ -131,10 +137,12 @@ flowchart LR
   classDef hotspot fill:#e74c3c,stroke:#8e1f14,color:#fff
 ```
 
-Source: `internal/application/usecases/transfer_facts.go`, `saga_health.go`, `internal/domain/transfer/workflow.go`, `cmd/network-inventory-planning/main.go`
+Source: `internal/application/usecases/transfer_facts.go`, `analytics_hook.go`, `saga_health.go`, `internal/domain/transfer/workflow.go`, `cmd/network-inventory-planning/wire_sagas.go`, `main.go`
 
-Hotspot H2 is precise: `PICKED` does emit `TransferStateAdvanced`, while
-`IN_TRANSIT`, `ARRIVED`, `RECEIVED` (and `UNFULFILLABLE` in diagram 2) do not.
+Every transition emits `TransferStateAdvanced`, including `IN_TRANSIT`, `ARRIVED`,
+`RECEIVED` (and `UNFULFILLABLE` and `CANCELLED` in diagram 2): each use case
+calls `publishStateAdvanced` and `wire_sagas.go` wires the outbox publisher
+into all of them.
 
 ## Sticky inventory
 
