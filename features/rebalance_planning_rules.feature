@@ -112,31 +112,23 @@ Feature: Scheduled rebalance planning rules and catalogue writes
     And the JSON field "items.0.snapshotAsOf" is "2026-10-06T14:59:00Z"
     And the domain event "RebalanceRunCompleted" was not published
 
-  Scenario: An update changes the policy, bumps the revision and moves its update time
+  Scenario Outline: An update changes the entry and moves its revision and update time, an identical PUT writes nothing
     Given the policy catalogue holds, for site "WH2", policy "pv-1" for SKU "SKU-1" with safety stock 5, target stock 50 and unit priority 10
     And 5 minutes pass
     When I send PUT "/v1/rebalance-policies" with this body:
       """
-      {"Version":"pv-2","Site":"WH2","SKU":"SKU-1","SafetyStock":5,"TargetStock":80,"UnitPriority":10}
+      {"Version":"<version>","Site":"WH2","SKU":"SKU-1","SafetyStock":5,"TargetStock":<target>,"UnitPriority":10}
       """
     Then the response status is 200
-    And the response header "ETag" is "2"
-    And the JSON field "outcome" is "UPDATED"
-    And the JSON field "revision" is 2
-    And the JSON field "updatedAt" is "2026-10-06T15:05:00Z"
+    And the JSON field "outcome" is "<outcome>"
+    And the JSON field "revision" is <revision>
+    And the JSON field "updatedAt" is "<updatedAt>"
+    And the response header "ETag" is "<revision>"
 
-  Scenario: An identical PUT writes nothing: the revision and the update time stand
-    Given the policy catalogue holds, for site "WH2", policy "pv-1" for SKU "SKU-1" with safety stock 5, target stock 50 and unit priority 10
-    And 5 minutes pass
-    When I send PUT "/v1/rebalance-policies" with this body:
-      """
-      {"Version":"pv-1","Site":"WH2","SKU":"SKU-1","SafetyStock":5,"TargetStock":50,"UnitPriority":10}
-      """
-    Then the response status is 200
-    And the JSON field "outcome" is "UNCHANGED"
-    And the JSON field "revision" is 1
-    And the JSON field "updatedAt" is "2026-10-06T15:00:00Z"
-    And the response header "ETag" is "1"
+    Examples: the stored entry is revision 1, written at 15:00
+      | version | target | outcome   | revision | updatedAt            | why                                      |
+      | pv-2    | 80     | UPDATED   | 2        | 2026-10-06T15:05:00Z | a changed entry is revision 2, just now  |
+      | pv-1    | 50     | UNCHANGED | 1        | 2026-10-06T15:00:00Z | an identical PUT touches nothing         |
 
   Scenario Outline: An If-Match for an entry that does not exist yet is a 412 and creates nothing
     When I send PUT "<path>" with If-Match "1" and this body:

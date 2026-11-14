@@ -68,24 +68,18 @@ Feature: Planning read models and approval at their documented boundaries
       | 900      | 300     | 500     | 460      | an older plan does not supersede  |
       | 200      | 30      | 200     | 160      | a newer plan supersedes           |
 
-  Scenario: A newer capability revision replaces the older one
-    Given site "WH2" also published capability revision 2 that cannot receive transfers
+  Scenario Outline: The newest capability revision of a site decides what it may do, whatever order they arrive in
+    Given site "WH2" also published capability revision <first revision> that <first> receive transfers
+    And site "WH2" also published capability revision <second revision> that <second> receive transfers
     When I request GET "/v1/transfer-simulations"
     Then the JSON field "sites.1.site" is "WH2"
-    And the JSON field "sites.1.destinationEnabled" is false
+    And the JSON field "sites.1.destinationEnabled" is <enabled>
 
-  Scenario: A late older capability revision does not undo a newer one
-    Given site "WH2" also published capability revision 3 that cannot receive transfers
-    And site "WH2" also published capability revision 2 that can receive transfers
-    When I request GET "/v1/transfer-simulations"
-    Then the JSON field "sites.1.site" is "WH2"
-    And the JSON field "sites.1.destinationEnabled" is false
-
-  Scenario: A capability with the same revision is not newer, the first one stands
-    Given site "WH2" also published capability revision 1 that cannot receive transfers
-    When I request GET "/v1/transfer-simulations"
-    Then the JSON field "sites.1.site" is "WH2"
-    And the JSON field "sites.1.destinationEnabled" is true
+    Examples: WH2 is declared at revision 1 and may receive; only a strictly greater revision supersedes
+      | first revision | first  | second revision | second | enabled | why                                          |
+      | 2              | cannot | 2               | cannot | false   | a newer revision replaces the declared one   |
+      | 3              | cannot | 2               | can    | false   | a late older revision does not undo it       |
+      | 1              | cannot | 1               | cannot | true    | the same revision is not newer, the first stands |
 
   Scenario Outline: The origin's capacity must cover ALL of its in-window demand plus the transfer
     Given site "WH1" also has 25 units of demand for SKU "SKU-2" inside its capacity window

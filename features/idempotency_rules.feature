@@ -17,37 +17,34 @@ Feature: Idempotency-Key on keyed writes
     Given site "WH1" is declared with capacity 500 and 40 units of demand for SKU "SKU-1"
     And site "WH2" is declared with capacity 300 and 10 units of demand for SKU "SKU-1"
 
-  Scenario Outline: The key is at most 128 characters
+  Scenario Outline: The key is 1 to 128 characters
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with an idempotency key of <length> characters
     Then the response status is <status>
+    And the response content type is "<type>"
 
     Examples: the length limit
-      | length | status | why                 |
-      | 1      | 200    | the shortest key    |
-      | 128    | 200    | exactly the limit   |
-      | 129    | 400    | one over the limit  |
-
-  Scenario: An over-long key is refused with its own slug and creates nothing
-    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with an idempotency key of 129 characters
-    Then the problem detail type is "idempotency-key-invalid"
-    And no transfer exists
-    And no domain events were published
+      | length | status | type                     | why                 |
+      | 1      | 200    | application/json         | the shortest key    |
+      | 128    | 200    | application/json         | exactly the limit   |
+      | 129    | 400    | application/problem+json | one over the limit  |
 
   Scenario Outline: The key is printable ASCII, without spaces
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "<key>"
     Then the response status is <status>
+    And the response content type is "<type>"
 
     Examples: the character range 0x21 to 0x7e
-      | key       | status | why                                    |
-      | !         | 200    | the first printable character          |
-      | ~         | 200    | the last printable character           |
-      | a b       | 400    | a space is below 0x21                  |
-      | clé-1     | 400    | a non-ASCII character                  |
+      | key       | status | type                     | why                                    |
+      | !         | 200    | application/json         | the first printable character          |
+      | ~         | 200    | application/json         | the last printable character           |
+      | a b       | 400    | application/problem+json | a space is below 0x21                  |
+      | clé-1     | 400    | application/problem+json | a non-ASCII character                  |
 
-  Scenario: A refused key is a problem document and nothing was created
-    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "a b"
+  Scenario: A refused key is the idempotency-key-invalid problem and nothing was created
+    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with an idempotency key of 129 characters
     Then the problem detail type is "idempotency-key-invalid"
     And no transfer exists
+    And no domain events were published
 
   Scenario: Two Idempotency-Key headers are refused, there must be exactly one
     When I approve a transfer with two Idempotency-Key headers

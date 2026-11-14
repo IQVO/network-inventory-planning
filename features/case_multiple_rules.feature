@@ -160,14 +160,14 @@ Feature: Case-multiple transfers
     And SKU "SKU-1" is packed in cases of 12
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
     Then the response status is <status>
-    And the response content type is "<type>"
+    And the JSON field "<field>" is "<value>"
 
     Examples: the origin headroom is the capacity minus its 40 units of demand
-      | capacity | status | type                     | headroom                        |
-      | 51       | 422    | application/problem+json | 11 eaches: not one whole case   |
-      | 52       | 200    | application/json         | 12 eaches: exactly one case     |
+      | capacity | status | field | value                                              | headroom                      |
+      | 51       | 422    | type  | https://warehouse.example/problems/below-one-case  | 11 eaches: not one whole case |
+      | 52       | 200    | state | ALLOCATING                                         | 12 eaches: exactly one case   |
 
-  Scenario: A refused below-one-case approval creates nothing and names the slug
+  Scenario: A refused below-one-case approval creates nothing
     Given site "WH1" is declared with capacity 51 and 40 units of demand for SKU "SKU-1"
     And site "WH2" is declared with capacity 300 and 10 units of demand for SKU "SKU-1"
     And SKU "SKU-1" is packed in cases of 12
