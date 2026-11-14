@@ -77,6 +77,24 @@ Feature: Case-multiple transfers
     And the JSON field "proposals.0.caseMultiple" is absent
     And the JSON field "proposals.0.remainderEaches" is absent
 
+  Scenario Outline: A pack level of fewer than 2 eaches is not a case, a level of 2 is
+    Given a planning snapshot as of "2026-10-06T15:00:00Z"
+    And SKU "SKU-1" is packed in cases of <per case>
+    And site "WH1" has 100 available units of SKU "SKU-1"
+    And site "WH1" holds policy "policy-v7" for SKU "SKU-1" with safety stock 20, target stock 0 and unit priority 0
+    And site "WH2" has 10 available units of SKU "SKU-1"
+    And site "WH2" holds policy "policy-v7" for SKU "SKU-1" with safety stock 0, target stock 25 and unit priority 3
+    And an enabled lane from "WH1" to "WH2" with lead time 24 hours and unit handling cost 1
+    When I generate transfer proposals
+    Then the response status is 200
+    And the JSON field "proposals.0.Quantity" is <quantity>
+    And the JSON field "proposals.0.caseMultiple" is <multiple>
+
+    Examples: a demand of 15 eaches
+      | per case | quantity | multiple | rule                                              |
+      | 1        | 15       | absent   | one each per pack is no case: planned in eaches   |
+      | 2        | 16       | 2        | two eaches per pack is the smallest real case     |
+
   Scenario Outline: A case level counts from its effective date, inclusive, until its end date, exclusive
     Given a planning snapshot as of "2026-10-06T15:00:00Z"
     And SKU "SKU-1" is packed in cases of 12 <validity>
