@@ -655,6 +655,24 @@ func (w *world) pickReleaseConfiguredAgain() error {
 	return nil
 }
 
+// pickReleaseIs configures the approval's pick leg with the given path and
+// CPT offset (the rest of the work-release configuration is the harness's).
+func (w *world) pickReleaseIs(path string, hours int) error {
+	cfg := w.release
+	cfg.PickPathID = path
+	cfg.PickCPTOffset = time.Duration(hours) * time.Hour
+	w.approve.Release = cfg
+	return nil
+}
+
+// dispatchReleaseIs configures the dispatch leg with the given path and CPT
+// offset.
+func (w *world) dispatchReleaseIs(path string, hours int) error {
+	w.release.DispatchPathID = path
+	w.release.DispatchCPTOffset = time.Duration(hours) * time.Hour
+	return nil
+}
+
 func (w *world) iRememberTheResponse() error {
 	w.rules.remembered = append([]byte(nil), w.body...)
 	return nil
@@ -728,6 +746,8 @@ func (w *world) registerRulesSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^I approve a transfer of (\d+) units? of SKU "([^"]*)" from "([^"]*)" to "([^"]*)" under policy "([^"]*)" with an idempotency key of (\d+) characters$`, w.iApproveWithKeyOfLength)
 	sc.Step(`^I approve a transfer with two Idempotency-Key headers$`, w.iApproveWithTwoKeys)
 	sc.Step(`^the pick work release is configured again$`, w.pickReleaseConfiguredAgain)
+	sc.Step(`^the pick work release has the path "([^"]*)" and an offset of (\d+) hours?$`, w.pickReleaseIs)
+	sc.Step(`^the dispatch work release has the path "([^"]*)" and an offset of (\d+) hours?$`, w.dispatchReleaseIs)
 	sc.Step(`^I remember the response$`, w.iRememberTheResponse)
 	sc.Step(`^the response is the one I remembered$`, w.theResponseIsTheRememberedOne)
 

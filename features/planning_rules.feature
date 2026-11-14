@@ -159,3 +159,41 @@ Feature: Planning read models and approval at their documented boundaries
     Then the JSON array "proposals" has 2 elements
     And the JSON field "proposals.0.Origin" is "WH1"
     And the JSON field "proposals.1.Origin" is "WH2"
+
+  Scenario Outline: An approval without a usable pick leg is refused with config-incomplete and creates nothing
+    Given the pick work release has the path "<path>" and an offset of <hours> hours
+    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
+    Then the response status is 503
+    And the problem detail type is "config-incomplete"
+    And no transfer exists
+
+    Examples: the pick leg of the approval
+      | path               | hours | why                           |
+      | transfer-pick-path | 0     | a zero offset is not positive |
+      |                    | 2     | no pick path is configured    |
+
+  Scenario: The smallest positive pick offset is a usable pick leg
+    Given the pick work release has the path "transfer-pick-path" and an offset of 1 hour
+    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
+    Then the response status is 200
+    And the JSON field "state" is "ALLOCATING"
+
+  Scenario Outline: A pick fact without a usable dispatch leg commits PICKED and releases no dispatch work
+    Given the dispatch work release has the path "<path>" and an offset of <hours> hours
+    And a transfer "T1" in state "ALLOCATED"
+    When fulfillment-execution publishes event "F1" TransferPicked for transfer "T1"
+    Then the message is acknowledged without a dead letter
+    And transfer "T1" is in state "PICKED"
+    And the work demand "{T1}:dispatch" was not released
+
+    Examples: the dispatch leg of the pick fact
+      | path                   | hours | why                            |
+      | transfer-dispatch-path | 0     | a zero offset is not positive  |
+      |                        | 3     | no dispatch path is configured |
+
+  Scenario: The smallest positive dispatch offset is a usable dispatch leg
+    Given the dispatch work release has the path "transfer-dispatch-path" and an offset of 1 hour
+    And a transfer "T1" in state "ALLOCATED"
+    When fulfillment-execution publishes event "F1" TransferPicked for transfer "T1"
+    Then transfer "T1" is in state "PICKED"
+    And the TRANSFER_DISPATCH work demand "{T1}:dispatch" for 5 units was released
