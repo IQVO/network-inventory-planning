@@ -97,7 +97,7 @@ com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced
 
 - **Published** to `warehouse.network-inventory-planning.events` (through the
   transactional outbox): `TransferPlanApproved`, `TransferAllocationRequested`,
-  `WorkDemandReleased`, `TransferStateAdvanced`, `TransferStuckDetected`,
+  `TransferAllocationReleaseRequested`, `WorkDemandReleased`, `TransferStateAdvanced`, `TransferStuckDetected`,
   `RebalanceRunCompleted` — types
   `com.warehouse.wes.network-inventory-planning.<entity>.<Event>` (`transfer`,
   `workdemand`, `saga`). The same outbox rows additionally feed
@@ -108,7 +108,7 @@ com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced
   warehouse-planning `CapacityPlanPublished`
   (`warehouse.warehouse-planning.events`); inventory-storage
   `TransferStockAllocated`, `TransferStockAllocationRejected`,
-  `TransferReceiptStaged`, `TransferStockStowed` (`warehouse.inventory.events`);
+  `TransferStockAllocationReleased`, `TransferReceiptStaged`, `TransferStockStowed` (`warehouse.inventory.events`);
   fulfillment-execution `TransferPicked`, `TransferDispatched`,
   `TransferArrived` (`warehouse.fulfillment.events`); product-master
   `ProductPackLevelDeclared`, `ProductPackLevelRetired`

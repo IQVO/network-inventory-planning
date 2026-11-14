@@ -43,6 +43,8 @@ stateDiagram-v2
   PROPOSED --> CANCELLED : Cancel
   APPROVED --> CANCELLED : Cancel
   ALLOCATING --> CANCELLED : Cancel
+  ALLOCATED --> RELEASING : CancelAfterAllocation
+  RELEASING --> CANCELLED : MarkReleased
   RECEIVED --> [*]
   UNFULFILLABLE --> [*]
   CANCELLED --> [*]
@@ -75,6 +77,13 @@ approval is persisted in `ALLOCATING`. `RECEIVED`, `UNFULFILLABLE` and
   quantity > 0; at least one stow allocation (`ErrFactRefused` otherwise).
 - `Cancel`: only from `DRAFT`, `PROPOSED`, `APPROVED`, `ALLOCATING`, with a
   reason.
+- `CancelAfterAllocation`: only from `ALLOCATED`, with a reason; it moves the
+  transfer to `RELEASING` and raises `TransferAllocationReleaseRequested`
+  (ADR 0022).
+- `MarkReleased`: only from `RELEASING`; the fact must carry this transfer's
+  line, reservation id, origin, SKU and quantity and an outcome of `RELEASED`
+  or `ALREADY_RESOLVED` (`ErrFactRefused` otherwise); it clears the reservation
+  id, allocations and expiry (ADR 0023).
 - Persistence mirrors the rules with named CHECK constraints (closed state
   enum, origin ≠ destination, reservation id only from `ALLOCATED` on, picked
   quantity only from `PICKED` on and never above quantity), a UNIQUE
@@ -85,9 +94,9 @@ approval is persisted in `ALLOCATING`. `RECEIVED`, `UNFULFILLABLE` and
 - Replies and facts for an unknown transfer, an illegal transition or a
   refused fact are logged and committed past.
 - Transient failures are retried on the same message (200ms doubling to 5s).
-- A mismatched allocation or rejection reply returns a plain error and is
-  therefore retried like a transient one (a gap, see
-  [Troubleshooting](../operations/troubleshooting.md)).
+- A reply or fact the aggregate refuses (`ErrReplyRefused`, `ErrFactRefused`)
+  is published raw to the topic's `.dlq` and committed past, never retried
+  (ADR 0013; see [Troubleshooting](../operations/troubleshooting.md)).
 - Stuck transfers are only observed (`TransferStuckDetected`); nothing cancels,
   retries or releases automatically.
 - `allocation_expires_at` is stored but no policy acts on it.
@@ -103,7 +112,8 @@ approval is persisted in `ALLOCATING`. `RECEIVED`, `UNFULFILLABLE` and
 | Apply dispatch | Kafka `TransferDispatched` | `MarkDispatched` |
 | Apply arrival | Kafka `TransferArrived` or `TransferReceiptStaged` | `MarkArrived` |
 | Apply stow | Kafka `TransferStockStowed` | `MarkStowed` |
-| Cancel | none (tests only) | `Cancel` |
+| Cancel | `POST /v1/transfers/{id}/cancellation` (ADR 0022) | `Cancel` (before allocation), `CancelAfterAllocation` (from `ALLOCATED`) |
+| Apply release | Kafka `TransferStockAllocationReleased` | `MarkReleased` |
 
 ## 7. Created events
 
@@ -111,9 +121,10 @@ approval is persisted in `ALLOCATING`. `RECEIVED`, `UNFULFILLABLE` and
 | --- | --- | --- |
 | `PlanApproved` | `Approve` | `...transfer.TransferPlanApproved` |
 | `AllocationRequested` | `RequestAllocation` | `...transfer.TransferAllocationRequested` |
+| `ReleaseRequested` | `CancelAfterAllocation` | `...transfer.TransferAllocationReleaseRequested` |
 | `DemandReleased` (pick) | `ApplyTransferAllocation` after `MarkAllocated` | `...workdemand.WorkDemandReleased` |
 | `DemandReleased` (dispatch) | `ApplyTransferPick` after `MarkPicked` | `...workdemand.WorkDemandReleased` |
-| `StateAdvanced` | derived from new audit entries (`StateAdvancedSince`) by the approval, allocation and pick use cases | `...saga.TransferStateAdvanced` |
+| `StateAdvanced` | derived from new audit entries (`StateAdvancedSince`) by every use case that changes a transfer's state | `...saga.TransferStateAdvanced` |
 
 ## 8. Throughput and 9. Size
 

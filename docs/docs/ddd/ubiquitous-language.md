@@ -32,7 +32,7 @@ constant or field in `internal/domain/**`, a use case, or a migration column.
 | **Staleness budget** | `PLANNING_MAX_STALENESS` (default 10m): the maximum age of any fact; an older fact excludes its site | `cmd/network-inventory-planning/main.go` |
 | **Simulation** | The advisory per-site view: demand, capacity over window, headroom (negative = short) | `usecases.SimulateTransferOptions` |
 | **InterWarehouseTransfer** | The saga aggregate: an operator-approved plan to move a quantity of one SKU from origin to destination | `transfer.InterWarehouseTransfer` |
-| **TransferState** | `DRAFT`, `PROPOSED`, `APPROVED`, `ALLOCATING`, `ALLOCATED`, `PICKED`, `IN_TRANSIT`, `ARRIVED`, `RECEIVED`, `UNFULFILLABLE`, `CANCELLED`; `RECEIVED`, `UNFULFILLABLE` and `CANCELLED` are terminal | `transfer.TransferState` |
+| **TransferState** | `DRAFT`, `PROPOSED`, `APPROVED`, `ALLOCATING`, `ALLOCATED`, `RELEASING`, `PICKED`, `IN_TRANSIT`, `ARRIVED`, `RECEIVED`, `UNFULFILLABLE`, `CANCELLED`; `RECEIVED`, `UNFULFILLABLE` and `CANCELLED` are terminal | `transfer.TransferState` |
 | **Transfer line** (`LineID`) | The v1 single line `<transfer_id>:1`; the correlation key with inventory-storage | `TransferID.LineID()` |
 | **AuditEntry** | One immutable transition: seq, from, to, event, reason, time | `transfer.AuditEntry`, `transfer_audit` |
 | **Idempotency key** | The approval's required `Idempotency-Key`, unique per transfer; a replay with the same body returns the original | `inter_warehouse_transfer.idempotency_key` |

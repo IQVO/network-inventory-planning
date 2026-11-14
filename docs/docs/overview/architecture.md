@@ -22,7 +22,7 @@ Everything below is read from `cmd/*/main.go`, the Dockerfile and
 | Domain-like read model | `internal/analytics/report` | Pure report rules for the analytics read side: half-open ranges, percentiles, rejection rates, freshness. |
 | Application | `internal/application/usecases`, `internal/application/ports` | One use case per trigger (see [Use cases](../ddd/use-cases.md)); ports for repositories, the query side, the unit of work and the event publisher. |
 | Inbound adapters | `internal/adapters/inbound/http` | REST handler (`Handler.Routes`) and the reports handler (`ReportsServer.Routes`). |
-| Inbound adapters | `internal/adapters/inbound/kafka` | Seven consumers: three read-model consumers, the inventory reply consumer, the fulfillment fact consumer and the analytics projector consumer. |
+| Inbound adapters | `internal/adapters/inbound/kafka` | Seven consumers: three read-model consumers, the inventory reply consumer, the fulfillment fact consumer, the product-master pack-level consumer and the analytics projector consumer. |
 | Inbound adapters | `internal/adapters/inbound/mcp` | The read-only MCP server (four tools). |
 | Inbound adapters | `internal/adapters/inbound/a2a` | The read-only A2A agent (two skills, ADR 0020). |
 | Outbound adapters | `internal/adapters/outbound/postgres` | pgx repositories, the unit of work, the transactional outbox writer and relay, golang-migrate runner and the OLTP migrations. |

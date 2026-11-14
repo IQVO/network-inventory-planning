@@ -46,6 +46,7 @@ flowchart LR
         in4["warehouse-planning"]:::ctx
         in5["inventory-storage"]:::ctx
         in6["fulfillment-execution"]:::ctx
+        in7["product-master"]:::ctx
     end
     subgraph BC["network-inventory-planning (NIP) - Core subdomain - WES tier"]
         direction TB
@@ -54,14 +55,15 @@ flowchart LR
         rules["<b>Business decisions it enforces</b><br/>- A proposal is advisory; only an operator approval creates<br/>a transfer<br/>- Unknown or stale data excludes a site or refuses the<br/>answer; never zero-filled<br/>- The origin keeps its safety stock; the destination gets no<br/>more than its deficit<br/>- Approval is idempotent per Idempotency-Key<br/>- Stuck detection and scheduled rebalances observe only<br/>- The MCP server has no write tool"]:::card
         purpose ~~~ roles ~~~ rules
     end
-    in0 -->|"cmd - REST<br/>ApproveTransfer"| BC
+    in0 -->|"cmd - REST<br/>ApproveTransfer,<br/>CancelTransfer"| BC
     in0 -.->|"qry - REST<br/>generate transfer proposals,<br/>transfer simulations,<br/>transfers, rebalance runs,<br/>rebalance policies, transfer<br/>lanes"| BC
     in1 -.->|"qry - MCP<br/>get_transfer, list_transfers,<br/>find_stuck_transfers,<br/>simulate_transfer_options"| BC
     in2 ==>|"evt - Kafka<br/>warehouse.facility.events<br/>SiteCapabilityChanged"| BC
     in3 ==>|"evt - Kafka<br/>warehouse.order-management.events<br/>SiteSkuDemandChanged"| BC
     in4 ==>|"evt - Kafka<br/>warehouse.warehouse-planning.events<br/>CapacityPlanPublished"| BC
-    in5 ==>|"evt - Kafka<br/>warehouse.inventory.events<br/>TransferStockAllocated,<br/>TransferStockAllocationRejected<br/>(replies),<br/>TransferReceiptStaged,<br/>TransferStockStowed (facts)"| BC
+    in5 ==>|"evt - Kafka<br/>warehouse.inventory.events<br/>TransferStockAllocated,<br/>TransferStockAllocationRejected,<br/>TransferStockAllocationReleased<br/>(replies),<br/>TransferReceiptStaged,<br/>TransferStockStowed (facts)"| BC
     in6 ==>|"evt - Kafka<br/>warehouse.fulfillment.events<br/>TransferPicked,<br/>TransferDispatched,<br/>TransferArrived (facts)"| BC
+    in7 ==>|"evt - Kafka<br/>warehouse.product-master.events<br/>ProductPackLevelDeclared,<br/>ProductPackLevelRetired"| BC
     linkStyle 0 stroke:#1971c2,stroke-width:1.5px
     linkStyle 1 stroke:#2f9e44,stroke-width:1.5px
     linkStyle 2 stroke:#2f9e44,stroke-width:1.5px
@@ -70,6 +72,7 @@ flowchart LR
     linkStyle 5 stroke:#e8590c,stroke-width:2.5px
     linkStyle 6 stroke:#e8590c,stroke-width:2.5px
     linkStyle 7 stroke:#e8590c,stroke-width:2.5px
+    linkStyle 8 stroke:#e8590c,stroke-width:2.5px
     class BC bc
 ```
 
@@ -93,7 +96,7 @@ flowchart LR
         out2["no consumer today"]:::none
         out3["own projector"]:::self
     end
-    BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferAllocationRequested"| out0
+    BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferAllocationRequested,<br/>TransferAllocationReleaseRequested"| out0
     BC -->|"cmd - Kafka<br/>warehouse.network-inventory-planning.events<br/>WorkDemandReleased (pick, then<br/>dispatch)"| out1
     BC ==>|"evt - Kafka<br/>warehouse.network-inventory-planning.events<br/>TransferPlanApproved"| out2
     BC ==>|"evt - Kafka<br/>warehouse.network-inventory-planning.analytics<br/>TransferStateAdvanced,<br/>TransferStuckDetected,<br/>RebalanceRunCompleted"| out3
@@ -147,18 +150,20 @@ inventory ledger and never moves stock itself (ADR 0001).
 | facility-layout | `SiteCapabilityChanged` | event | `site_capability` read model |
 | order-management | `SiteSkuDemandChanged` | event | `site_sku_demand` read model |
 | warehouse-planning | `CapacityPlanPublished` | event | `published_capacity_plan` read model |
-| inventory-storage | `TransferStockAllocated`, `TransferStockAllocationRejected` | reply | `ApplyTransferAllocation`, `ApplyTransferRejection` |
+| inventory-storage | `TransferStockAllocated`, `TransferStockAllocationRejected`, `TransferStockAllocationReleased` | reply | `ApplyTransferAllocation`, `ApplyTransferRejection`, `ApplyTransferAllocationReleased` |
 | inventory-storage | `TransferReceiptStaged`, `TransferStockStowed` | fact | `ApplyTransferReceiptStaged`, `ApplyTransferStow` |
 | fulfillment-execution | `TransferPicked`, `TransferDispatched`, `TransferArrived` | fact | `ApplyTransferPick`, `ApplyTransferDispatched`, `ApplyTransferArrival` |
 | operator / console | `POST /v1/transfer-approvals` | command | `ApproveTransfer` |
+| operator / console | `POST /v1/transfers/{id}/cancellation` | command | `CancelTransfer` |
 | operator / console / tools | `POST /v1/transfer-proposal-runs`, `GET /v1/transfer-simulations`, `GET /v1/transfers`, `GET /v1/transfers/{id}`, `GET /v1/rebalance-runs`, `GET /v1/rebalance-policies`, `GET /v1/transfer-lanes` | query | planner, read models, saga store |
 | warehouse-ops-agent | `get_transfer`, `list_transfers`, `find_stuck_transfers`, `simulate_transfer_options` | query (MCP) | read side |
+| product-master | `ProductPackLevelDeclared`, `ProductPackLevelRetired` | event | `ApplyPackLevel` (local `pack_levels` copy) |
 
 ## Outbound communication
 
 | Counterpart | Message | Kind | Topic |
 | --- | --- | --- | --- |
-| inventory-storage | `TransferAllocationRequested` | command | `warehouse.network-inventory-planning.events` |
+| inventory-storage | `TransferAllocationRequested`, `TransferAllocationReleaseRequested` | command | `warehouse.network-inventory-planning.events` |
 | wes-work-planning | `WorkDemandReleased` (pick, then dispatch) | command | `warehouse.network-inventory-planning.events` |
 | no consumer today | `TransferPlanApproved` | event | `warehouse.network-inventory-planning.events` |
 | own projector | `TransferStateAdvanced`, `TransferStuckDetected`, `RebalanceRunCompleted` | analytics occurrence | `warehouse.network-inventory-planning.analytics` |
@@ -190,8 +195,11 @@ PublishedCapacityPlan, WorkDemand, StuckTransfer, RebalanceRun.
 - Stuck detection and scheduled rebalances observe only: they never change a
   transfer, approve or allocate (ADR 0007).
 - The MCP server has no write tool (ADR 0008).
-- A transfer can be cancelled only before allocation, and nothing invokes
-  cancellation today.
+- An operator can cancel a transfer until it is picked
+  (`POST /v1/transfers/{id}/cancellation`, ADR 0022): before allocation it
+  cancels at once, after allocation it waits in `RELEASING` until
+  inventory-storage confirms the release; from `PICKED` onwards the cancel is
+  refused with 409.
 
 ## Assumptions
 
@@ -219,13 +227,8 @@ PublishedCapacityPlan, WorkDemand, StuckTransfer, RebalanceRun.
   operator-managed policy and lane catalogues (ADR 0015) on a site-level
   approximation (capacity headroom and demand), because no sibling publishes
   per-site stock positions.
-- **Cancellation after allocation** needs an explicit reservation revocation
-  that is not designed.
-- **Analytics coverage of the physical tail.** `TransferStateAdvanced` is not
-  emitted for `PICKED → IN_TRANSIT`, `→ ARRIVED`, `→ RECEIVED` or
-  `→ UNFULFILLABLE` because those use cases are wired without a publisher.
-- **Mismatched allocation replies** are retried forever instead of being
-  skipped (see [Troubleshooting](../operations/troubleshooting.md)).
+- **Cancellation from `PICKED` onwards** is refused: the stock is in motion and
+  a damage or short-pick exception flow is out of scope (ADR 0022).
 - **Per-state dwell.** `age_seconds` is age since creation, so
   `/reports/state-dwell` approximates time in state.
 - Auto-approval, route optimisation and forecasting are not built.

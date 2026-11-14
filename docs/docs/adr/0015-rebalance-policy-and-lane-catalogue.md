@@ -139,3 +139,13 @@ snapshot.
   through the saga health check (ADR 0007).
 - **Not planned.** A catalogue change event (for example
   `RebalancePolicyChanged`) has no consumer today and is not published.
+
+## Addendum 2026-11-13: current state
+
+The cancel follow-up above was built by [ADR 0022](./0022-cancel-after-allocation-compensation.md) (PR #103): the use case
+`CancelTransfer` (`internal/application/usecases/cancel_transfer.go`), the route
+`POST /v1/transfers/{transferId}/cancellation` and the command
+`TransferAllocationReleaseRequested` to inventory-storage, so transfers do reach
+`CANCELLED`. The cancel publishes only that command and the
+`TransferStateAdvanced` occurrence (`cancel_transfer.go:160-168`); no event
+withdraws an already released pick `WorkDemandReleased`.
