@@ -24,8 +24,9 @@ func (w *world) theScheduledRebalanceRuns(ctx context.Context) error {
 	run := usecases.RunScheduledRebalance{
 		Snapshot:     w.facts,
 		Planner:      transfer.Planner{},
-		Policies:     w.policies,
+		Policies:     w.rules.policyRepo(w),
 		Lanes:        w.lanes,
+		Packs:        w.packView,
 		Runs:         w.runs,
 		Events:       w.bus,
 		MaxStaleness: maxStaleness,
@@ -65,13 +66,13 @@ func (w *world) noTransferExists(ctx context.Context) error {
 		return err
 	}
 	var page struct {
-		Total int `json:"total"`
+		Items []json.RawMessage `json:"items"`
 	}
 	if status != http.StatusOK || json.Unmarshal(body, &page) != nil {
 		return fmt.Errorf("listing transfers: status %d: %s", status, string(body))
 	}
-	if page.Total != 0 {
-		return fmt.Errorf("expected no transfer to exist, found %d", page.Total)
+	if len(page.Items) != 0 {
+		return fmt.Errorf("expected no transfer to exist, found %d", len(page.Items))
 	}
 	return nil
 }

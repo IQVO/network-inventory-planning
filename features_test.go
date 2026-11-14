@@ -34,6 +34,7 @@ import (
 	inboundhttp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/analyticsstore"
 	"github.com/claudioed/network-inventory-planning/internal/adapters/outbound/memory"
+	"github.com/claudioed/network-inventory-planning/internal/application/ports"
 	"github.com/claudioed/network-inventory-planning/internal/application/usecases"
 )
 
@@ -74,6 +75,13 @@ type world struct {
 	analytics *analyticsstore.Memory
 	release   usecases.WorkReleaseConfig
 	approve   *usecases.ApproveTransfer
+	// packs is the local pack-level view (ADR 0017); packView is what the
+	// use cases read (swapped for a failing double by the outage step).
+	packs    *memory.PackLevelView
+	packView ports.PackLevelView
+	// rules holds the state of the documentation-derived steps
+	// (steps_rules_test.go).
+	rules rulesState
 
 	oltp          *httptest.Server
 	reports       *httptest.Server
@@ -112,12 +120,16 @@ func (w *world) start() {
 		DispatchPathID:    "transfer-dispatch-path",
 		DispatchCPTOffset: 3 * time.Hour,
 	}
+	w.packs = memory.NewPackLevelView()
+	w.packView = w.packs
+	w.rules = rulesState{}
 	w.approve = &usecases.ApproveTransfer{
 		Transfers:    w.transfers,
 		Events:       w.bus,
 		Snapshot:     w.facts,
 		UoW:          memory.UnitOfWork{},
 		MaxStaleness: maxStaleness,
+		Packs:        w.packView,
 		Release:      w.release,
 		Now:          w.clock.Now,
 	}
@@ -139,13 +151,14 @@ func (w *world) start() {
 // outbox and the work-release path are all configured.
 func (w *world) fullHandler() inboundhttp.Handler {
 	return inboundhttp.Handler{
-		Generate: usecases.GenerateTransferProposals{},
+		Generate: usecases.GenerateTransferProposals{Packs: w.packView},
 		Simulate: &usecases.SimulateTransferOptions{
 			Snapshot:     w.facts,
 			MaxStaleness: maxStaleness,
 			Now:          w.clock.Now,
 		},
 		Approve:           w.approve,
+		Cancel:            &usecases.CancelTransfer{Transfers: w.transfers, Events: w.bus, UoW: memory.UnitOfWork{}, Now: w.clock.Now},
 		ListRebalanceRuns: &usecases.ListRebalanceRuns{Runs: w.runs},
 		GetTransfer:       &usecases.GetTransfer{Query: w.transfers},
 		ListTransfers:     &usecases.ListTransfers{Query: w.transfers},
@@ -319,11 +332,11 @@ func (w *world) iRequestTheReport(ctx context.Context, path string) error {
 }
 
 func (w *world) iPostBody(ctx context.Context, path string, body *godog.DocString) error {
-	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: path, body: []byte(w.expand(body.Content))})
+	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: w.expand(path), body: []byte(w.expand(body.Content))})
 }
 
 func (w *world) iPostBodyKeyless(ctx context.Context, path string, body *godog.DocString) error {
-	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: path, keyless: true, body: []byte(w.expand(body.Content))})
+	return w.record(ctx, request{server: w.oltp, method: http.MethodPost, path: w.expand(path), keyless: true, body: []byte(w.expand(body.Content))})
 }
 
 // iRequestNextPage follows nextCursor of the last response: the same path
@@ -344,7 +357,7 @@ func (w *world) iRequestNextPage(ctx context.Context, path string) error {
 
 func (w *world) iPostBodyWithKey(ctx context.Context, path, key string, body *godog.DocString) error {
 	return w.record(ctx, request{
-		server: w.oltp, method: http.MethodPost, path: path,
+		server: w.oltp, method: http.MethodPost, path: w.expand(path),
 		headers: map[string]string{"Idempotency-Key": key},
 		body:    []byte(w.expand(body.Content)),
 	})
@@ -504,6 +517,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	w.registerSagaSteps(sc)
 	w.registerReportSteps(sc)
 	w.registerCatalogueSteps(sc)
+	w.registerRulesSteps(sc)
 }
 
 func (w *world) registerHTTPSteps(sc *godog.ScenarioContext) {
