@@ -66,6 +66,7 @@ Feature: Planning read models and approval at their documented boundaries
     Examples: the declared plan was published 60 seconds ago with 500 units
       | capacity | seconds | planned | headroom | why                               |
       | 900      | 300     | 500     | 460      | an older plan does not supersede  |
+      | 200      | 60      | 500     | 460      | the same publication time is not newer, the first stands |
       | 200      | 30      | 200     | 160      | a newer plan supersedes           |
 
   Scenario Outline: The newest capability revision of a site decides what it may do, whatever order they arrive in
