@@ -176,7 +176,7 @@ rebalance; when it is set, `PACK_LEVEL_CONSUMER_GROUP` is required with it
 | `TRANSFER_DISPATCH_PATH_ID` | *(unset = no dispatch demand)* | Path id of the dispatch-leg demand; a `TransferPicked` fact still moves the transfer to `PICKED` |
 | `TRANSFER_DISPATCH_CPT_OFFSET` | `3h` | CPT horizon of the dispatch demand |
 | `NIP_HEALTH_CHECK_INTERVAL` | `5m` | Saga-health (stuck transfer) check tick (ADR 0007); `0` disables |
-| `NIP_STUCK_THRESHOLDS` | `ALLOCATING=1h,PICKED=24h,IN_TRANSIT=72h` (other non-terminal states 24h) | `STATE=DURATION` overrides merged over the defaults |
+| `NIP_STUCK_THRESHOLDS` | `ALLOCATING=1h,RELEASING=1h,PICKED=24h,IN_TRANSIT=72h` (other non-terminal states 24h) | `STATE=DURATION` overrides merged over the defaults |
 | `NIP_REBALANCE_SCHEDULE` | *(unset = off)* | Interval of the observe-only scheduled rebalance; needs the outbox |
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`, case-insensitive |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | OTLP/gRPC endpoint for traces and metrics (ADR 0012) |
