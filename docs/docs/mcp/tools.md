@@ -30,8 +30,8 @@ enforces), and every input schema sets `additionalProperties: false`. Each tool 
 | Tool | Read-only | Inputs | Output |
 | --- | --- | --- | --- |
 | `get_transfer` | yes | `transfer_id` (string, required) | the transfer view plus `audit[]` of `{seq, from, to, event, cause, occurred_at}` |
-| `list_transfers` | yes | `state` (one of the 12 states), `site` (matches origin **or** destination), `limit` (1–200, default 50) | `{transfers[], total}`, newest first; `total` counts matches before paging |
-| `find_stuck_transfers` | yes | `older_than_minutes` (integer, required, positive), `state` (a non-terminal state), `limit` (1–200, default 50) | `{transfers[], total}`, stalest first; `RECEIVED`, `UNFULFILLABLE` and `CANCELLED` are never reported |
+| `list_transfers` | yes | `state` (one of the 11 states of `transfer.AllStates()`; `RELEASING` is not among them and is refused as `invalid-query`), `site` (matches origin **or** destination), `limit` (1–200, default 50) | `{transfers[], total}`, newest first; `total` counts matches before paging |
+| `find_stuck_transfers` | yes | `older_than_minutes` (integer, required, positive), `state` (a non-terminal state of `transfer.AllStates()`, so not `RELEASING`; without it the search covers `NonTerminalStates()`, which has no `RELEASING` either), `limit` (1–200, default 50) | `{transfers[], total}`, stalest first; `RECEIVED`, `UNFULFILLABLE` and `CANCELLED` are never reported |
 | `simulate_transfer_options` | yes | none | `{advisory, as_of, sites[]}` with per site `site`, `origin_enabled`, `destination_enabled`, `total_demand`, `capacity_over_window`, `capacity_headroom` (negative = short), `window_start`, `window_end` |
 
 The transfer view has `id`, `state`, `sku`, `quantity`, `picked_quantity`
