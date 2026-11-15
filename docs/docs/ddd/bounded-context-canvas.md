@@ -216,7 +216,7 @@ PublishedCapacityPlan, WorkDemand, StuckTransfer, RebalanceRun.
 ## Verification metrics
 
 - End-to-end saga and read-model integration tests against testcontainers
-  Kafka and Postgres; 188 BDD scenarios; architecture fitness tests pinning the
+  Kafka and Postgres; 456 executed BDD scenarios; architecture fitness tests pinning the
   event catalogue (ADR 0004) and the layering.
 - Operationally: `/reports/transfer-funnel`, `/reports/state-dwell`,
   `/reports/stuck-transfers`, `/reports/rebalance-runs`, `/reports/freshness`.

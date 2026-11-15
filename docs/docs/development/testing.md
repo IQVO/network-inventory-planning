@@ -13,28 +13,44 @@ description: The test pyramid of network-inventory-planning as it exists in the 
 | --- | --- | --- | --- | --- |
 | Unit | `internal/domain/**`, `internal/application/**`, `internal/analytics/report`, adapters with fakes, `cmd/*/main_test.go` | 338 `func Test...` across the module (unit, integration and fitness together) | `make test` | nothing |
 | HTTP adapter (httptest) | `internal/adapters/inbound/http/*_test.go` | handler, approve, simulate, transfers read, rebalance runs, policy/lane catalogues, reports, OTel metric and OpenAPI-contract tests | `make test` | nothing |
-| BDD acceptance (godog/Gherkin, ADR 0011) | `features/*.feature`, steps in `features_test.go`, `features_saga_test.go`, `features_facts_test.go`, `features_reports_test.go` | **8 feature files, 107 `Scenario`/`Scenario Outline` blocks, 188 executed scenarios, 1361 steps** | `make bdd` (also part of `make test`) | nothing (in-memory world) |
+| BDD acceptance (godog/Gherkin, ADR 0011) | `features/*.feature`, steps in `features_test.go`, `features_saga_test.go`, `features_facts_test.go`, `features_reports_test.go`, `features_catalogue_test.go`, `steps_rules_test.go` | **17 feature files, 234 `Scenario`/`Scenario Outline` blocks, 456 executed scenarios, 3388 steps** | `make bdd` (also part of `make test`) | nothing (in-memory world) |
 | Integration (testcontainers) | files tagged `//go:build integration` | 16 files | `make integration` | Docker |
 | Architecture fitness | `internal/architecture` | 14 tests | `make arch-test` | nothing |
 | Mutation | gremlins over `internal/domain/transfer`, `internal/analytics/report`, `internal/domain` | — | `make mutation`, `make mutation-full` | `gremlins` v0.6.0 |
 | Console remote | `web/src/**/*.test.ts(x)` (vitest + Testing Library) | — | `npm test` in `web/` | Node 22 and a sibling `warehouse-ui-kit` checkout |
 
 The BDD numbers come from a local run of `go test -run TestFeatures -count=1 -v .`
-on this branch: `188 scenarios (188 passed)`, `1361 steps (1361 passed)`.
+on this branch: `456 scenarios (456 passed)`, `3388 steps (3388 passed)`.
 
 ### BDD feature files
 
 | File | Scenario blocks | Covers |
 | --- | --- | --- |
 | `features/analytics_reports.feature` | 22 | the five `/reports/*` routes, ranges, redelivery |
-| `features/transfer_approval.feature` | 22 | approval, idempotency, fail-closed refusals, problem types |
+| `features/transfer_approval.feature` | 24 | approval, idempotency, fail-closed refusals, problem types |
 | `features/proposal_generation.feature` | 15 | planner rules on `POST /v1/transfer-proposal-runs` |
-| `features/transfer_lifecycle.feature` | 13 | allocation, rejection, pick, dispatch, arrival, stow |
+| `features/transfer_lifecycle.feature` | 21 | allocation, rejection, pick, dispatch, arrival, stow |
 | `features/transfer_queries.feature` | 12 | `GET /v1/transfers` filters, paging, 400/404/503 |
-| `features/simulation.feature` | 11 | fail-closed simulation |
-| `features/rebalance_catalogue.feature` | 11 | policy and lane catalogues (idempotent PUT, `If-Match`, 422/503) and the scheduled run proposing from them (ADR 0015) |
-| `features/rebalance_runs.feature` | 10 | run history and its `limit` |
+| `features/simulation.feature` | 13 | fail-closed simulation |
+| `features/rebalance_catalogue.feature` | 14 | policy and lane catalogues (idempotent PUT, `If-Match`, 422/503) and the scheduled run proposing from them (ADR 0015) |
+| `features/rebalance_runs.feature` | 11 | run history and its `limit` |
 | `features/health.feature` | 2 | `/healthz` |
+
+Eight further files, named `*_rules.feature`, pin rules the documentation states
+(use cases, aggregate canvas, troubleshooting problem-type table and ADRs 0007, 0013,
+0017, 0022, 0023), one rule per scenario title, with boundary values. Their steps
+are in `steps_rules_test.go`:
+
+| File | Scenario blocks | Rules |
+| --- | --- | --- |
+| `features/case_multiple_rules.feature` | 18 | ADR 0017: nearest case, ties up, never below one case, capped at the origin's whole cases, pack level of 1 is no case, effective-from inclusive, an unreadable pack view refuses |
+| `features/idempotency_rules.feature` | 11 | key 1..128 printable ASCII, two key headers refused, a reused key with any differing field is 409, a 4xx is stored and a 5xx never is |
+| `features/planning_rules.feature` | 15 | capacity window half-open, freshness budget, newest capacity plan and capability revision win, origin capacity covers all in-window demand, removed demand justifies nothing |
+| `features/rebalance_planning_rules.feature` | 13 | scheduled pass and planner: score strictly positive, tie order, headroom never promised twice, safety stock, target stock, unreadable catalogue is a FAILED run |
+| `features/saga_health_rules.feature` | 6 | stuck strictly after the per-state threshold, clock restarts at each transition, cancelled transfers unwatched |
+| `features/transfer_cancellation_rules.feature` | 14 | cancel from each state (ADR 0022/0023), 202 and the release command from `ALLOCATED`, replay, 409 from `PICKED` onwards, key rules |
+| `features/transfer_inbound_consumers_rules.feature` | 19 | ADR 0013: redelivery applied once, contradicting replies and facts dead-lettered, unknown transfers and out-of-order facts skipped, first arrival fact wins |
+| `features/transfer_query_rules.feature` | 4 | the eleven states of `transfer.AllStates()` as filters, `limit` 1 and 500, a page that exactly fills the limit has no `nextCursor` |
 
 ### Integration tests
 
