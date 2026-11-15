@@ -326,6 +326,27 @@ jobs:
         run: govulncheck ./...
 
   # ============================================================
+  # CLASSIFICATION: CONTRACT PINS
+  # Every producer spec this repo pins a byte-copy of must equal the
+  # producer's develop: a stale copy keeps the consumer contract tests
+  # green while the producer's contract has moved on. Refresh = copy the
+  # producer's file over the pin (see contracts/pinned.json), never edit.
+  # ============================================================
+  pinned-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Pins equal the producer's develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/harness/pinned_contract_gate.py
+      - name: The gate's own tests
+        run: python3 scripts/harness/test_pinned_contract_gate.py
+
+  # ============================================================
   # CLASSIFICATION: DOCS/API DRIFT
   # Guards against the generated "API Reference" docs
   # (docs/docs/api-reference/rest/, produced by docusaurus-plugin-openapi-docs
