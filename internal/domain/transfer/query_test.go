@@ -3,8 +3,10 @@ package transfer
 import "testing"
 
 func TestAllStatesIsTheClosedLifecycleVocabulary(t *testing.T) {
+	// Twelve states, RELEASING between ALLOCATED and PICKED (ADR 0022);
+	// apis/openapi.yaml TransferState enumerates the same twelve.
 	want := []TransferState{
-		StateDraft, StateProposed, StateApproved, StateAllocating, StateAllocated,
+		StateDraft, StateProposed, StateApproved, StateAllocating, StateAllocated, StateReleasing,
 		StatePicked, StateInTransit, StateArrived, StateReceived, StateUnfulfillable, StateCancelled,
 	}
 	got := AllStates()
@@ -47,8 +49,10 @@ func TestTransferStateIsTerminal(t *testing.T) {
 
 func TestNonTerminalStatesExcludeEveryTerminalState(t *testing.T) {
 	got := NonTerminalStates()
+	// RELEASING is waiting for inventory-storage's release fact, so it is
+	// non-terminal and can be stuck (ADR 0022).
 	want := []TransferState{
-		StateDraft, StateProposed, StateApproved, StateAllocating, StateAllocated,
+		StateDraft, StateProposed, StateApproved, StateAllocating, StateAllocated, StateReleasing,
 		StatePicked, StateInTransit, StateArrived,
 	}
 	if len(got) != len(want) {

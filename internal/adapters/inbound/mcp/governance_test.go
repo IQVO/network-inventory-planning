@@ -9,6 +9,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	inboundmcp "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/mcp"
+	"github.com/claudioed/network-inventory-planning/internal/domain/transfer"
 )
 
 // wantTools is the curated tool surface: name -> read-only. EVERY tool is
@@ -100,6 +101,48 @@ func checkToolArguments(t *testing.T, tool *sdk.Tool) {
 			t.Errorf("tool %q argument %q has no description", tool.Name, arg)
 		}
 	}
+}
+
+// The tool schemas advertise the same state vocabulary the use cases accept
+// (transfer.AllStates(), RELEASING included), and both state-taking tools
+// accept RELEASING instead of refusing it as invalid-query.
+func TestStateVocabularyIsAdvertisedAndAccepted(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	stateArgDescription := func(tool *sdk.Tool) string {
+		props, _ := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		d, _ := props["state"].(map[string]any)["description"].(string)
+		return d
+	}
+	for _, tool := range res.Tools {
+		var want []transfer.TransferState
+		switch tool.Name {
+		case "list_transfers":
+			want = transfer.AllStates()
+		case "find_stuck_transfers":
+			want = transfer.NonTerminalStates()
+		case "get_transfer":
+			for _, s := range transfer.AllStates() {
+				if !strings.Contains(tool.Description, string(s)) {
+					t.Errorf("get_transfer description does not name state %s", s)
+				}
+			}
+			continue
+		default:
+			continue
+		}
+		desc := stateArgDescription(tool)
+		for _, s := range want {
+			if !strings.Contains(desc, string(s)) {
+				t.Errorf("%s: state argument description %q does not name %s", tool.Name, desc, s)
+			}
+		}
+	}
+	h.ok(t, "list_transfers", map[string]any{"state": "RELEASING"})
+	h.ok(t, "find_stuck_transfers", map[string]any{"older_than_minutes": 10, "state": "releasing"})
 }
 
 // Tool errors must never leak infrastructure detail (DSNs, SQL) to the model:

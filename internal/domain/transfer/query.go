@@ -5,11 +5,15 @@ import (
 	"time"
 )
 
-// allStates lists every lifecycle state in saga order. It is the closed
-// vocabulary the read side validates a requested state filter against.
+// allStates lists every lifecycle state in saga order: the twelve states of
+// apis/openapi.yaml TransferState, RELEASING (ADR 0022, the compensation
+// between ALLOCATED and CANCELLED) included. It is the closed vocabulary the
+// read side validates a requested state filter against, and NonTerminalStates
+// derives from it, so a state missing here is both unfilterable and invisible
+// to the unfiltered stuck search.
 var allStates = []TransferState{
 	StateDraft, StateProposed, StateApproved, StateAllocating, StateAllocated,
-	StatePicked, StateInTransit, StateArrived, StateReceived,
+	StateReleasing, StatePicked, StateInTransit, StateArrived, StateReceived,
 	StateUnfulfillable, StateCancelled,
 }
 

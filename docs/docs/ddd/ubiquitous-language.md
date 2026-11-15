@@ -46,7 +46,7 @@ constant or field in `internal/domain/**`, a use case, or a migration column.
 | **Picked quantity** | What the origin pick actually picked; a short pick is recorded and the dispatch carries it | `InterWarehouseTransfer.PickedQuantity` |
 | **StowAllocation** | A destination stow location from `TransferStockStowed` | `transfer.StowAllocation` |
 | **Stuck transfer** | A non-terminal transfer whose last transition is older than its state's threshold. A reading, never a state | `transfer.StuckCheck` |
-| **StuckThresholds** | `ALLOCATING=1h`, `PICKED=24h`, `IN_TRANSIT=72h`, 24h otherwise; `NIP_STUCK_THRESHOLDS` overrides | `transfer.DefaultStuckThresholds` |
+| **StuckThresholds** | `ALLOCATING=1h`, `RELEASING=1h`, `PICKED=24h`, `IN_TRANSIT=72h`, 24h otherwise; `NIP_STUCK_THRESHOLDS` overrides | `transfer.DefaultStuckThresholds` |
 | **Rebalance Policy catalogue** | NIP-owned, operator-managed `Policy` per site + SKU (safety stock, target stock, unit priority, version) that the scheduled pass plans from (ADR 0015) | `transfer.RebalancePolicy`, `rebalance_policies` |
 | **Transfer Lane catalogue** | NIP-owned, operator-managed directed `Lane` (lead time, unit handling cost, enabled); used only when both ends are capable | `transfer.TransferLane`, `transfer_lanes` |
 | **Catalogue revision** | A catalogue entry's optimistic-concurrency token: 1 on creation, +1 per change; the `ETag`/`If-Match` value | `RebalancePolicy.Revision`, `TransferLane.Revision` |

@@ -92,7 +92,7 @@ func Card(cfg Config) *a2a.AgentCard {
 			{
 				ID:          skillTransferStatus,
 				Name:        "Status of one transfer",
-				Description: "Reads one inter-warehouse transfer by id: its current state (DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED), sku, quantity, picked quantity, origin and destination sites, reservation id once allocated, rejection reason once unfulfillable, and the audit trail of state transitions (timestamp and cause of each). Answered as a 404 problem for an unknown id.",
+				Description: "Reads one inter-warehouse transfer by id: its current state (DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED), sku, quantity, picked quantity, origin and destination sites, reservation id once allocated, rejection reason once unfulfillable, and the audit trail of state transitions (timestamp and cause of each). Answered as a 404 problem for an unknown id.",
 				Tags:        []string{"transfers", "status", "read"},
 				InputModes:  []string{mediaTypeJSON},
 				Examples: []string{

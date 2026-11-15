@@ -3,12 +3,10 @@
 # opaque cursor from nextCursor) and the troubleshooting problem-type table
 # (invalid-limit: limit outside 1-500).
 #
-# OPEN QUESTION (not pinned here): apis/openapi.yaml lists RELEASING among the
-# `state` filter values, while the use-cases page says "11-state vocabulary" and
-# transfer.AllStates() has 11 states without RELEASING, so
-# GET /v1/transfers?state=RELEASING answers 400 invalid-query today. The
-# documents contradict each other; only the eleven states both agree on are
-# pinned.
+# The vocabulary is the twelve saga states of apis/openapi.yaml TransferState,
+# RELEASING included (ADR 0022: cancel after allocation runs ALLOCATED ->
+# RELEASING -> CANCELLED), so an operator can list the transfers whose origin
+# hold is being released.
 @bdd
 Feature: Transfer list filter vocabulary and paging edges
   As an operator
@@ -33,6 +31,8 @@ Feature: Transfer list filter vocabulary and paging edges
       | ALLOCATING    | 1     |
       | allocating    | 1     |
       | ALLOCATED     | 0     |
+      | RELEASING     | 0     |
+      | releasing     | 0     |
       | PICKED        | 0     |
       | IN_TRANSIT    | 0     |
       | in_transit    | 0     |
@@ -40,6 +40,19 @@ Feature: Transfer list filter vocabulary and paging edges
       | RECEIVED      | 0     |
       | UNFULFILLABLE | 0     |
       | CANCELLED     | 0     |
+
+  Scenario: A transfer whose origin hold is being released is listed under RELEASING
+    Given a transfer "T1" in state "RELEASING"
+    And a transfer "T2" in state "ALLOCATED"
+    When I request GET "/v1/transfers?state=RELEASING"
+    Then the response status is 200
+    And the JSON array "items" has 1 element
+    And the JSON field "items.0.id" is "{T1}"
+    And the JSON field "items.0.state" is "RELEASING"
+
+  Scenario: An unknown state is still refused
+    When I request GET "/v1/transfers?state=FLYING"
+    Then the response status is 400
 
   Scenario Outline: The page size accepts its smallest and largest value
     When I request GET "/v1/transfers?limit=<limit>"

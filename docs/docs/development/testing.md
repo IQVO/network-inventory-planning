@@ -13,14 +13,14 @@ description: The test pyramid of network-inventory-planning as it exists in the 
 | --- | --- | --- | --- | --- |
 | Unit | `internal/domain/**`, `internal/application/**`, `internal/analytics/report`, adapters with fakes, `cmd/*/main_test.go` | 338 `func Test...` across the module (unit, integration and fitness together) | `make test` | nothing |
 | HTTP adapter (httptest) | `internal/adapters/inbound/http/*_test.go` | handler, approve, simulate, transfers read, rebalance runs, policy/lane catalogues, reports, OTel metric and OpenAPI-contract tests | `make test` | nothing |
-| BDD acceptance (godog/Gherkin, ADR 0011) | `features/*.feature`, steps in `features_test.go`, `features_saga_test.go`, `features_facts_test.go`, `features_reports_test.go`, `features_catalogue_test.go`, `steps_rules_test.go` | **17 feature files, 234 `Scenario`/`Scenario Outline` blocks, 456 executed scenarios, 3388 steps** | `make bdd` (also part of `make test`) | nothing (in-memory world) |
+| BDD acceptance (godog/Gherkin, ADR 0011) | `features/*.feature`, steps in `features_test.go`, `features_saga_test.go`, `features_facts_test.go`, `features_reports_test.go`, `features_catalogue_test.go`, `steps_rules_test.go` | **17 feature files, 236 `Scenario`/`Scenario Outline` blocks, 460 executed scenarios, 3413 steps** | `make bdd` (also part of `make test`) | nothing (in-memory world) |
 | Integration (testcontainers) | files tagged `//go:build integration` | 16 files | `make integration` | Docker |
 | Architecture fitness | `internal/architecture` | 14 tests | `make arch-test` | nothing |
 | Mutation | gremlins over `internal/domain/transfer`, `internal/analytics/report`, `internal/domain` | — | `make mutation`, `make mutation-full` | `gremlins` v0.6.0 |
 | Console remote | `web/src/**/*.test.ts(x)` (vitest + Testing Library) | — | `npm test` in `web/` | Node 22 and a sibling `warehouse-ui-kit` checkout |
 
 The BDD numbers come from a local run of `go test -run TestFeatures -count=1 -v .`
-on this branch: `456 scenarios (456 passed)`, `3388 steps (3388 passed)`.
+on this branch: `460 scenarios (460 passed)`, `3413 steps (3413 passed)`.
 
 ### BDD feature files
 
@@ -50,7 +50,7 @@ are in `steps_rules_test.go`:
 | `features/saga_health_rules.feature` | 6 | stuck strictly after the per-state threshold, clock restarts at each transition, cancelled transfers unwatched |
 | `features/transfer_cancellation_rules.feature` | 14 | cancel from each state (ADR 0022/0023), 202 and the release command from `ALLOCATED`, replay, 409 from `PICKED` onwards, key rules |
 | `features/transfer_inbound_consumers_rules.feature` | 19 | ADR 0013: redelivery applied once, contradicting replies and facts dead-lettered, unknown transfers and out-of-order facts skipped, first arrival fact wins |
-| `features/transfer_query_rules.feature` | 4 | the eleven states of `transfer.AllStates()` as filters, `limit` 1 and 500, a page that exactly fills the limit has no `nextCursor` |
+| `features/transfer_query_rules.feature` | 6 | the twelve states of `transfer.AllStates()` (`RELEASING` included) as filters, an unknown state refused, `limit` 1 and 500, a page that exactly fills the limit has no `nextCursor` |
 
 ### Integration tests
 
