@@ -151,19 +151,17 @@ func assertArrivalRouted(t *testing.T, golden map[string]any, applier *fakeFactA
 	}
 }
 
-// TestGoldenSharedIDIsDedupedAcrossTypes pins the caveat from the file
-// comment: the pinned spec's three examples share ONE CloudEvents id, so
-// delivering a second example AS-IS (same id, different type) hits the
-// processed-event gate — the published set (claim map) stays at one
-// entry and the second type is never routed. That is exactly why
-// adapted clones above mint fresh ids.
+// TestGoldenSharedIDIsDedupedAcrossTypes_Fulfillment pins the consumer's
+// processed-event gate across event TYPES: a second fact delivered with the
+// SAME CloudEvents id as an already-claimed one (different type) must not
+// grow the published set nor be routed. The pinned examples used to share one
+// id (producer fulfillment-execution diversified them in #302), so the shared
+// id is now forced on a clone instead of being inherited from the spec — the
+// invariant is the consumer's, not the producer's.
 func TestGoldenSharedIDIsDedupedAcrossTypes_Fulfillment(t *testing.T) {
 	picked := fulfillmentGoldenExamples(t, typeTransferPicked)[0].Payload
-	dispatched := fulfillmentGoldenExamples(t, typeTransferDispatched)[0].Payload
-	if strOf(t, picked["id"]) != strOf(t, dispatched["id"]) {
-		t.Fatalf("pinned examples no longer share a CloudEvents id (%q vs %q) — the fresh-id cloning can be retired",
-			picked["id"], dispatched["id"])
-	}
+	dispatched := clonePayload(fulfillmentGoldenExamples(t, typeTransferDispatched)[0].Payload)
+	dispatched["id"] = picked["id"]
 	applier, claims := &fakeFactApplier{}, newFakeClaims()
 	c := fulfillmentContractConsumer(applier, claims)
 
