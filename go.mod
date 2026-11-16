@@ -3,14 +3,14 @@ module github.com/claudioed/network-inventory-planning
 go 1.27.4
 
 require (
-	github.com/a2aproject/a2a-go/v2 v2.7.0
+	github.com/a2aproject/a2a-go/v2 v2.8.0
 	github.com/arch-go/arch-go v1.7.0
 	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/cucumber/godog v0.16.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/riandyrn/otelchi v0.12.3
 	github.com/segmentio/kafka-go v0.4.51
