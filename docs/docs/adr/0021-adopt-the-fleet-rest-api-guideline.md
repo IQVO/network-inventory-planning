@@ -51,6 +51,13 @@ to 404/405. There is no alias and no dual route.
 - `PUT` (catalogue upserts, optimistic concurrency by `If-Match`) is idempotent
   by method and takes no middleware.
 
+> Amended 2026-11-20 by [ADR-0024](./0024-every-problem-type-has-a-replay-class.md):
+> the "2xx and 4xx answers are stored" sentence above no longer holds
+> unconditionally. Every problem type now carries a replay class
+> (FINAL / OUTCOME / RETRYABLE); a RETRYABLE refusal — one whose cause can
+> change, such as `facts-incomplete` — is NOT stored: the transaction rolls
+> back, the key is released and a retry under the same key executes again.
+
 ### Instance without a database
 
 `DATABASE_URL` is mandatory at boot, so a store-less instance exists only when

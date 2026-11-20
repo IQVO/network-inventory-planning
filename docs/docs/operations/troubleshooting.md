@@ -52,8 +52,14 @@ outbound HTTP calls and uses no ETags.
 
 Every REST error is `application/problem+json` with
 `type = https://warehouse.example/problems/<slug>`
-(`internal/adapters/inbound/http/handler.go`, `transfers_read.go`,
-`reports_handler.go`).
+(`internal/adapters/inbound/http/problems.go`, `transfers_read.go`,
+`reports_handler.go`). Every slug carries a replay class
+([ADR-0024](../adr/0024-every-problem-type-has-a-replay-class.md)): a FINAL
+refusal is stored under its `Idempotency-Key` and replayed on retry; a
+RETRYABLE one (marked R below: `facts-incomplete`, `below-one-case`,
+`transfer-not-found`, `version-mismatch`, `concurrent-modification`, and every
+5xx) is NOT stored — the key is released and a retry under the same key
+executes again, so check the live state instead of expecting a replay.
 
 | Slug | Status | Route(s) |
 | --- | --- | --- |
@@ -65,9 +71,15 @@ Every REST error is `application/problem+json` with
 | `idempotency-key-required` | 400 | approve |
 | `idempotency-key-reused` | 409 | approve |
 | `config-incomplete` | 503 | approve |
-| `invalid-approval` | 422 | approve |
-| `facts-incomplete` | 422 | approve |
+| `invalid-approval` | 422 | approve (FINAL: replays from the store) |
+| `facts-incomplete` | 422 | approve (R: not stored — after the facts arrive, retry the SAME key) |
 | `proposal-expired` | 422 | approve |
+| `below-one-case` | 422 | approve (R: the origin's headroom can recover) |
+| `pack-levels-unavailable` | 503 | approve, generate |
+| `invalid-cancel` | 422 | cancellation (FINAL: replays from the store) |
+| `transfer-not-found` | 404 | cancellation, `GET /v1/transfers/{id}` (R on cancellation: the transfer arrives by another request) |
+| `cancel-refused` | 409 | cancellation (FINAL: PICKED onwards never returns) |
+| `cancel-unavailable` | 503 | cancellation |
 | `approval-unavailable` | 503 | approve |
 | `rebalance-runs-unavailable` | 503 | `GET /v1/rebalance-runs` |
 | `invalid-limit` | 400 | every paged `GET` (`limit` outside 1–500) |

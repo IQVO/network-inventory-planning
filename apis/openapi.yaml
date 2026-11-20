@@ -56,9 +56,12 @@ paths:
         malformed JSON is 400 invalid-request; a snapshot the planner refuses
         is 422 invalid-planning-snapshot. 503 problem+json when the
         idempotency store is not configured (idempotency-unavailable) or the
-        pack levels cannot be read (pack-levels-unavailable). 2xx and 4xx
-        answers are stored under the key and replayed (Idempotency-Replayed:
-        true); a 5xx is never stored. Diagnostic boundary: production
+        pack levels cannot be read (pack-levels-unavailable). A 2xx and a
+        FINAL refusal (invalid-request, invalid-planning-snapshot) are
+        stored under the key and replayed (Idempotency-Replayed: true); a
+        5xx is never stored, and a RETRYABLE refusal is not stored either:
+        the key is released and a retry under it executes again (replay
+        classes, ADR 0024). Diagnostic boundary: production
         planning consumes local read models via the simulation endpoint
         instead.
       parameters:
@@ -126,8 +129,14 @@ paths:
         inventory-storage's reply later drives the transfer to ALLOCATED or
         UNFULFILLABLE. Idempotent per the required Idempotency-Key header:
         replaying the same key with the same request replays the ORIGINAL
-        answer (header Idempotency-Replayed: true); the same key with a
-        different request is a 409 idempotency-key-reused. Fail-closed validation failures return 422: the origin or the
+        stored answer (header Idempotency-Replayed: true) when that answer
+        is final for the request — a success, or a FINAL refusal such as
+        invalid-approval or proposal-expired; the same key with a different
+        request is a 409 idempotency-key-reused. A RETRYABLE refusal
+        (facts-incomplete, below-one-case: causes that clear when the
+        event-fed planning facts change) is NOT stored — the key is
+        released and a retry under it executes again (replay classes, ADR
+        0024). Fail-closed validation failures return 422: the origin or the
         destination is missing or stale in the planning snapshot (the problem
         detail names the site and the stale fact), is disabled for its role, or
         the demand and capacity checks fail. Stale facts of any other site do
@@ -139,8 +148,10 @@ paths:
         types: saga-unavailable (no saga persistence), config-incomplete
         (TRANSFER_PICK_PATH_ID / TRANSFER_PICK_CPT_OFFSET unset),
         pack-levels-unavailable and approval-unavailable. A body with an
-        unknown field or malformed JSON is 400 invalid-request. 2xx and 4xx
-        answers are stored and replayed; a 5xx is never stored.
+        unknown field or malformed JSON is 400 invalid-request. Answers are
+        stored and replayed by their problem type's replay class (ADR 0024):
+        FINAL and OUTCOME refusals replay, RETRYABLE ones release the key,
+        and a 5xx is never stored.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -191,9 +202,13 @@ paths:
         with an unknown field or malformed JSON is 400 invalid-request.
         Idempotent per the required Idempotency-Key header like every
         keyed write: same key and same request replays the stored answer
-        (Idempotency-Replayed: true), a different request under the same
-        key is 409 idempotency-key-reused. 2xx and 4xx answers are
-        stored; a 5xx is never stored.
+        (Idempotency-Replayed: true) when that answer is final for the
+        request, a different request under the same stored key is 409
+        idempotency-key-reused. Replay classes (ADR 0024): a FINAL refusal
+        (invalid-cancel, cancel-refused) is stored and replayed; a
+        RETRYABLE refusal (transfer-not-found — the transfer arrives by
+        another request) is not stored, the key is released and a retry
+        executes; a 5xx is never stored.
       parameters:
         - name: transferId
           in: path
@@ -653,8 +668,11 @@ components:
         Client-generated key (1-128 printable ASCII characters, a UUID per
         logical submit). A retry reuses it; a new user action mints a new
         one. Same key and same request replays the stored answer with
-        Idempotency-Replayed: true; the same key with a different request
-        is 409 idempotency-key-reused.
+        Idempotency-Replayed: true when that answer is final for the
+        request; the same key with a different request is 409
+        idempotency-key-reused. A refusal whose problem type is RETRYABLE
+        (its cause can change) is not stored: the key is released and the
+        retry executes again (replay classes, ADR 0024).
       schema:
         type: string
         minLength: 1
