@@ -84,7 +84,7 @@ func TestRetryableRefusalsAreNotStoredAndTheRetryExecutes(t *testing.T) {
 
 	t.Run("facts-incomplete is released and the retry executes and is stored", func(t *testing.T) {
 		const key = "replay-facts-incomplete-1"
-		approveBody := `{"originSiteId":"WH1","destinationSiteId":"WH2","sku":"SKU-1","quantity":5,` +
+		approveBody := `{"originSiteId":"RP1","destinationSiteId":"RP2","sku":"SKU-RP","quantity":5,` +
 			`"policyVersion":"policy-v3","operatorReason":"replay-class proof",` +
 			`"proposalAsOf":"` + time.Now().UTC().Add(-5*time.Minute).Format(time.RFC3339) + `"}`
 
@@ -110,35 +110,46 @@ func TestRetryableRefusalsAreNotStoredAndTheRetryExecutes(t *testing.T) {
 		windowStart := occurred.Add(time.Hour).Truncate(time.Microsecond)
 		windowEnd := occurred.Add(8 * time.Hour).Truncate(time.Microsecond)
 		dueAt := occurred.Add(2 * time.Hour).Truncate(time.Microsecond)
-		itProduceCloudEvent(t, brokers, facilityTopicForFacts, "WH1", "com.warehouse.wms.facility-layout.site.SiteCapabilityChanged", occurred,
-			map[string]any{"site_code": "WH1", "transfer_origin_enabled": true, "transfer_destination_enabled": true, "capability_revision": 4})
-		itProduceCloudEvent(t, brokers, facilityTopicForFacts, "WH2", "com.warehouse.wms.facility-layout.site.SiteCapabilityChanged", occurred,
-			map[string]any{"site_code": "WH2", "transfer_origin_enabled": true, "transfer_destination_enabled": true, "capability_revision": 2})
+		itProduceCloudEvent(t, brokers, facilityTopicForFacts, "RP1", "com.warehouse.wms.facility-layout.site.SiteCapabilityChanged", occurred,
+			map[string]any{"site_code": "RP1", "transfer_origin_enabled": true, "transfer_destination_enabled": true, "capability_revision": 4})
+		itProduceCloudEvent(t, brokers, facilityTopicForFacts, "RP2", "com.warehouse.wms.facility-layout.site.SiteCapabilityChanged", occurred,
+			map[string]any{"site_code": "RP2", "transfer_origin_enabled": true, "transfer_destination_enabled": true, "capability_revision": 2})
 		itProduceCloudEvent(t, brokers, orderTopicForFacts, "ord-replay-1/line/1", "com.warehouse.wes.order-management.siteskudemand.SiteSkuDemandChanged", occurred,
-			map[string]any{"source_order_id": "ord-replay-1", "line_no": 1, "site_id": "WH1", "sku": "SKU-1", "demanded_units": 40,
+			map[string]any{"source_order_id": "ord-replay-1", "line_no": 1, "site_id": "RP1", "sku": "SKU-RP", "demanded_units": 40,
 				"due_at": dueAt.Format(time.RFC3339), "state": "ACTIVE", "assignment_version": "static-site-v1"})
 		itProduceCloudEvent(t, brokers, orderTopicForFacts, "ord-replay-2/line/1", "com.warehouse.wes.order-management.siteskudemand.SiteSkuDemandChanged", occurred,
-			map[string]any{"source_order_id": "ord-replay-2", "line_no": 1, "site_id": "WH2", "sku": "SKU-1", "demanded_units": 10,
+			map[string]any{"source_order_id": "ord-replay-2", "line_no": 1, "site_id": "RP2", "sku": "SKU-RP", "demanded_units": 10,
 				"due_at": dueAt.Format(time.RFC3339), "state": "ACTIVE", "assignment_version": "static-site-v1"})
 		itProduceCloudEvent(t, brokers, planningTopicForFacts, "plan-replay-1", "com.warehouse.wes.warehouse-planning.capacityplan.CapacityPlanPublished", occurred,
-			map[string]any{"plan_id": "plan-replay-1", "site_id": "WH1", "warehouse_id": "WH-1", "location": "PATH-ZONE-A", "path_id": "pick-rebin-pack",
+			map[string]any{"plan_id": "plan-replay-1", "site_id": "RP1", "warehouse_id": "RP-1", "location": "PATH-ZONE-A", "path_id": "pick-rebin-pack",
 				"window_start": windowStart.Format(time.RFC3339), "window_end": windowEnd.Format(time.RFC3339),
 				"assigned_demand": 100, "path_capacity": 125, "capacity_over_window": 500, "shortage": 0,
 				"bottleneck_step": "REBIN", "published_at": occurred.Format(time.RFC3339)})
 		itProduceCloudEvent(t, brokers, planningTopicForFacts, "plan-replay-2", "com.warehouse.wes.warehouse-planning.capacityplan.CapacityPlanPublished", occurred,
-			map[string]any{"plan_id": "plan-replay-2", "site_id": "WH2", "warehouse_id": "WH-2", "location": "PATH-ZONE-B", "path_id": "pick-rebin-pack",
+			map[string]any{"plan_id": "plan-replay-2", "site_id": "RP2", "warehouse_id": "RP-2", "location": "PATH-ZONE-B", "path_id": "pick-rebin-pack",
 				"window_start": windowStart.Format(time.RFC3339), "window_end": windowEnd.Format(time.RFC3339),
 				"assigned_demand": 10, "path_capacity": 125, "capacity_over_window": 300, "shortage": 0,
 				"bottleneck_step": "REBIN", "published_at": occurred.Format(time.RFC3339)})
-		waitUntil(t, "the facts to reach the read models (simulation 200 with both sites)", func() bool {
+		// The e2e suite shares the broker; this test's sites are RP1/RP2 so
+		// its facts cannot satisfy this snapshot — wait for THEM.
+		waitUntil(t, "the RP1/RP2 facts to reach the read models", func() bool {
 			r := s.call(t, http.MethodGet, "/v1/transfer-simulations", "", "")
 			if r.status != http.StatusOK {
 				return false
 			}
 			var sim struct {
-				Sites []map[string]any `json:"sites"`
+				Sites []struct {
+					Site string `json:"site"`
+				} `json:"sites"`
 			}
-			return json.Unmarshal([]byte(r.body), &sim) == nil && len(sim.Sites) == 2
+			if json.Unmarshal([]byte(r.body), &sim) != nil {
+				return false
+			}
+			have := map[string]bool{}
+			for _, site := range sim.Sites {
+				have[site.Site] = true
+			}
+			return have["RP1"] && have["RP2"]
 		})
 
 		// The retry under the SAME key executes (the refusal was never
