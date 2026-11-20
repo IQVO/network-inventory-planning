@@ -43,8 +43,8 @@ func laneDTO(e transfer.TransferLane, outcome usecases.CatalogueOutcome) transfe
 	return transferLaneEntryDTO{Lane: e.Lane, Revision: e.Revision, UpdatedAt: e.UpdatedAt, Outcome: string(outcome)}
 }
 
-func catalogueUnavailable(w http.ResponseWriter) {
-	writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable",
+func catalogueUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeProblem(w, r, ptCatalogueUnavailable,
 		"Rebalance catalogue is not configured", "this instance runs without the persistence the policy and lane catalogues require")
 }
 
@@ -63,11 +63,11 @@ func listCatalogue[E any, D any](w http.ResponseWriter, r *http.Request,
 	}
 	entries, err := list(r.Context(), after, page.FetchSize(limit))
 	if isInvalidCursor(err) {
-		writeInvalidCursor(w, err)
+		writeInvalidCursor(w, r, err)
 		return
 	}
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", failed, err.Error())
+		writeProblem(w, r, ptCatalogueUnavailable, failed, err.Error())
 		return
 	}
 	out := make([]D, 0, len(entries))
@@ -80,7 +80,7 @@ func listCatalogue[E any, D any](w http.ResponseWriter, r *http.Request,
 // listPolicies serves GET /v1/rebalance-policies.
 func (h Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 	if h.ListPolicies == nil {
-		catalogueUnavailable(w)
+		catalogueUnavailable(w, r)
 		return
 	}
 	listCatalogue(w, r, h.ListPolicies.Execute, "Rebalance policies could not be listed",
@@ -95,7 +95,7 @@ func (h Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 // optimistic concurrency.
 func (h Handler) putPolicy(w http.ResponseWriter, r *http.Request) {
 	if h.PutPolicy == nil {
-		catalogueUnavailable(w)
+		catalogueUnavailable(w, r)
 		return
 	}
 	ifMatch, ok := parseIfMatch(w, r)
@@ -108,7 +108,7 @@ func (h Handler) putPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.PutPolicy.Execute(r.Context(), policy, ifMatch)
 	if err != nil {
-		writeCatalogueProblem(w, err)
+		writeCatalogueProblem(w, r, err)
 		return
 	}
 	writeJSON(w, putStatus(result.Outcome), etag(result.Entry.Revision), policyDTO(result.Entry, result.Outcome))
@@ -117,7 +117,7 @@ func (h Handler) putPolicy(w http.ResponseWriter, r *http.Request) {
 // listLanes serves GET /v1/transfer-lanes.
 func (h Handler) listLanes(w http.ResponseWriter, r *http.Request) {
 	if h.ListLanes == nil {
-		catalogueUnavailable(w)
+		catalogueUnavailable(w, r)
 		return
 	}
 	listCatalogue(w, r, h.ListLanes.Execute, "Transfer lanes could not be listed",
@@ -131,7 +131,7 @@ func (h Handler) listLanes(w http.ResponseWriter, r *http.Request) {
 // in the body (keyed by its directed Origin → Destination).
 func (h Handler) putLane(w http.ResponseWriter, r *http.Request) {
 	if h.PutLane == nil {
-		catalogueUnavailable(w)
+		catalogueUnavailable(w, r)
 		return
 	}
 	ifMatch, ok := parseIfMatch(w, r)
@@ -144,7 +144,7 @@ func (h Handler) putLane(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.PutLane.Execute(r.Context(), lane, ifMatch)
 	if err != nil {
-		writeCatalogueProblem(w, err)
+		writeCatalogueProblem(w, r, err)
 		return
 	}
 	writeJSON(w, putStatus(result.Outcome), etag(result.Entry.Revision), laneDTO(result.Entry, result.Outcome))
@@ -159,7 +159,7 @@ func parseIfMatch(w http.ResponseWriter, r *http.Request) (*int64, bool) {
 	}
 	revision, err := strconv.ParseInt(strings.Trim(raw, `"`), 10, 64)
 	if err != nil || revision < 1 {
-		writeProblem(w, http.StatusBadRequest, "invalid-if-match",
+		writeProblem(w, r, ptInvalidIfMatch,
 			"If-Match must carry a catalogue revision", fmt.Sprintf(`got %q; send the ETag of the entry (for example "3")`, raw))
 		return nil, false
 	}
@@ -171,7 +171,7 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, into any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(into); err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
+		writeProblem(w, r, ptInvalidRequest, "Invalid request", err.Error())
 		return false
 	}
 	return true
@@ -196,17 +196,17 @@ func writeJSON(w http.ResponseWriter, status int, entityTag string, body any) {
 }
 
 // writeCatalogueProblem maps catalogue use-case errors onto RFC 7807.
-func writeCatalogueProblem(w http.ResponseWriter, err error) {
+func writeCatalogueProblem(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, transfer.ErrInvalidCatalogueEntry):
-		writeProblem(w, http.StatusUnprocessableEntity, "invalid-catalogue-entry", "Invalid catalogue entry", err.Error())
+		writeProblem(w, r, ptInvalidCatalogueEntry, "Invalid catalogue entry", err.Error())
 	case errors.Is(err, usecases.ErrCatalogueVersionMismatch):
-		writeProblem(w, http.StatusPreconditionFailed, "version-mismatch",
+		writeProblem(w, r, ptVersionMismatch,
 			"If-Match does not match the current revision", "re-fetch the entry and retry with its current ETag")
 	case errors.Is(err, transfer.ErrCatalogueConcurrentModification):
-		writeProblem(w, http.StatusConflict, "concurrent-modification",
+		writeProblem(w, r, ptConcurrentModification,
 			"The entry was modified concurrently", "another writer changed this entry; re-fetch and retry")
 	default:
-		writeProblem(w, http.StatusServiceUnavailable, "catalogue-unavailable", "Catalogue write could not be completed", err.Error())
+		writeProblem(w, r, ptCatalogueUnavailable, "Catalogue write could not be completed", err.Error())
 	}
 }

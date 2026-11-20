@@ -80,7 +80,7 @@ func TestKeyedRouteRejectsMissingAndInvalidKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := postRun(h, "/v1/transfer-proposal-runs", tc.key, validRunBody)
-			if rec.Code != http.StatusBadRequest || problemType(t, rec) != tc.want {
+			if rec.Code != http.StatusBadRequest || problemSlug(t, rec) != tc.want {
 				t.Fatalf("status = %d problem = %s, want 400 %s", rec.Code, rec.Body.String(), tc.want)
 			}
 		})
@@ -109,12 +109,12 @@ func TestKeyedRouteReplaysByteIdenticalWithHeaderAndRejectsReuse(t *testing.T) {
 	}
 
 	diffBody := postRun(h, "/v1/transfer-proposal-runs", "k-1", `{"asOf":"2026-10-05T11:00:00Z","positions":[],"policies":[],"lanes":[]}`)
-	if diffBody.Code != http.StatusConflict || problemType(t, diffBody) != "idempotency-key-reused" {
+	if diffBody.Code != http.StatusConflict || problemSlug(t, diffBody) != "idempotency-key-reused" {
 		t.Fatalf("different body = %d %s, want 409 idempotency-key-reused", diffBody.Code, diffBody.Body.String())
 	}
 	// The key is GLOBAL: the same key on another route is a reuse, not a new key.
 	otherRoute := postRun(h, "/v1/transfer-approvals", "k-1", validRunBody)
-	if otherRoute.Code != http.StatusConflict || problemType(t, otherRoute) != "idempotency-key-reused" {
+	if otherRoute.Code != http.StatusConflict || problemSlug(t, otherRoute) != "idempotency-key-reused" {
 		t.Fatalf("other route = %d %s, want 409 idempotency-key-reused", otherRoute.Code, otherRoute.Body.String())
 	}
 }
@@ -177,7 +177,7 @@ func (c countingStore) Do(ctx context.Context, key, fp string, fn func(ctx conte
 
 func TestKeyedRoutesFailClosedWithoutAStore(t *testing.T) {
 	rec := postRun(Handler{Generate: usecases.GenerateTransferProposals{}}, "/v1/transfer-proposal-runs", "k", validRunBody)
-	if rec.Code != http.StatusServiceUnavailable || problemType(t, rec) != "idempotency-unavailable" {
+	if rec.Code != http.StatusServiceUnavailable || problemSlug(t, rec) != "idempotency-unavailable" {
 		t.Fatalf("no store = %d %s", rec.Code, rec.Body.String())
 	}
 }

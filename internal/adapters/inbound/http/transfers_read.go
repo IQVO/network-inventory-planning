@@ -90,12 +90,12 @@ func toTransferDetailDTO(t *transfer.InterWarehouseTransfer) transferDetailDTO {
 // its audit trail, 404 problem+json for an unknown id.
 func (h Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 	if h.GetTransfer == nil {
-		writeReadSideUnavailable(w)
+		writeReadSideUnavailable(w, r)
 		return
 	}
 	t, err := h.GetTransfer.Execute(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeReadProblem(w, err)
+		writeReadProblem(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -106,7 +106,7 @@ func (h Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 // originSiteId and destinationSiteId and keyset-paged by limit / cursor.
 func (h Handler) listTransfers(w http.ResponseWriter, r *http.Request) {
 	if h.ListTransfers == nil {
-		writeReadSideUnavailable(w)
+		writeReadSideUnavailable(w, r)
 		return
 	}
 	limit, after, ok := pageParams(w, r, "state", "originSiteId", "destinationSiteId")
@@ -122,11 +122,11 @@ func (h Handler) listTransfers(w http.ResponseWriter, r *http.Request) {
 		Limit:             limit,
 	})
 	if isInvalidCursor(err) {
-		writeInvalidCursor(w, err)
+		writeInvalidCursor(w, r, err)
 		return
 	}
 	if err != nil {
-		writeReadProblem(w, err)
+		writeReadProblem(w, r, err)
 		return
 	}
 	items := make([]transferDTO, 0, len(rows))
@@ -139,19 +139,19 @@ func (h Handler) listTransfers(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-func writeReadSideUnavailable(w http.ResponseWriter) {
-	writeProblem(w, http.StatusServiceUnavailable, "read-side-unavailable",
+func writeReadSideUnavailable(w http.ResponseWriter, r *http.Request) {
+	writeProblem(w, r, ptReadSideUnavailable,
 		"Transfer read side is not configured", "this instance runs without DATABASE_URL, so there is no transfer store to read")
 }
 
 // writeReadProblem maps read-side use-case errors onto RFC 7807 statuses.
-func writeReadProblem(w http.ResponseWriter, err error) {
+func writeReadProblem(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, usecases.ErrInvalidTransferQuery):
-		writeProblem(w, http.StatusBadRequest, "invalid-query", "Invalid query", err.Error())
+		writeProblem(w, r, ptInvalidQuery, "Invalid query", err.Error())
 	case errors.Is(err, transfer.ErrTransferNotFound):
-		writeProblem(w, http.StatusNotFound, "transfer-not-found", "Transfer not found", err.Error())
+		writeProblem(w, r, ptTransferNotFound, "Transfer not found", err.Error())
 	default:
-		writeProblem(w, http.StatusServiceUnavailable, "read-side-unavailable", "Transfer read side is unavailable", "the transfer store could not be read")
+		writeProblem(w, r, ptReadSideUnavailable, "Transfer read side is unavailable", "the transfer store could not be read")
 	}
 }

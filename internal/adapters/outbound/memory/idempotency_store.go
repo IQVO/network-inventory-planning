@@ -42,7 +42,9 @@ func (s *IdempotencyStore) Do(ctx context.Context, key, fingerprint string, fn f
 	if err != nil {
 		return contract.StoredResponse{}, false, err
 	}
-	if resp.Status < 500 {
+	// The same rule as the Postgres store: a 5xx is never kept, and a
+	// RETRYABLE refusal (ADR 0024's Transient mark) releases the key.
+	if resp.Status < 500 && !resp.Transient {
 		s.records[key] = memoryRecord{fingerprint: fingerprint, resp: resp}
 	}
 	return resp, false, nil

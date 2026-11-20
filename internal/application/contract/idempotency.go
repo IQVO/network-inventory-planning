@@ -17,4 +17,11 @@ type StoredResponse struct {
 	ContentType string
 	Location    string
 	Body        []byte
+	// Transient marks an answer the store must NOT keep (ADR 0024): a
+	// refusal whose problem type declared the replay class RETRYABLE — or
+	// declared no class at all — is answered to the client, but the store
+	// rolls its transaction back exactly like a 5xx, releases the key and a
+	// retry executes again. The middleware sets it from the class the
+	// handler's problem marked; a 2xx never carries it.
+	Transient bool
 }

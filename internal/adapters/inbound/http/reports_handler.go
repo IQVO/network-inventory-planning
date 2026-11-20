@@ -149,7 +149,7 @@ func (s *ReportsServer) now() time.Time {
 func (s *ReportsServer) handleFreshness(w http.ResponseWriter, r *http.Request) {
 	asOf, err := s.Reader.LastEventAt(r.Context())
 	if err != nil {
-		writeReportError(w)
+		writeReportError(w, r)
 		return
 	}
 	writeReportJSON(w, report.ComputeFreshness(asOf, s.now()))
@@ -161,7 +161,7 @@ func (s *ReportsServer) parseRange(w http.ResponseWriter, r *http.Request) (repo
 	q := r.URL.Query()
 	rg, err := report.ParseRange(q.Get("from"), q.Get("to"), s.now())
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-report-range",
+		writeProblem(w, r, ptInvalidReportRange,
 			"from and to must form a valid RFC 3339 range of at most 366 days", err.Error())
 		return report.Range{}, false
 	}
@@ -170,8 +170,8 @@ func (s *ReportsServer) parseRange(w http.ResponseWriter, r *http.Request) (repo
 
 // writeReportError is the 500 for a failed analytical query. The cause is not
 // echoed: it can carry SQL and connection details.
-func writeReportError(w http.ResponseWriter) {
-	writeProblem(w, http.StatusInternalServerError, "report-store-error",
+func writeReportError(w http.ResponseWriter, r *http.Request) {
+	writeProblem(w, r, ptReportStoreError,
 		"The report could not be served", "the analytical database query failed")
 }
 
@@ -182,7 +182,7 @@ func (s *ReportsServer) handleTransferFunnel(w http.ResponseWriter, r *http.Requ
 	}
 	days, err := s.Reader.TransferFunnel(r.Context(), rg)
 	if err != nil {
-		writeReportError(w)
+		writeReportError(w, r)
 		return
 	}
 	out := funnelReportDTO{reportRangeDTO: reportRangeDTO{rg.From, rg.To}, Days: make([]funnelDayDTO, 0, len(days))}
@@ -199,7 +199,7 @@ func (s *ReportsServer) handleStateDwell(w http.ResponseWriter, r *http.Request)
 	}
 	days, err := s.Reader.StateDwell(r.Context(), rg)
 	if err != nil {
-		writeReportError(w)
+		writeReportError(w, r)
 		return
 	}
 	out := dwellReportDTO{reportRangeDTO: reportRangeDTO{rg.From, rg.To}, Days: make([]dwellDayDTO, 0, len(days))}
@@ -219,17 +219,17 @@ func (s *ReportsServer) handleStuckTransfers(w http.ResponseWriter, r *http.Requ
 	}
 	limit, err := report.ParseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-report-limit", "limit must be an integer from 1 to 100", err.Error())
+		writeProblem(w, r, ptInvalidReportLimit, "limit must be an integer from 1 to 100", err.Error())
 		return
 	}
 	days, err := s.Reader.StuckDays(r.Context(), rg)
 	if err != nil {
-		writeReportError(w)
+		writeReportError(w, r)
 		return
 	}
 	latest, err := s.Reader.StuckLatest(r.Context(), rg, limit)
 	if err != nil {
-		writeReportError(w)
+		writeReportError(w, r)
 		return
 	}
 	out := stuckReportDTO{
@@ -256,7 +256,7 @@ func (s *ReportsServer) handleRebalanceRuns(w http.ResponseWriter, r *http.Reque
 	}
 	days, err := s.Reader.RebalanceDays(r.Context(), rg)
 	if err != nil {
-		writeReportError(w)
+		writeReportError(w, r)
 		return
 	}
 	trend := report.RebalanceTrend(days)

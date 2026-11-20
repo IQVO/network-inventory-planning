@@ -44,7 +44,7 @@ type cancelTransferResponse struct {
 //   - unknown transfer: 404.
 func (h Handler) cancelTransfer(w http.ResponseWriter, r *http.Request) {
 	if h.Cancel == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "saga-unavailable",
+		writeProblem(w, r, ptSagaUnavailable,
 			"Transfer saga is not configured", "this instance runs without the persistence the cancellation requires")
 		return
 	}
@@ -53,7 +53,7 @@ func (h Handler) cancelTransfer(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
+		writeProblem(w, r, ptInvalidRequest, "Invalid request", err.Error())
 		return
 	}
 
@@ -62,7 +62,7 @@ func (h Handler) cancelTransfer(w http.ResponseWriter, r *http.Request) {
 		Reason:     request.Reason,
 	})
 	if err != nil {
-		writeCancelProblem(w, err)
+		writeCancelProblem(w, r, err)
 		return
 	}
 	status := http.StatusOK
@@ -85,20 +85,20 @@ func writeCancelResponse(w http.ResponseWriter, status int, t *transfer.InterWar
 }
 
 // writeCancelProblem maps use-case errors onto RFC 9457 statuses.
-func writeCancelProblem(w http.ResponseWriter, err error) {
+func writeCancelProblem(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, usecases.ErrCancelInvalid):
-		writeProblem(w, http.StatusUnprocessableEntity, "invalid-cancel",
+		writeProblem(w, r, ptInvalidCancel,
 			"Invalid cancellation request", err.Error())
 	case errors.Is(err, transfer.ErrTransferNotFound):
-		writeProblem(w, http.StatusNotFound, "transfer-not-found",
+		writeProblem(w, r, ptTransferNotFound,
 			"Transfer not found", err.Error())
 	case errors.Is(err, usecases.ErrCancelRefused):
-		writeProblem(w, http.StatusConflict, "cancel-refused",
+		writeProblem(w, r, ptCancelRefused,
 			"Transfer cannot be cancelled in its current state",
 			"the fact-driven tail (PICKED onwards) is never cancellable — the stock is physically in motion — and a terminal transfer stays closed; cancel an ALLOCATED transfer goes through RELEASING (ADR 0022)")
 	default:
-		writeProblem(w, http.StatusServiceUnavailable, "cancel-unavailable",
+		writeProblem(w, r, ptCancelUnavailable,
 			"Cancellation failed", err.Error())
 	}
 }

@@ -71,19 +71,18 @@ Feature: Idempotency-Key on keyed writes
       | WH1    | WH2         | SKU-1 | operator approved rebalance | 2026-10-06T14:56:00Z | the proposal as-of                      |
       | WH1    | WH2         | SKU-1 | operator approved rebalance | 2026-10-06T14:55:00Z | the same values in a different key order |
 
-  Scenario: A refused approval is stored with its key, so a retry after the facts recover is still refused
+  Scenario: A facts-incomplete refusal is not stored, so the retry under the same key executes once the facts recover
     Given 11 minutes pass
     And I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
     And the problem detail type is "facts-incomplete"
     And the planning facts are refreshed
     When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
-    Then the response status is 422
-    And the problem detail type is "facts-incomplete"
-    And the response header "Idempotency-Replayed" is true
-    And no transfer exists
-    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T2"
     Then the response status is 200
     And the response header "Idempotency-Replayed" is absent
+    And the JSON field "state" is "ALLOCATING"
+    When I approve a transfer of 5 units of SKU "SKU-1" from "WH1" to "WH2" under policy "policy-v3" with the idempotency key "T1"
+    Then the response status is 200
+    And the response header "Idempotency-Replayed" is true
 
   Scenario: A server-side failure is never stored, so the retry with the same key succeeds once the cause is fixed
     Given the pick work release is not configured
