@@ -91,18 +91,22 @@ func TestTheADRDeclaresTheClassOfEveryProblem(t *testing.T) {
 // elsewhere would carry no class and be silently released as unclassified.
 func TestProblemTypesAreDeclaredOnlyInTheCatalogue(t *testing.T) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
-		return strings.HasSuffix(fi.Name(), ".go") && !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pkg := range pkgs {
-		for name, file := range pkg.Files {
-			for _, lit := range compositeLiteralsOf(fset, file, "problemType") {
-				if filepath.Base(name) != "problems.go" {
-					t.Errorf("%s declares a problemType literal (%s): declare it on the catalogue in problems.go instead", filepath.Base(name), lit)
-				}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, lit := range compositeLiteralsOf(fset, file, "problemType") {
+			if name != "problems.go" {
+				t.Errorf("%s declares a problemType literal (%s): declare it on the catalogue in problems.go instead", name, lit)
 			}
 		}
 	}
