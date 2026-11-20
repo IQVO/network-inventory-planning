@@ -14,7 +14,7 @@ import (
 // (default 100, max 500) and cursor continue the keyset.
 func (h Handler) rebalanceRuns(w http.ResponseWriter, r *http.Request) {
 	if h.ListRebalanceRuns == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "rebalance-runs-unavailable",
+		writeProblem(w, r, ptRebalanceRunsUnavailable,
 			"Rebalance run history is not configured", "this instance runs without the persistence the run history requires")
 		return
 	}
@@ -24,11 +24,11 @@ func (h Handler) rebalanceRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	runs, err := h.ListRebalanceRuns.Execute(r.Context(), after, page.FetchSize(limit))
 	if isInvalidCursor(err) {
-		writeInvalidCursor(w, err)
+		writeInvalidCursor(w, r, err)
 		return
 	}
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "rebalance-runs-unavailable",
+		writeProblem(w, r, ptRebalanceRunsUnavailable,
 			"Rebalance run history could not be read", err.Error())
 		return
 	}

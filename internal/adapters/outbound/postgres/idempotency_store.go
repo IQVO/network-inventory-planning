@@ -64,8 +64,11 @@ func (s *IdempotencyStore) Do(ctx context.Context, key, fingerprint string, fn f
 	if err != nil {
 		return contract.StoredResponse{}, false, err
 	}
-	if resp.Status >= 500 {
-		return resp, false, nil // rolled back by the deferred Rollback: a 5xx is never stored
+	if resp.Status >= 500 || resp.Transient {
+		// rolled back by the deferred Rollback: a 5xx is never stored, and a
+		// RETRYABLE refusal (or one that declared no class) releases its key
+		// exactly the same way — nothing is remembered, a retry re-executes.
+		return resp, false, nil
 	}
 	if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT handler_run"); err != nil {
 		// A statement inside the handler failed on the server: the

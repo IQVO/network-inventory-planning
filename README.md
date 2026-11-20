@@ -251,7 +251,11 @@ RFC 9457 `application/problem+json` (`type` is a slug such as `not-found`,
 idempotency-keyed (`Idempotency-Key`, 1-128 printable ASCII, a fresh UUID per
 logical submit): a replay answers the stored response with
 `Idempotency-Replayed: true`, a key reused with a different request is a 409
-`idempotency-key-reused`, a missing key a 400. Collections are keyset-paged:
+`idempotency-key-reused`, a missing key a 400. Refusals follow their problem
+type's replay class ([ADR-0024](docs/docs/adr/0024-every-problem-type-has-a-replay-class.md)):
+a FINAL refusal is stored and replayed, a RETRYABLE one (a cause that can
+change, e.g. `facts-incomplete`) is not stored — the key is released and the
+retry executes. Collections are keyset-paged:
 `limit` (1-500, default 100) and `cursor`, answered as `{items, nextCursor}`
 ([ADR-0021](docs/docs/adr/0021-adopt-the-fleet-rest-api-guideline.md)).
 

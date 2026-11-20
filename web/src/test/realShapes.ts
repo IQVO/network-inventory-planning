@@ -226,7 +226,7 @@ export const GENERATE_RESPONSE: Shape = { proposals: "array" };
  */
 export const GO_SOURCES: {
   name: string;
-  file: "handler.go" | "transfers_read.go" | "catalogue.go" | "approve.go" | "rebalance_runs.go" | "page/page.go";
+  file: "handler.go" | "transfers_read.go" | "catalogue.go" | "approve.go" | "rebalance_runs.go" | "page/page.go" | "problems.go";
   shape: Shape;
   struct?: string;
   anonymousFirstField?: string;
@@ -241,7 +241,7 @@ export const GO_SOURCES: {
   { name: "approveTransferDTO", file: "approve.go", struct: "approveTransferDTO", shape: APPROVE_RESPONSE, optionality: true },
   { name: "rebalanceRunDTO", file: "rebalance_runs.go", struct: "rebalanceRunDTO", shape: REBALANCE_RUN, optionality: true },
   { name: "page envelope (all four lists)", file: "page/page.go", struct: "Page\\[T any\\]", shape: PAGE_ENVELOPE, optionality: true },
-  { name: "problem", file: "handler.go", struct: "problem", shape: PROBLEM, optionality: true },
+  { name: "problem", file: "problems.go", struct: "problem", shape: PROBLEM, optionality: true },
   { name: "transferLaneEntryDTO", file: "catalogue.go", struct: "transferLaneEntryDTO", shape: LANE_ENTRY, optionality: true },
   { name: "rebalancePolicyEntryDTO", file: "catalogue.go", struct: "rebalancePolicyEntryDTO", shape: POLICY_ENTRY, optionality: true },
   { name: "generateRequest", file: "handler.go", struct: "generateRequest", shape: GENERATE_REQUEST, optionality: false },

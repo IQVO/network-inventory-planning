@@ -270,7 +270,7 @@ func TestListTransfersBadQueryIs400Problem(t *testing.T) {
 		if ct := response.Header().Get("Content-Type"); ct != "application/problem+json" {
 			t.Fatalf("%s Content-Type = %q", target, ct)
 		}
-		if got := problemType(t, response); got != want {
+		if got := problemSlug(t, response); got != want {
 			t.Fatalf("%s problem = %s, want %s", target, got, want)
 		}
 	}
@@ -279,7 +279,7 @@ func TestListTransfersBadQueryIs400Problem(t *testing.T) {
 func TestListTransfersCursorOfAnotherCollectionIsInvalidCursor(t *testing.T) {
 	q := &stubTransferQuery{err: transfer.ErrInvalidPageAfter}
 	response := serve(readHandler(q), "/v1/transfers?cursor="+page.Encode(page.Position{Sort: "not-a-time", ID: "x"}))
-	if response.Code != http.StatusBadRequest || problemType(t, response) != "invalid-cursor" {
+	if response.Code != http.StatusBadRequest || problemSlug(t, response) != "invalid-cursor" {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
 }
