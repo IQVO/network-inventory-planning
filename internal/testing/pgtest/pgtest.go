@@ -68,19 +68,40 @@ func buildTemplate(ctx context.Context) error {
 	if err := adminExec(ctx, `CREATE DATABASE `+templateName); err != nil {
 		return err
 	}
-	url, err := container.ConnectionString(ctx, "sslmode=disable", "dbname="+templateName)
+	url, err := databaseURL(ctx, templateName)
 	if err != nil {
 		return err
 	}
-	dir, err := migrationsDir()
-	if err != nil {
-		return err
+	for range 2 {
+		dir, err := migrationsDir()
+		if err != nil {
+			return err
+		}
+		if err := postgres.RunMigrations(url, dir); err != nil {
+			return fmt.Errorf("migrations: %w", err)
+		}
 	}
-	return postgres.RunMigrations(url, dir)
+	return nil
+}
+
+// databaseURL builds the DSN of one database on the shared container with
+// the database in the URL PATH: golang-migrate (unlike pgx) ignores a
+// dbname= query parameter, so a parameter-shaped URL would migrate the
+// admin database instead of the named one.
+func databaseURL(ctx context.Context, db string) (string, error) {
+	base, err := container.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		return "", err
+	}
+	cfg, err := pgx.ParseConfig(base)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", user, password, cfg.Host, cfg.Port, db), nil
 }
 
 func adminExec(ctx context.Context, sql string) error {
-	url, err := container.ConnectionString(ctx, "sslmode=disable", "dbname="+adminDB)
+	url, err := databaseURL(ctx, adminDB)
 	if err != nil {
 		return err
 	}
@@ -107,7 +128,7 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	if err := adminExec(ctx, fmt.Sprintf(`CREATE DATABASE %s TEMPLATE %s`, name, templateName)); err != nil {
 		t.Fatalf("clone test database: %v", err)
 	}
-	url, err := container.ConnectionString(ctx, "sslmode=disable", "dbname="+name)
+	url, err := databaseURL(ctx, name)
 	if err != nil {
 		t.Fatalf("resolve connection string: %v", err)
 	}
