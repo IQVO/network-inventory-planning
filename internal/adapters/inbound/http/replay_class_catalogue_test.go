@@ -19,15 +19,15 @@ import (
 	httpadapter "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/http"
 )
 
-// classDeclared reports whether c is one of the three replay classes.
-func classDeclared(c string) bool {
+// declaresAReplayClass reports whether c is one of the three replay classes.
+func declaresAReplayClass(c string) bool {
 	return c == "FINAL" || c == "OUTCOME" || c == "RETRYABLE"
 }
 
 // Every problem type the adapter can answer declares exactly one replay
 // class; there is no runtime default. A 5xx is never stored, so its class is
 // RETRYABLE by definition. Every (slug, status) pair appears once.
-func TestEveryProblemTypeDeclaresAReplayClass(t *testing.T) {
+func TestTheCatalogueDeclaresAReplayClassForEveryProblemType(t *testing.T) {
 	entries := httpadapter.ReplayCatalogue()
 	if len(entries) == 0 {
 		t.Fatal("the catalogue accessor returned no problem types: the test would pass on nothing")
@@ -35,7 +35,7 @@ func TestEveryProblemTypeDeclaresAReplayClass(t *testing.T) {
 	seen := map[string]bool{}
 	for _, e := range entries {
 		t.Run(e.Slug+"/"+strconv.Itoa(e.Status), func(t *testing.T) {
-			if !classDeclared(e.Class) {
+			if !declaresAReplayClass(e.Class) {
 				t.Errorf("problem type %q (%d) declares no replay class (%q): set FINAL, OUTCOME or RETRYABLE on its catalogue entry (.claude/rules/fleet/idempotency-and-outbox.md)", e.Slug, e.Status, e.Class)
 			}
 			if e.Status >= 500 && e.Class != "RETRYABLE" {
