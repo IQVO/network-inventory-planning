@@ -94,7 +94,7 @@ func (c *CapacityPlanConsumer) Run(ctx context.Context) error {
 func (c *CapacityPlanConsumer) HandleMessage(ctx context.Context, value []byte) error {
 	e, err := cloudevents.Decode(value)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping non-CloudEvents planning message", "error", err)
+		c.Logger.WarnContext(ctx, "skipping non-CloudEvents planning message", "error", sanitizeErr(err))
 		return nil
 	}
 	if e.Type() != typeCapacityPlanPublished {
@@ -103,23 +103,23 @@ func (c *CapacityPlanConsumer) HandleMessage(ctx context.Context, value []byte) 
 
 	var data capacityPlanPublishedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed CapacityPlanPublished payload", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping malformed CapacityPlanPublished payload", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 	if data.SiteID == "" {
 		// Legacy v1 payload published before site_id existed. The site
 		// is NEVER inferred from warehouse_id: the fact is excluded.
-		c.Logger.InfoContext(ctx, "excluding legacy CapacityPlanPublished without site_id", "event_id", e.ID(), "plan_id", data.PlanID)
+		c.Logger.InfoContext(ctx, "excluding legacy CapacityPlanPublished without site_id", "event_id", sanitizeLog(e.ID()), "plan_id", sanitizeLog(data.PlanID))
 		return nil
 	}
 	windowStart, err := time.Parse(time.RFC3339, data.WindowStart)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping CapacityPlanPublished with unparsable window_start", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping CapacityPlanPublished with unparsable window_start", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 	windowEnd, err := time.Parse(time.RFC3339, data.WindowEnd)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping CapacityPlanPublished with unparsable window_end", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping CapacityPlanPublished with unparsable window_end", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 
@@ -137,7 +137,7 @@ func (c *CapacityPlanConsumer) HandleMessage(ctx context.Context, value []byte) 
 		PublishedAt:        occurredAt,
 	})
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping CapacityPlanPublished that failed domain validation", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping CapacityPlanPublished that failed domain validation", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 
@@ -147,7 +147,7 @@ func (c *CapacityPlanConsumer) HandleMessage(ctx context.Context, value []byte) 
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed CapacityPlanPublished event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed CapacityPlanPublished event", "event_id", sanitizeLog(e.ID()))
 			return nil
 		}
 		if _, err := c.Plans.Upsert(ctx, plan); err != nil {
