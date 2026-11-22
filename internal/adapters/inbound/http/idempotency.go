@@ -16,7 +16,11 @@ import (
 // Handler.idempotent. The key alone identifies the record; the fingerprint
 // is method + path + sha256(body). Same key and fingerprint replays the
 // stored answer with Idempotency-Replayed: true; a different fingerprint is
-// 409 idempotency-key-reused. A 2xx is stored; a 5xx or a panic is not. A
+// 409 idempotency-key-reused. A stored answer lives for 24 hours
+// (contract.IdempotencyTTL, ADR 0024's addendum): past the window the key is
+// free again — the same request executes once more and a different body
+// under it is a NEW request, not a 409 — and an hourly purge deletes the
+// dead rows. A 2xx is stored; a 5xx or a panic is not. A
 // refusal is stored (and replayed) only when its problem type's catalogue
 // entry declares the replay class FINAL or OUTCOME (ADR 0024); a RETRYABLE
 // refusal — and any refusal that declared no class — is answered but not
