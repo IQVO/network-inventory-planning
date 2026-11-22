@@ -34,6 +34,9 @@ the `Status:` line of each ADR body.
 | [0019](./0019-a-dead-consumer-takes-the-process-down.md) | A consumer that stops on its own (not by shutdown) ends the process so the kubelet restarts it, instead of leaving a frozen read model behind a Ready pod | Accepted |
 | [0020](./0020-a2a-inbound-adapter.md) | A2A inbound adapter: a read-only Agent2Agent agent (`transfer_status`, `find_stuck_transfers`) over the same read use cases as REST and MCP, served by `cmd/a2a` on `:8093` | Accepted |
 | [0021](./0021-adopt-the-fleet-rest-api-guideline.md) | Adopt the fleet REST API guideline: noun routes, idempotent `POST`s (409 `idempotency-key-reused`, `Idempotency-Replayed`), keyset `{items,nextCursor}` lists | Accepted |
+| [0022](./0022-cancel-after-allocation-compensation.md) | Cancel-after-allocation compensation: `RELEASING` state, `TransferAllocationReleaseRequested` command, `TransferStockAllocationReleased` reply, `POST /v1/transfers/{id}/cancellation` — closes ADR-0003's stranded-reservation gap | Accepted |
+| [0023](./0023-cancelled-transfer-holds-no-reservation.md) | A transfer cancelled after allocation holds no reservation: the release settle clears the reservation id, allocations and expiry (amends 0022; matches migration 0009's CHECK) | Accepted |
+| [0024](./0024-every-problem-type-has-a-replay-class.md) | Every problem type has a replay class (FINAL, OUTCOME, RETRYABLE) declared on its catalogue entry; a RETRYABLE refusal is not stored — the key is released and a retry executes (fleet rule; refines 0021's stored-4xx behaviour) | Accepted |
 
 ## Where each decision shows up in the code
 
@@ -59,3 +62,4 @@ the `Status:` line of each ADR body.
 | 0018 | `planning.BuildSnapshot` / `PlanningSnapshot.StaleSites` (`snapshot.go`), `transfer.ValidateApproval` (`approval.go`), `PLANNING_MAX_STALENESS` |
 | 0019 | `startRunners` (`cmd/network-inventory-planning/main.go`) |
 | 0020 | `internal/adapters/inbound/a2a`, `cmd/a2a`, `A2A_AGENT_URL`, chart `a2a` block (`templates/a2a-*.yaml`), `internal/architecture/a2a_fitness_test.go` |
+| 0024 | `problemCatalogue` / `writeProblem` (`internal/adapters/inbound/http/problems.go`), `replayClass` (`replay_class.go`), `contract.StoredResponse.Transient`, `internal/adapters/inbound/http/replay_class_catalogue_test.go`, `idempotency_replay_classes_integration_test.go` |

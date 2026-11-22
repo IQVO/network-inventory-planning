@@ -32,6 +32,11 @@ func (r *refusingReplyApplier) ApplyReceiptStaged(context.Context, usecases.Appl
 	return r.err
 }
 
+func (r *refusingReplyApplier) ApplyReleased(context.Context, usecases.ApplyReleasedInput) error {
+	r.calls++
+	return r.err
+}
+
 func (r *refusingReplyApplier) ApplyStowed(context.Context, usecases.ApplyStowInput) error {
 	r.calls++
 	return r.err

@@ -45,7 +45,7 @@ positions, policies or lanes).
 
 **Model complexity is high (x = 0.68).** Evidence in the code:
 
-- one saga aggregate with eleven states, an append-only audit trail,
+- one saga aggregate with twelve states, an append-only audit trail,
   optimistic concurrency (`version`) and a unique idempotency key;
 - a fail-closed `BuildSnapshot` over three read models with three different
   supersede rules and half-open window arithmetic that never zero-fills;
@@ -65,4 +65,4 @@ models and simulation, the approval saga, work release, observability and
 scheduled runs, the read side and MCP, analytics, the console remote, BDD, OTLP
 export). Known simplifications are explicit in the code: a single transfer
 line (`<transfer_id>:1`), a flat 24-hour approval expiry, site-level approval
-checks, and no cancellation path once stock is allocated.
+checks, and no cancellation once the transfer is picked (an `ALLOCATED` transfer cancels through `RELEASING`, ADR 0022).

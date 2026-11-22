@@ -280,7 +280,7 @@ func (r *TransferRepo) ListNonTerminal(ctx context.Context, limit int) ([]transf
 		SELECT transfer_id, state, updated_at
 		FROM inter_warehouse_transfer
 		WHERE state IN ('DRAFT','PROPOSED','APPROVED','ALLOCATING','ALLOCATED',
-		                'PICKED','IN_TRANSIT','ARRIVED')
+		                'RELEASING','PICKED','IN_TRANSIT','ARRIVED')
 		ORDER BY updated_at ASC
 		LIMIT $1
 	`, limit)

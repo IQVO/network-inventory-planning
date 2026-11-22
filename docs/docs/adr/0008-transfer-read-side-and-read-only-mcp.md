@@ -93,3 +93,10 @@ warehouse-planning `cmd/mcp`). This context had none.
   on stuck transfers and any write tool each need their own decision.
 - The api and mcp images share one build; MCP can be enabled per environment
   without touching the api Deployment.
+
+## Addendum 2026-11-13: current state
+
+The revocation path mentioned above exists: [ADR 0022](./0022-cancel-after-allocation-compensation.md) (PR #103) added
+`POST /v1/transfers/{transferId}/cancellation` (`apis/openapi.yaml:172`), which
+cancels before allocation at once and through `RELEASING` after it. It is a REST
+route only; the MCP server still has the four read tools and no write tool.

@@ -48,7 +48,7 @@ type approveTransferDTO struct {
 // payload under a reused key is a 409 problem.
 func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 	if h.Approve == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "saga-unavailable",
+		writeProblem(w, r, ptSagaUnavailable,
 			"Transfer saga is not configured", "this instance runs without the read models and persistence the approval requires")
 		return
 	}
@@ -60,7 +60,7 @@ func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
+		writeProblem(w, r, ptInvalidRequest, "Invalid request", err.Error())
 		return
 	}
 
@@ -75,7 +75,7 @@ func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 		ProposalAsOf:      request.ProposalAsOf,
 	})
 	if err != nil {
-		writeApproveProblem(w, err)
+		writeApproveProblem(w, r, err)
 		return
 	}
 	dto := approveTransferDTO{
@@ -97,31 +97,31 @@ func (h Handler) approve(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeApproveProblem maps use-case errors onto RFC 7807 statuses.
-func writeApproveProblem(w http.ResponseWriter, err error) {
+func writeApproveProblem(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, usecases.ErrIdempotencyConflict):
-		writeProblem(w, http.StatusConflict, "idempotency-key-reused",
+		writeProblem(w, r, ptIdempotencyKeyReused,
 			"Idempotency-Key was already used with a different request", err.Error())
 	case errors.Is(err, usecases.ErrWorkReleaseNotConfigured):
-		writeProblem(w, http.StatusServiceUnavailable, "config-incomplete",
+		writeProblem(w, r, ptConfigIncomplete,
 			"Work release is not configured", "set TRANSFER_PICK_PATH_ID and TRANSFER_PICK_CPT_OFFSET so an approved transfer's pick demand can be released (ADR 0005); approval is refused while unset")
 	case errors.Is(err, transfer.ErrBelowOneCase):
-		writeProblem(w, http.StatusUnprocessableEntity, "below-one-case",
+		writeProblem(w, r, ptBelowOneCase,
 			"The origin cannot send one whole case", err.Error())
 	case errors.Is(err, usecases.ErrPackLevelsUnavailable):
-		writeProblem(w, http.StatusServiceUnavailable, "pack-levels-unavailable",
+		writeProblem(w, r, ptPackLevelsUnavailable,
 			"Pack levels are unavailable", err.Error())
 	case errors.Is(err, usecases.ErrInvalidApproval):
-		writeProblem(w, http.StatusUnprocessableEntity, "invalid-approval",
+		writeProblem(w, r, ptInvalidApproval,
 			"Invalid approval request", err.Error())
 	case errors.Is(err, transfer.ErrFactsIncomplete):
-		writeProblem(w, http.StatusUnprocessableEntity, "facts-incomplete",
+		writeProblem(w, r, ptFactsIncomplete,
 			"Planning facts are incomplete or stale for approval", err.Error())
 	case errors.Is(err, transfer.ErrProposalExpired):
-		writeProblem(w, http.StatusUnprocessableEntity, "proposal-expired",
+		writeProblem(w, r, ptProposalExpired,
 			"The proposal snapshot has expired", err.Error())
 	default:
-		writeProblem(w, http.StatusServiceUnavailable, "approval-unavailable",
+		writeProblem(w, r, ptApprovalUnavailable,
 			"Approval could not be completed", err.Error())
 	}
 }

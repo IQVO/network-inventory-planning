@@ -16,9 +16,12 @@ type IdempotencyStore interface {
 	// aggregate change and the outbox rows commit together. A key already
 	// seen with the same fingerprint returns the stored answer with
 	// replayed true and does not call fn. fn's answer is stored and the unit
-	// committed unless its Status is >= 500, or fn returns an error or
-	// panics: then everything rolls back, nothing is stored, and the retry
-	// re-executes. Concurrent calls with one key are serialised; the loser
-	// replays the winner's answer.
+	// committed unless its Status is >= 500 or it carries the Transient mark
+	// (a refusal whose replay class is RETRYABLE, or none — ADR 0024), or fn
+	// returns an error or panics: then everything rolls back, nothing is
+	// stored, and the retry re-executes. Concurrent calls with one key are
+	// serialised; the loser replays the winner's answer — or, when the
+	// winner's transaction rolled back (a released key), claims the key and
+	// runs fn itself.
 	Do(ctx context.Context, key, fingerprint string, fn func(ctx context.Context) (contract.StoredResponse, error)) (resp contract.StoredResponse, replayed bool, err error)
 }

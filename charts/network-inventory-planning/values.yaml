@@ -264,6 +264,12 @@ a2a:
       cpu: 100m
       memory: 128Mi
 
+# capacity step 3 (warehouse-infra ADR 0012): true (with mcp.enabled and a2a.enabled) runs cmd/mcp and cmd/a2a as
+# two containers of one <release>-agents Deployment. Off by default; warehouse-infra switches it on.
+agents:
+  colocate: false
+  strategy: {}   # {} = k8s default (RollingUpdate); {type: Recreate} only when no surge slot is free
+
 # --- console remote (ADR 0010) -----------------------------------------------
 # An OPTIONAL nginx pod that serves the nip_mfe Module Federation remote (web/)
 # as static bytes. DISABLED by default and entirely absent from the rendered

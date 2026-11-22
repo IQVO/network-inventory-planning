@@ -135,3 +135,14 @@ on.
 - Approval capacity is bounded by the relay's drain rate, not the
   request path; an operator can observe stuck deliveries directly in
   `outbox_events` (attempts/last_error).
+
+## Addendum 2026-11-13: current state
+
+The revocation path this ADR left open was built by
+[ADR 0022](./0022-cancel-after-allocation-compensation.md) (PR #103): an `ALLOCATED` transfer cancels through `RELEASING`
+(`CancelAfterAllocation`, `internal/domain/transfer/saga.go:272`) and the command
+`TransferAllocationReleaseRequested`, settled by inventory-storage's
+`TransferStockAllocationReleased` (`MarkReleased`, `workflow.go:147`). The route
+is `POST /v1/transfers/{transferId}/cancellation` (`apis/openapi.yaml:172`,
+`internal/application/usecases/cancel_transfer.go`). The saga now publishes four
+integration types and consumes three inventory-storage replies.

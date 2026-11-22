@@ -53,3 +53,24 @@ type AllocationRequested struct {
 
 // EventName implements DomainEvent.
 func (AllocationRequested) EventName() string { return "TransferAllocationRequested" }
+
+// ReleaseRequested is the TransferAllocationReleaseRequested COMMAND event
+// raised by CancelAfterAllocation (ADR 0022): inventory-storage resolves the
+// origin reservation of a transfer cancelled after allocation and replies
+// with TransferStockAllocationReleased on warehouse.inventory.events. The
+// wire payload is exactly inventory-storage's consumed contract: {transfer_id,
+// transfer_line_id, reservation_id, origin_site_id, sku, quantity, reason},
+// key transfer_line_id.
+type ReleaseRequested struct {
+	TransferID     TransferID
+	TransferLineID string
+	ReservationID  string
+	OriginSiteID   string
+	SKU            string
+	Quantity       int
+	Reason         string
+	OccurredAt     time.Time
+}
+
+// EventName implements DomainEvent.
+func (ReleaseRequested) EventName() string { return "TransferAllocationReleaseRequested" }

@@ -201,13 +201,14 @@ func wire(ctx context.Context, logger *slog.Logger) (httpadapter.Handler, []func
 		return handler, nil, closeAll, err
 	}
 
-	wired, err := wireSagas(logger, pool, maxStaleness)
+	wired, err := wireSagas(ctx, logger, pool, maxStaleness)
 	if err != nil {
 		return handler, nil, closeAll, err
 	}
 	handler.Simulate = wired.simulate
 	handler.Generate = wired.generate
 	handler.Approve = wired.approve
+	handler.Cancel = wired.cancel
 	handler.Idempotency = postgres.NewIdempotencyStore(pool)
 	handler.ListRebalanceRuns = wired.runs
 	handler.GetTransfer, handler.ListTransfers = wireTransferReadSide(pool)

@@ -19,6 +19,7 @@ type fakeReplyApplier struct {
 	rejections  []usecases.ApplyRejectionInput
 	staged      []usecases.ApplyReceiptStagedInput
 	stowed      []usecases.ApplyStowInput
+	released    []usecases.ApplyReleasedInput
 	failAlloc   int
 }
 
@@ -51,6 +52,13 @@ func (f *fakeReplyApplier) ApplyStowed(_ context.Context, in usecases.ApplyStowI
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stowed = append(f.stowed, in)
+	return nil
+}
+
+func (f *fakeReplyApplier) ApplyReleased(_ context.Context, in usecases.ApplyReleasedInput) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.released = append(f.released, in)
 	return nil
 }
 
@@ -233,6 +241,11 @@ func (d *deterministicFailApplier) ApplyStowed(_ context.Context, in usecases.Ap
 	return transfer.ErrTransferNotFound
 }
 
+func (d *deterministicFailApplier) ApplyReleased(_ context.Context, in usecases.ApplyReleasedInput) error {
+	d.calls++
+	return transfer.ErrTransferNotFound
+}
+
 func TestTransferReplyConsumerAppliesReceiptStagedAndStowed(t *testing.T) {
 	applier := &fakeReplyApplier{}
 	c := newReplyConsumer(applier, newFakeClaims())
@@ -322,5 +335,68 @@ func TestTransferReplyConsumerSkipsFactsForUnknownTransfers(t *testing.T) {
 	bad := encodeEvent(t, typeTransferStockStowed, "trf-x:1", replyOccurred, map[string]string{"nonsense": "x"})
 	if err := c.HandleMessage(context.Background(), bad); err != nil {
 		t.Fatalf("malformed stowed payload must be skipped: %v", err)
+	}
+}
+
+func releasedReplyValue(t *testing.T, transferID, outcome string) []byte {
+	t.Helper()
+	return encodeEvent(t, typeTransferStockAllocationReleased, transferID+":1", replyOccurred, transferStockAllocationReleasedData{
+		TransferID:     transferID,
+		TransferLineID: transferID + ":1",
+		ReservationID:  "res-77",
+		OriginSiteID:   "WH1",
+		SKU:            "SKU-1",
+		Quantity:       10,
+		Outcome:        outcome,
+		Reason:         "revoked for cancelled transfer",
+	})
+}
+
+func TestTransferReplyConsumerAppliesReleased(t *testing.T) {
+	applier := &fakeReplyApplier{}
+	c := newReplyConsumer(applier, newFakeClaims())
+
+	if err := c.HandleMessage(context.Background(), releasedReplyValue(t, "trf-r", "RELEASED")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(applier.released) != 1 {
+		t.Fatalf("applied released = %d", len(applier.released))
+	}
+	got := applier.released[0]
+	if got.TransferID != transfer.TransferID("trf-r") {
+		t.Fatalf("applied = %+v", got)
+	}
+	if got.Released.TransferLineID != "trf-r:1" || got.Released.ReservationID != "res-77" ||
+		got.Released.Outcome != transfer.ReleaseOutcomeReleased || got.Released.Quantity != 10 {
+		t.Fatalf("fact = %+v", got.Released)
+	}
+	if !got.OccurredAt.Equal(replyOccurred) {
+		t.Fatalf("occurred at = %v", got.OccurredAt)
+	}
+
+	// Both outcomes drive the same applier — ALREADY_RESOLVED settles too.
+	if err := c.HandleMessage(context.Background(), releasedReplyValue(t, "trf-r2", "ALREADY_RESOLVED")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(applier.released) != 2 || applier.released[1].Released.Outcome != transfer.ReleaseOutcomeAlreadyResolved {
+		t.Fatalf("applied = %+v", applier.released)
+	}
+}
+
+func TestTransferReplyConsumerDeadLettersUnknownReleasedOutcome(t *testing.T) {
+	applier := &fakeReplyApplier{}
+	dlq := &anFakeDLQ{}
+	c := newReplyConsumer(applier, newFakeClaims())
+	c.DLQ = dlq
+	c.DLQTopic = "warehouse.inventory.events.dlq"
+
+	if err := c.HandleMessage(context.Background(), releasedReplyValue(t, "trf-bad", "PARTIAL")); err != nil {
+		t.Fatalf("a dead-lettered poison reply must not fail the loop: %v", err)
+	}
+	if len(dlq.written()) != 1 {
+		t.Fatalf("dead-lettered = %d, want 1", len(dlq.written()))
+	}
+	if len(applier.released) != 0 {
+		t.Fatalf("applied = %+v, want nothing", applier.released)
 	}
 }

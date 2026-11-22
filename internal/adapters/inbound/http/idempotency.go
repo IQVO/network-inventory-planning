@@ -16,10 +16,15 @@ import (
 // Handler.idempotent. The key alone identifies the record; the fingerprint
 // is method + path + sha256(body). Same key and fingerprint replays the
 // stored answer with Idempotency-Replayed: true; a different fingerprint is
-// 409 idempotency-key-reused; 2xx and 4xx answers are stored, a 5xx or a
-// panic rolls back and is never stored. The store runs the handler inside
-// the transaction that holds the key row, so the key, the aggregate change
-// and the outbox rows commit together.
+// 409 idempotency-key-reused. A 2xx is stored; a 5xx or a panic is not. A
+// refusal is stored (and replayed) only when its problem type's catalogue
+// entry declares the replay class FINAL or OUTCOME (ADR 0024); a RETRYABLE
+// refusal — and any refusal that declared no class — is answered but not
+// stored: the store rolls the request back, the key is released and a retry
+// executes again. The class is read from the mark writeProblem leaves in
+// the request context; the middleware holds no list of problem slugs. The
+// store runs the handler inside the transaction that holds the key row, so
+// the key, the aggregate change and the outbox rows commit together.
 const (
 	idempotencyKeyHeader      = "Idempotency-Key"
 	idempotencyReplayedHeader = "Idempotency-Replayed"
@@ -32,7 +37,7 @@ func (h Handler) idempotent() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if h.Idempotency == nil {
-				writeProblem(w, http.StatusServiceUnavailable, "idempotency-unavailable",
+				writeProblem(w, r, ptIdempotencyUnavailable,
 					"Idempotency store is not configured", "this instance cannot accept keyed writes without its idempotency store")
 				return
 			}
@@ -42,7 +47,7 @@ func (h Handler) idempotent() func(http.Handler) http.Handler {
 			}
 			body, err := io.ReadAll(io.LimitReader(r.Body, maxIdempotentBody+1))
 			if err != nil || len(body) > maxIdempotentBody {
-				writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", "the request body could not be read or is too large")
+				writeProblem(w, r, ptInvalidRequest, "Invalid request", "the request body could not be read or is too large")
 				return
 			}
 			sum := sha256.Sum256(body)
@@ -51,22 +56,28 @@ func (h Handler) idempotent() func(http.Handler) http.Handler {
 			var rec *bufferedResponse
 			resp, replayed, err := h.Idempotency.Do(r.Context(), key, fingerprint, func(ctx context.Context) (contract.StoredResponse, error) {
 				rec = &bufferedResponse{header: http.Header{}, status: http.StatusOK}
+				ctx, mark := withReplayMark(ctx)
 				req := r.Clone(ctx)
 				req.Body = io.NopCloser(bytes.NewReader(body))
 				next.ServeHTTP(rec, req)
-				return contract.StoredResponse{
+				stored := contract.StoredResponse{
 					Status:      rec.status,
 					ContentType: rec.header.Get("Content-Type"),
 					Location:    rec.header.Get("Location"),
 					Body:        rec.body.Bytes(),
-				}, nil
+				}
+				// The class of the problem the handler answered (FINAL and
+				// OUTCOME store, RETRYABLE and an unclassified refusal do
+				// not) turns into the store's release decision.
+				stored.Transient = mark.transient(stored.Status)
+				return stored, nil
 			})
 			switch {
 			case errors.Is(err, contract.ErrIdempotencyKeyReused):
-				writeProblem(w, http.StatusConflict, "idempotency-key-reused",
+				writeProblem(w, r, ptIdempotencyKeyReused,
 					"Idempotency-Key was already used with a different request", "send a new key for a new logical request")
 			case err != nil:
-				writeProblem(w, http.StatusServiceUnavailable, "idempotency-unavailable",
+				writeProblem(w, r, ptIdempotencyUnavailable,
 					"Idempotency store could not complete the request", err.Error())
 			case replayed:
 				w.Header().Set(idempotencyReplayedHeader, "true")
@@ -85,12 +96,12 @@ func (h Handler) idempotent() func(http.Handler) http.Handler {
 func checkIdempotencyKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 	vals := r.Header.Values(idempotencyKeyHeader)
 	if len(vals) == 0 || vals[0] == "" {
-		writeProblem(w, http.StatusBadRequest, "idempotency-key-required",
+		writeProblem(w, r, ptIdempotencyKeyRequired,
 			"Idempotency-Key header is required", "send a client-generated Idempotency-Key (a UUID per logical submit) on this operation")
 		return "", false
 	}
 	if len(vals) > 1 || !validIdempotencyKey(vals[0]) {
-		writeProblem(w, http.StatusBadRequest, "idempotency-key-invalid",
+		writeProblem(w, r, ptIdempotencyKeyInvalid,
 			"Idempotency-Key must be 1-128 printable ASCII characters", "send exactly one Idempotency-Key of 1-128 printable ASCII characters")
 		return "", false
 	}

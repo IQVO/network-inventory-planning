@@ -56,9 +56,12 @@ paths:
         malformed JSON is 400 invalid-request; a snapshot the planner refuses
         is 422 invalid-planning-snapshot. 503 problem+json when the
         idempotency store is not configured (idempotency-unavailable) or the
-        pack levels cannot be read (pack-levels-unavailable). 2xx and 4xx
-        answers are stored under the key and replayed (Idempotency-Replayed:
-        true); a 5xx is never stored. Diagnostic boundary: production
+        pack levels cannot be read (pack-levels-unavailable). A 2xx and a
+        FINAL refusal (invalid-request, invalid-planning-snapshot) are
+        stored under the key and replayed (Idempotency-Replayed: true); a
+        5xx is never stored, and a RETRYABLE refusal is not stored either:
+        the key is released and a retry under it executes again (replay
+        classes, ADR 0024). Diagnostic boundary: production
         planning consumes local read models via the simulation endpoint
         instead.
       parameters:
@@ -126,8 +129,14 @@ paths:
         inventory-storage's reply later drives the transfer to ALLOCATED or
         UNFULFILLABLE. Idempotent per the required Idempotency-Key header:
         replaying the same key with the same request replays the ORIGINAL
-        answer (header Idempotency-Replayed: true); the same key with a
-        different request is a 409 idempotency-key-reused. Fail-closed validation failures return 422: the origin or the
+        stored answer (header Idempotency-Replayed: true) when that answer
+        is final for the request — a success, or a FINAL refusal such as
+        invalid-approval or proposal-expired; the same key with a different
+        request is a 409 idempotency-key-reused. A RETRYABLE refusal
+        (facts-incomplete, below-one-case: causes that clear when the
+        event-fed planning facts change) is NOT stored — the key is
+        released and a retry under it executes again (replay classes, ADR
+        0024). Fail-closed validation failures return 422: the origin or the
         destination is missing or stale in the planning snapshot (the problem
         detail names the site and the stale fact), is disabled for its role, or
         the demand and capacity checks fail. Stale facts of any other site do
@@ -139,8 +148,10 @@ paths:
         types: saga-unavailable (no saga persistence), config-incomplete
         (TRANSFER_PICK_PATH_ID / TRANSFER_PICK_CPT_OFFSET unset),
         pack-levels-unavailable and approval-unavailable. A body with an
-        unknown field or malformed JSON is 400 invalid-request. 2xx and 4xx
-        answers are stored and replayed; a 5xx is never stored.
+        unknown field or malformed JSON is 400 invalid-request. Answers are
+        stored and replayed by their problem type's replay class (ADR 0024):
+        FINAL and OUTCOME refusals replay, RETRYABLE ones release the key,
+        and a 5xx is never stored.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -163,6 +174,83 @@ paths:
                 $ref: '#/components/schemas/ApproveTransferResponse'
         '400':
           $ref: '#/components/responses/KeyedProblem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/transfers/{transferId}/cancellation:
+    post:
+      operationId: cancelTransfer
+      tags: [transfers]
+      summary: Cancel a transfer — synchronously pre-release, through RELEASING once allocated.
+      description: |
+        The operator cancel of the transfer saga (ADR 0022). Pre-release
+        states (DRAFT/PROPOSED/APPROVED/ALLOCATING) cancel synchronously:
+        200 with state CANCELLED, no hold exists. ALLOCATED answers 202
+        with state RELEASING: the saga outboxes
+        TransferAllocationReleaseRequested in the same transaction and
+        inventory-storage resolves the origin reservation; its
+        TransferStockAllocationReleased fact (outcome RELEASED or
+        ALREADY_RESOLVED — both settle) completes the cancel to CANCELLED.
+        A retried cancel is idempotent on the saga state: RELEASING
+        answers 202 again, CANCELLED answers 200 again. PICKED onwards and
+        UNFULFILLABLE refuse with 409 cancel-refused — the stock is
+        physically in motion or the saga already closed. An unknown
+        transfer is 404; a missing reason is 422 invalid-cancel. A body
+        with an unknown field or malformed JSON is 400 invalid-request.
+        Idempotent per the required Idempotency-Key header like every
+        keyed write: same key and same request replays the stored answer
+        (Idempotency-Replayed: true) when that answer is final for the
+        request, a different request under the same stored key is 409
+        idempotency-key-reused. Replay classes (ADR 0024): a FINAL refusal
+        (invalid-cancel, cancel-refused) is stored and replayed; a
+        RETRYABLE refusal (transfer-not-found — the transfer arrives by
+        another request) is not stored, the key is released and a retry
+        executes; a 5xx is never stored.
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The saga aggregate id being cancelled.
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTransferRequest'
+      responses:
+        '200':
+          description: |
+            Cancelled synchronously (a pre-release state, or a replay of an
+            already-settled cancel).
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelTransferResponse'
+        '202':
+          description: |
+            Accepted for compensation: state RELEASING — the origin hold is
+            being released; the saga settles to CANCELLED on
+            inventory-storage's TransferStockAllocationReleased fact.
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelTransferResponse'
+        '400':
+          $ref: '#/components/responses/KeyedProblem'
+        '404':
+          $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -580,8 +668,11 @@ components:
         Client-generated key (1-128 printable ASCII characters, a UUID per
         logical submit). A retry reuses it; a new user action mints a new
         one. Same key and same request replays the stored answer with
-        Idempotency-Replayed: true; the same key with a different request
-        is 409 idempotency-key-reused.
+        Idempotency-Replayed: true when that answer is final for the
+        request; the same key with a different request is 409
+        idempotency-key-reused. A refusal whose problem type is RETRYABLE
+        (its cause can change) is not stored: the key is released and the
+        retry executes again (replay classes, ADR 0024).
       schema:
         type: string
         minLength: 1
@@ -979,11 +1070,14 @@ components:
           description: The saga aggregate id.
         state:
           type: string
-          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
+          enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
           description: |
             The persisted saga state at response time — ALLOCATING
             immediately after a fresh approval (awaiting inventory-storage's
-            reply). PICKED/IN_TRANSIT/ARRIVED/RECEIVED are driven later by
+            reply). RELEASING holds between an ALLOCATED cancel and
+            inventory-storage's TransferStockAllocationReleased fact, which
+            settles it to CANCELLED (ADR 0022).
+            PICKED/IN_TRANSIT/ARRIVED/RECEIVED are driven later by
             fulfillment-execution's transfer facts and inventory-storage's
             destination facts (ADR 0005); RECEIVED is terminal.
         originSiteId:
@@ -1066,9 +1160,38 @@ components:
         nextCursor:
           type: string
           description: Opaque cursor of the next page; absent on the last page.
+    CancelTransferRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: The operator's cancellation reason (recorded in the immutable audit trail).
+    CancelTransferResponse:
+      type: object
+      required: [transferId, state, transferLineId]
+      properties:
+        transferId:
+          type: string
+          description: The saga aggregate id.
+        state:
+          $ref: '#/components/schemas/TransferState'
+        transferLineId:
+          type: string
+          description: The v1 single transfer line identifier (`<transfer_id>:1`).
+        reservationId:
+          type: string
+          description: >
+            The origin reservation being released; present while the saga
+            carries one (ALLOCATED and RELEASING answers, ADR 0022).
+        rejectionReason:
+          type: string
+          description: Present only on a transfer inventory-storage refused (UNFULFILLABLE).
     TransferState:
       type: string
-      enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
+      enum: [DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE, CANCELLED]
       description: |
         Saga lifecycle state. RECEIVED, UNFULFILLABLE and CANCELLED are
         terminal; every other state is waiting for a next step.

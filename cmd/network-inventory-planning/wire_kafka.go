@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	inboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/inbound/kafka"
 	outboundkafka "github.com/claudioed/network-inventory-planning/internal/adapters/outbound/kafka"
@@ -35,7 +33,15 @@ type consumerDeps struct {
 // publisher is nil (the approval endpoint then stays 503) and any rows
 // written would wait for a later relay — the saga's durability never
 // depends on the broker being up at approval time.
-func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPublisher, func() error) {
+//
+// The relay's context DERIVES from run()'s root signal context (ctx) rather
+// than opening its own signal.NotifyContext: a private one races the root
+// cancellation in startRunners, so a clean SIGTERM stop could be misread as
+// "returned without an error while the service was still running" and turn
+// a clean shutdown into a non-zero exit (ADR 0019). A derived context
+// cancels strictly after its parent, so by the time the relay returns, the
+// root ctx is already cancelled and the stop reads as clean.
+func wireOutbox(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPublisher, func() error) {
 	brokers := brokersFromEnv()
 	if brokers == nil {
 		logger.Warn("KAFKA_BROKERS not configured; outbox disabled (POST /v1/transfer-approvals answers 503)",
@@ -55,7 +61,7 @@ func wireOutbox(logger *slog.Logger, pool *pgxpool.Pool) (ports.TransferEventPub
 	sink := outboundkafka.NewRelaySink(brokers)
 	maxAttempts := outboxMaxAttemptsFromEnv(logger)
 	relay := postgres.NewOutboxRelay(pool, sink, postgres.WithMaxAttempts(maxAttempts), postgres.WithRelayLogger(logger))
-	relayCtx, relayStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	relayCtx, relayStop := context.WithCancel(ctx)
 	runner := func() error {
 		defer relayStop()
 		defer func() { _ = sink.Close() }()
@@ -101,7 +107,7 @@ type consumer interface {
 
 // startConsumers builds every ENABLED consumer (each group env var is its
 // own off switch) and returns its Run funcs plus its Close funcs.
-func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func() error, error) {
+func startConsumers(ctx context.Context, logger *slog.Logger, d consumerDeps) ([]func() error, []func() error, error) {
 	raw := os.Getenv(envKafkaBrokers)
 	if raw == "" {
 		logger.Warn("KAFKA_BROKERS not configured; read-model Kafka ingestion is disabled",
@@ -123,8 +129,11 @@ func startConsumers(logger *slog.Logger, d consumerDeps) ([]func() error, []func
 			return
 		}
 		c := build()
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		runners = append(runners, func() error { defer stop(); return c.Run(ctx) })
+		// Derived from run()'s root signal context for the same ADR 0019
+		// reason as the relay: a private signal context races the root
+		// cancellation and can misread a clean stop as an early death.
+		cctx, stop := context.WithCancel(ctx)
+		runners = append(runners, func() error { defer stop(); return c.Run(cctx) })
 		closers = append(closers, c.Close)
 		logger.Info("consumer running", "name", name, "group_id", group, "brokers", brokers)
 	}

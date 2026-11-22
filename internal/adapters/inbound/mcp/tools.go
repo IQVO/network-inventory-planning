@@ -140,7 +140,7 @@ func (d Deps) getTransfer(ctx context.Context, in getTransferInput) (getTransfer
 // --- list_transfers -----------------------------------------------------------
 
 type listTransfersInput struct {
-	State string `json:"state,omitempty" jsonschema:"only transfers currently in this state: DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED"`
+	State string `json:"state,omitempty" jsonschema:"only transfers currently in this state: DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED (case-insensitive)"`
 	Site  string `json:"site,omitempty" jsonschema:"only transfers whose origin OR destination site is this site id, e.g. WH1"`
 	Limit int    `json:"limit,omitempty" jsonschema:"page size, 1 to 200; defaults to 50"`
 }
@@ -160,7 +160,7 @@ func (d Deps) listTransfers(ctx context.Context, in listTransfersInput) (transfe
 
 type findStuckInput struct {
 	OlderThanMinutes int    `json:"older_than_minutes" jsonschema:"a transfer is stuck when its state has not changed for MORE than this many minutes; must be positive"`
-	State            string `json:"state,omitempty" jsonschema:"only look at transfers in this NON-terminal state, e.g. ALLOCATING; omit for every non-terminal state"`
+	State            string `json:"state,omitempty" jsonschema:"only look at transfers in this NON-terminal state (DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT or ARRIVED), e.g. ALLOCATING; omit for every non-terminal state"`
 	Limit            int    `json:"limit,omitempty" jsonschema:"page size, 1 to 200; defaults to 50"`
 }
 
@@ -235,7 +235,7 @@ func (d Deps) registerTools(server *mcp.Server) {
 
 	addTool(server, &mcp.Tool{
 		Name: "get_transfer",
-		Description: "Read one inter-warehouse transfer by id: its current state (DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED), " +
+		Description: "Read one inter-warehouse transfer by id: its current state (DRAFT, PROPOSED, APPROVED, ALLOCATING, ALLOCATED, RELEASING, PICKED, IN_TRANSIT, ARRIVED, RECEIVED, UNFULFILLABLE or CANCELLED), " +
 			"sku, quantity, picked quantity, origin and destination sites, reservation id once allocated, rejection reason once unfulfillable, " +
 			"and the full audit trail of state transitions (timestamp and cause of each). Read-only; fails with transfer-not-found for an unknown id.",
 		Annotations: readOnly,

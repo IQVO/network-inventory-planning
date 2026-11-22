@@ -196,6 +196,41 @@ func TestFindStuckNarrowsToOneNonTerminalState(t *testing.T) {
 	}
 }
 
+// RELEASING is a real saga state (ADR 0022) that waits for
+// inventory-storage's release fact, so it can be listed and can be stuck.
+func TestListTransfersAcceptsReleasingAsAStateFilter(t *testing.T) {
+	q := &fakeTransferQuery{}
+	_, err := ListTransfers{Query: q}.Execute(context.Background(), ListTransfersInput{State: "releasing"})
+	if err != nil {
+		t.Fatalf("state=releasing: %v, want accepted", err)
+	}
+	if len(q.gotFilter.States) != 1 || q.gotFilter.States[0] != transfer.StateReleasing {
+		t.Fatalf("States = %v, want [RELEASING]", q.gotFilter.States)
+	}
+}
+
+func TestFindStuckSearchesReleasingByDefaultAndByName(t *testing.T) {
+	q := &fakeTransferQuery{}
+	if _, err := stuckUseCase(q).Execute(context.Background(), FindStuckInput{OlderThan: time.Minute}); err != nil {
+		t.Fatalf("unfiltered: %v", err)
+	}
+	found := false
+	for _, s := range q.gotFilter.States {
+		if s == transfer.StateReleasing {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unfiltered stuck search States = %v, must include RELEASING", q.gotFilter.States)
+	}
+	if _, err := stuckUseCase(q).Execute(context.Background(), FindStuckInput{OlderThan: time.Minute, State: "RELEASING"}); err != nil {
+		t.Fatalf("state=RELEASING: %v, want accepted", err)
+	}
+	if len(q.gotFilter.States) != 1 || q.gotFilter.States[0] != transfer.StateReleasing {
+		t.Fatalf("States = %v, want [RELEASING]", q.gotFilter.States)
+	}
+}
+
 func TestFindStuckRefusesBadInput(t *testing.T) {
 	cases := map[string]FindStuckInput{
 		"zero threshold":     {OlderThan: 0},

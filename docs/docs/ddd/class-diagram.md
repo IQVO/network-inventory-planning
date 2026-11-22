@@ -39,6 +39,8 @@ classDiagram
     +MarkArrived(event, now) error
     +MarkStowed(Stowed, now) error
     +Cancel(reason, now) error
+    +CancelAfterAllocation(reason, now) ReleaseRequested
+    +MarkReleased(StockAllocationReleased, now) error
     +DispatchQuantity() int
     +StateAdvancedSince(version) StateAdvanced[]
   }
@@ -49,6 +51,7 @@ classDiagram
     APPROVED
     ALLOCATING
     ALLOCATED
+    RELEASING
     PICKED
     IN_TRANSIT
     ARRIVED
@@ -91,6 +94,7 @@ classDiagram
     +Time CPT
     +int Quantity
   }
+  class ReleaseRequested
   class StateAdvanced
   InterWarehouseTransfer --> TransferState
   InterWarehouseTransfer "1" *-- "many" AuditEntry : audit
@@ -100,6 +104,7 @@ classDiagram
   InterWarehouseTransfer ..> IllegalTransitionError : returns
   InterWarehouseTransfer ..> PlanApproved : raises
   InterWarehouseTransfer ..> AllocationRequested : raises
+  InterWarehouseTransfer ..> ReleaseRequested : raises
   InterWarehouseTransfer ..> StateAdvanced : derives
 ```
 

@@ -60,6 +60,12 @@ const sidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api-reference/rest/cancel-transfer",
+          label: "Cancel a transfer — synchronously pre-release, through RELEASING once allocated.",
+          className: "api-method post",
+        },
+        {
+          type: "doc",
           id: "api-reference/rest/list-transfers",
           label: "List transfers, newest first.",
           className: "api-method get",

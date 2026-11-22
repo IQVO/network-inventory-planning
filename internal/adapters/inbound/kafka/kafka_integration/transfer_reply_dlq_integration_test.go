@@ -102,6 +102,7 @@ func TestTransferReplyPoisonIsDeadLetteredAndTheNextReplyApplies(t *testing.T) {
 			Reject:   usecases.ApplyTransferRejection{Transfers: transfers, Events: outbox, UoW: uow},
 			Staged:   usecases.ApplyTransferReceiptStaged{Transfers: transfers, Events: outbox, UoW: uow},
 			Stow:     usecases.ApplyTransferStow{Transfers: transfers, Events: outbox, UoW: uow},
+			Released: usecases.ApplyTransferAllocationReleased{Transfers: transfers, Events: outbox, UoW: uow},
 		}, postgres.NewProcessedEventRepo(pool), uow, nil)
 	runConsumerUntil(t, consumer, 20*time.Second)
 

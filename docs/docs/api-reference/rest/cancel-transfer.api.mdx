@@ -1,0 +1,93 @@
+---
+id: cancel-transfer
+title: "Cancel a transfer — synchronously pre-release, through RELEASING once allocated."
+description: "The operator cancel of the transfer saga (ADR 0022). Pre-release"
+sidebar_label: "Cancel a transfer — synchronously pre-release, through RELEASING once allocated."
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: "post api-method"
+info_path: docs/api-reference/rest/network-inventory-planning-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+import Translate from "@docusaurus/Translate";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Cancel a transfer — synchronously pre-release, through RELEASING once allocated."}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"post"}
+  path={"/v1/transfers/{transferId}/cancellation"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+The operator cancel of the transfer saga (ADR 0022). Pre-release
+states (DRAFT/PROPOSED/APPROVED/ALLOCATING) cancel synchronously:
+200 with state CANCELLED, no hold exists. ALLOCATED answers 202
+with state RELEASING: the saga outboxes
+TransferAllocationReleaseRequested in the same transaction and
+inventory-storage resolves the origin reservation; its
+TransferStockAllocationReleased fact (outcome RELEASED or
+ALREADY_RESOLVED — both settle) completes the cancel to CANCELLED.
+A retried cancel is idempotent on the saga state: RELEASING
+answers 202 again, CANCELLED answers 200 again. PICKED onwards and
+UNFULFILLABLE refuse with 409 cancel-refused — the stock is
+physically in motion or the saga already closed. An unknown
+transfer is 404; a missing reason is 422 invalid-cancel. A body
+with an unknown field or malformed JSON is 400 invalid-request.
+Idempotent per the required Idempotency-Key header like every
+keyed write: same key and same request replays the stored answer
+(Idempotency-Replayed: true) when that answer is final for the
+request, a different request under the same stored key is 409
+idempotency-key-reused. Replay classes (ADR 0024): a FINAL refusal
+(invalid-cancel, cancel-refused) is stored and replayed; a
+RETRYABLE refusal (transfer-not-found — the transfer arrives by
+another request) is not stored, the key is released and a retry
+executes; a 5xx is never stored.
+
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./cancel-transfer.ParamsDetails.json")}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  {...require("./cancel-transfer.RequestSchema.json")}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  {...require("./cancel-transfer.StatusCodes.json")}
+>
+  
+</StatusCodes>
+
+
+      

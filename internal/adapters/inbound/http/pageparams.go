@@ -14,18 +14,18 @@ import (
 // and reports false. filters lists the collection's own query parameters.
 func pageParams(w http.ResponseWriter, r *http.Request, filters ...string) (int, *transfer.PageAfter, bool) {
 	if name := page.Unknown(r, filters...); name != "" {
-		writeProblem(w, http.StatusBadRequest, "unknown-query-parameter",
+		writeProblem(w, r, ptUnknownQueryParameter,
 			"Unknown query parameter", "this collection does not declare the query parameter "+name)
 		return 0, nil, false
 	}
 	limit, err := page.Limit(r)
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-limit", "limit must be an integer between 1 and 500", err.Error())
+		writeProblem(w, r, ptInvalidLimit, "limit must be an integer between 1 and 500", err.Error())
 		return 0, nil, false
 	}
 	pos, err := page.After(r)
 	if err != nil {
-		writeInvalidCursor(w, err)
+		writeInvalidCursor(w, r, err)
 		return 0, nil, false
 	}
 	if pos == nil {
@@ -34,8 +34,8 @@ func pageParams(w http.ResponseWriter, r *http.Request, filters ...string) (int,
 	return limit, &transfer.PageAfter{Sort: pos.Sort, ID: pos.ID}, true
 }
 
-func writeInvalidCursor(w http.ResponseWriter, err error) {
-	writeProblem(w, http.StatusBadRequest, "invalid-cursor", "cursor is not a valid page token", err.Error())
+func writeInvalidCursor(w http.ResponseWriter, r *http.Request, err error) {
+	writeProblem(w, r, ptInvalidCursor, "cursor is not a valid page token", err.Error())
 }
 
 // isInvalidCursor reports whether a store refused a well-formed cursor that

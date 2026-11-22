@@ -88,7 +88,7 @@ func do(t *testing.T, h http.Handler, method, path, ifMatch, body string) *httpt
 	return response
 }
 
-func problemType(t *testing.T, r *httptest.ResponseRecorder) string {
+func problemSlug(t *testing.T, r *httptest.ResponseRecorder) string {
 	t.Helper()
 	var p problem
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -134,16 +134,16 @@ func TestPolicyCatalogueRefusals(t *testing.T) {
 		t.Fatalf("seed: %d", r.Code)
 	}
 	stale := do(t, h, http.MethodPut, "/v1/rebalance-policies", `"7"`, policyBody)
-	if stale.Code != http.StatusPreconditionFailed || problemType(t, stale) != "version-mismatch" {
+	if stale.Code != http.StatusPreconditionFailed || problemSlug(t, stale) != "version-mismatch" {
 		t.Fatalf("stale If-Match: %d %s", stale.Code, stale.Body.String())
 	}
 	invalid := do(t, h, http.MethodPut, "/v1/rebalance-policies", "",
 		`{"Version":"pv-3","Site":"WH2","SKU":"SKU-1","SafetyStock":9,"TargetStock":1,"UnitPriority":10}`)
-	if invalid.Code != http.StatusUnprocessableEntity || problemType(t, invalid) != "invalid-catalogue-entry" {
+	if invalid.Code != http.StatusUnprocessableEntity || problemSlug(t, invalid) != "invalid-catalogue-entry" {
 		t.Fatalf("invalid: %d %s", invalid.Code, invalid.Body.String())
 	}
 	badIfMatch := do(t, h, http.MethodPut, "/v1/rebalance-policies", `"abc"`, policyBody)
-	if badIfMatch.Code != http.StatusBadRequest || problemType(t, badIfMatch) != "invalid-if-match" {
+	if badIfMatch.Code != http.StatusBadRequest || problemSlug(t, badIfMatch) != "invalid-if-match" {
 		t.Fatalf("bad If-Match: %d %s", badIfMatch.Code, badIfMatch.Body.String())
 	}
 	unknownField := do(t, h, http.MethodPut, "/v1/rebalance-policies", "", `{"Warehouse":"WH9"}`)
@@ -209,7 +209,7 @@ func TestCatalogueEndpointsUnconfiguredAre503(t *testing.T) {
 		{http.MethodPut, "/v1/transfer-lanes"},
 	} {
 		r := do(t, h, tc.method, tc.path, "", "{}")
-		if r.Code != http.StatusServiceUnavailable || problemType(t, r) != "catalogue-unavailable" {
+		if r.Code != http.StatusServiceUnavailable || problemSlug(t, r) != "catalogue-unavailable" {
 			t.Fatalf("%s %s: %d", tc.method, tc.path, r.Code)
 		}
 	}
@@ -226,7 +226,7 @@ func TestCatalogueLostRaceIs409(t *testing.T) {
 	h := Handler{PutLane: &usecases.PutTransferLane{Lanes: &racingLanes{}, Now: catalogueClock}}.Routes()
 	r := do(t, h, http.MethodPut, "/v1/transfer-lanes", "",
 		`{"Origin":"WH1","Destination":"WH2","LeadTime":0,"UnitHandlingCost":1,"Enabled":true}`)
-	if r.Code != http.StatusConflict || problemType(t, r) != "concurrent-modification" {
+	if r.Code != http.StatusConflict || problemSlug(t, r) != "concurrent-modification" {
 		t.Fatalf("lost race: %d %s", r.Code, r.Body.String())
 	}
 }

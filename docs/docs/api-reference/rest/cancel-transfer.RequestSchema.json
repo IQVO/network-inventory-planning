@@ -1,0 +1,1 @@
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["reason"],"properties":{"reason":{"type":"string","minLength":1,"maxLength":512,"description":"The operator's cancellation reason (recorded in the immutable audit trail)."}},"title":"CancelTransferRequest"}}}}}

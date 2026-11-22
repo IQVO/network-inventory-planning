@@ -71,6 +71,20 @@ info:
     — no approval, no allocation command). W3C trace context
     (`traceparent`) propagates on every produced and consumed message.
 
+    **Cancel-after-allocation (ADR 0022, the compensation leg)** closes
+    ADR 0003's documented gap — a transfer cancelled AFTER allocation gets
+    its origin hold resolved instead of stranding the reservation until
+    lazy expiry:
+
+    - `com.warehouse.wes.network-inventory-planning.transfer.TransferAllocationReleaseRequested`
+      (published COMMAND, subject/key `transfer_line_id`): an ALLOCATED
+      transfer's operator cancel; inventory-storage resolves the origin
+      reservation and replies on `warehouse.inventory.events`.
+    - `com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationReleased`
+      (consumed reply, subject/key `transfer_line_id`, outcome RELEASED |
+      ALREADY_RESOLVED — both settle): the saga moves RELEASING →
+      CANCELLED.
+
     **Phase 3 (ADR 0005, work-demand release + fact-driven transitions)**
     adds the released work demands on the PUBLISHED stream, the three
     CONSUMED fulfillment-execution transfer facts on
@@ -177,6 +191,8 @@ channels:
         $ref: '#/components/messages/transferPlanApproved'
       transferAllocationRequested:
         $ref: '#/components/messages/transferAllocationRequested'
+      transferAllocationReleaseRequested:
+        $ref: '#/components/messages/transferAllocationReleaseRequested'
       workDemandReleased:
         $ref: '#/components/messages/workDemandReleased'
   warehouse.network-inventory-planning.analytics:
@@ -201,13 +217,16 @@ channels:
     title: inventory-storage integration topic
     description: |
       inventory-storage's integration stream. network-inventory-planning
-      consumes only the two transfer-allocation replies and the two
-      destination facts; every other type is ignored.
+      consumes only the two transfer-allocation replies, the allocation
+      release fact (ADR 0022) and the two destination facts; every other
+      type is ignored.
     messages:
       transferStockAllocated:
         $ref: '#/components/messages/transferStockAllocated'
       transferStockAllocationRejected:
         $ref: '#/components/messages/transferStockAllocationRejected'
+      transferStockAllocationReleased:
+        $ref: '#/components/messages/transferStockAllocationReleased'
       transferReceiptStaged:
         $ref: '#/components/messages/transferReceiptStaged'
       transferStockStowed:
@@ -293,6 +312,20 @@ operations:
       ("<transfer_id>:1" in v1's single-line saga) — inventory-storage's
       transfer_allocations ledger key, so its reply and any replay
       correlate on exactly it.
+  sendTransferAllocationReleaseRequested:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.network-inventory-planning.events'
+    summary: Command inventory-storage to resolve the origin hold of a cancelled transfer.
+    description: |
+      The saga's compensation COMMAND (ADR 0022), published through the
+      outbox in the SAME transaction as the ALLOCATED → RELEASING
+      transition (POST /v1/transfers/{transferId}/cancellation).
+      Subject and Kafka key are the transfer_line_id, mirroring
+      TransferAllocationRequested; the payload additionally carries the
+      reservation_id being resolved and the operator's cancellation
+      reason. inventory-storage's TransferStockAllocationReleased reply
+      settles the saga to CANCELLED.
   receiveTransferStockAllocated:
     action: receive
     channel:
@@ -315,6 +348,21 @@ operations:
       ORIGIN_SITE_UNKNOWN|INSUFFICIENT_USABLE|IDEMPOTENCY_CONFLICT. The
       consumer applies it in ONE transaction with the processed-event
       claim; an unknown reason is a deterministic skip. Consumer group
+      TRANSFER_REPLY_CONSUMER_GROUP (env-configured).
+  receiveTransferStockAllocationReleased:
+    action: receive
+    channel:
+      $ref: '#/channels/warehouse.inventory.events'
+    summary: Drive the saga RELEASING → CANCELLED.
+    description: |
+      inventory-storage's release fact (ADR 0022): the origin hold of a
+      transfer cancelled after allocation is resolved. outcome is the
+      closed set RELEASED (the reservation still held the stock; it was
+      revoked) | ALREADY_RESOLVED (it had already expired or been
+      confirmed) — both settle the saga to CANCELLED. The consumer
+      validates the fact against the transfer (line, reservation, origin,
+      SKU, quantity) exactly like the allocation reply; a mismatch is a
+      deterministic dead-letter, never a retry. Consumer group
       TRANSFER_REPLY_CONSUMER_GROUP (env-configured).
   sendWorkDemandReleased:
     action: send
@@ -528,6 +576,13 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/TransferAllocationRequestedEvent'
+    transferAllocationReleaseRequested:
+      name: TransferAllocationReleaseRequested
+      title: Transfer allocation release requested
+      summary: Command inventory-storage to resolve the origin hold of a cancelled transfer (published).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferAllocationReleaseRequestedEvent'
     transferStockAllocated:
       name: TransferStockAllocated
       title: Transfer stock allocated
@@ -542,6 +597,13 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/TransferStockAllocationRejectedEvent'
+    transferStockAllocationReleased:
+      name: TransferStockAllocationReleased
+      title: Transfer stock allocation released
+      summary: inventory-storage resolved the origin hold of a cancelled transfer (consumed reply).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/TransferStockAllocationReleasedEvent'
     workDemandReleased:
       name: WorkDemandReleased
       title: Work demand released
@@ -975,6 +1037,79 @@ components:
                 reason:
                   type: string
                   enum: [ORIGIN_SITE_UNKNOWN, INSUFFICIENT_USABLE, IDEMPOTENCY_CONFLICT]
+    TransferAllocationReleaseRequestedEvent:
+      description: |
+        CloudEvents 1.0 envelope of this context's
+        TransferAllocationReleaseRequested COMMAND (published via the
+        transactional outbox, ADR 0022). The data payload is EXACTLY
+        inventory-storage's consumed contract.
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            source:
+              const: /warehouse/network-inventory-planning
+            type:
+              const: com.warehouse.wes.network-inventory-planning.transfer.TransferAllocationReleaseRequested
+            dataschema:
+              const: urn:warehouse:network-inventory-planning:events:TransferAllocationReleaseRequested:v1
+            data:
+              type: object
+              required: [transfer_id, transfer_line_id, reservation_id, origin_site_id, sku, quantity, reason]
+              properties:
+                transfer_id:
+                  type: string
+                transfer_line_id:
+                  type: string
+                  description: Also the Kafka key and subject, mirroring TransferAllocationRequested.
+                reservation_id:
+                  type: string
+                  description: The origin reservation being resolved.
+                origin_site_id:
+                  type: string
+                sku:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                reason:
+                  type: string
+                  description: The operator's cancellation reason, carried through to the reply.
+    TransferStockAllocationReleasedEvent:
+      description: CloudEvents 1.0 envelope of inventory-storage's TransferStockAllocationReleased reply (consumed).
+      allOf:
+        - $ref: '#/components/schemas/cloudEvent'
+        - type: object
+          properties:
+            type:
+              const: com.warehouse.wms.inventory-storage.reservation.TransferStockAllocationReleased
+            dataschema:
+              const: urn:warehouse:inventory-storage:events:TransferStockAllocationReleased:v1
+            data:
+              type: object
+              required: [transfer_id, transfer_line_id, reservation_id, origin_site_id, sku, quantity, outcome, reason]
+              properties:
+                transfer_id:
+                  type: string
+                transfer_line_id:
+                  type: string
+                  description: Also the Kafka key and subject of the reply.
+                reservation_id:
+                  type: string
+                origin_site_id:
+                  type: string
+                sku:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                outcome:
+                  type: string
+                  enum: [RELEASED, ALREADY_RESOLVED]
+                  description: Both settle the saga — either way the hold is gone.
+                reason:
+                  type: string
+                  description: The echoed cancellation reason, or IDEMPOTENCY_CONFLICT on a conflicting replay's answer.
     WorkDemandReleasedEvent:
       description: |
         CloudEvents 1.0 envelope of this context's WorkDemandReleased

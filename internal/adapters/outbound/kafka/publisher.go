@@ -29,9 +29,10 @@ const entityTransfer = "transfer"
 
 // CloudEvents data attribute names shared across the transfer publishers.
 const (
-	attrTransferID = "transfer_id"
-	attrSKU        = "sku"
-	attrQuantity   = "quantity"
+	attrTransferID   = "transfer_id"
+	attrSKU          = "sku"
+	attrQuantity     = "quantity"
+	attrOriginSiteID = "origin_site_id"
 )
 
 // Encoded is one already-encoded, wire-ready Kafka message. The CloudEvents
@@ -65,6 +66,10 @@ type Encoder interface {
 //     (subject/key transfer_line_id, payload exactly inventory-storage's
 //     consumed contract {transfer_id, transfer_line_id, origin_site_id,
 //     sku, quantity})
+//   - transfer.ReleaseRequested → TransferAllocationReleaseRequested
+//     (subject/key transfer_line_id, payload exactly inventory-storage's
+//     consumed contract {transfer_id, transfer_line_id, reservation_id,
+//     origin_site_id, sku, quantity, reason} — ADR 0022)
 //   - transfer.DemandReleased → WorkDemandReleased (subject/key
 //     demand_id, payload exactly WES's consumed contract {demand_id,
 //     work_kind, transfer_ref, path_id, site_id, cpt, sku, quantity} —
@@ -85,6 +90,8 @@ func (e *TransferEncoder) Encode(ctx context.Context, event transfer.DomainEvent
 		return e.encodePlanApproved(ctx, evt)
 	case transfer.AllocationRequested:
 		return e.encodeAllocationRequested(ctx, evt)
+	case transfer.ReleaseRequested:
+		return e.encodeReleaseRequested(ctx, evt)
 	case transfer.DemandReleased:
 		return e.encodeDemandReleased(ctx, evt)
 	default:
@@ -153,7 +160,7 @@ func (e *TransferEncoder) encodeDemandReleased(ctx context.Context, evt transfer
 func (e *TransferEncoder) encodePlanApproved(ctx context.Context, evt transfer.PlanApproved) ([]Encoded, error) {
 	payload := map[string]any{
 		attrTransferID:        string(evt.TransferID),
-		"origin_site_id":      evt.OriginSiteID,
+		attrOriginSiteID:      evt.OriginSiteID,
 		"destination_site_id": evt.DestinationSiteID,
 		attrSKU:               evt.SKU,
 		attrQuantity:          evt.Quantity,
@@ -202,7 +209,7 @@ func (e *TransferEncoder) encodeAllocationRequested(ctx context.Context, evt tra
 	payload := map[string]any{
 		attrTransferID:     string(evt.TransferID),
 		"transfer_line_id": evt.TransferLineID,
-		"origin_site_id":   evt.OriginSiteID,
+		attrOriginSiteID:   evt.OriginSiteID,
 		attrSKU:            evt.SKU,
 		attrQuantity:       evt.Quantity,
 	}
@@ -222,6 +229,43 @@ func (e *TransferEncoder) encodeAllocationRequested(ctx context.Context, evt tra
 	return []Encoded{{
 		Topic:     TransferTopic,
 		EventType: cloudevents.Type(entityTransfer, "TransferAllocationRequested"),
+		Key:       []byte(evt.TransferLineID),
+		Value:     value,
+		Headers:   tracedHeaders(ctx),
+	}}, nil
+}
+
+func (e *TransferEncoder) encodeReleaseRequested(ctx context.Context, evt transfer.ReleaseRequested) ([]Encoded, error) {
+	// EXACTLY inventory-storage's consumed contract (its apis/asyncapi.yaml,
+	// ADR 0051 / this context's ADR 0022): data {transfer_id,
+	// transfer_line_id, reservation_id, origin_site_id, sku, quantity,
+	// reason}, subject/key transfer_line_id — mirroring
+	// TransferAllocationRequested.
+	payload := map[string]any{
+		attrTransferID:     string(evt.TransferID),
+		"transfer_line_id": evt.TransferLineID,
+		"reservation_id":   evt.ReservationID,
+		attrOriginSiteID:   evt.OriginSiteID,
+		attrSKU:            evt.SKU,
+		attrQuantity:       evt.Quantity,
+		"reason":           evt.Reason,
+	}
+	value, err := cloudevents.New(cloudevents.Spec{
+		ID:        e.mintID(),
+		Entity:    entityTransfer,
+		EventName: "TransferAllocationReleaseRequested",
+		Subject:   evt.TransferLineID,
+		Time:      evt.OccurredAt,
+		Stream:    cloudevents.StreamEvents,
+		Version:   1,
+		Data:      payload,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode TransferAllocationReleaseRequested: %w", err)
+	}
+	return []Encoded{{
+		Topic:     TransferTopic,
+		EventType: cloudevents.Type(entityTransfer, "TransferAllocationReleaseRequested"),
 		Key:       []byte(evt.TransferLineID),
 		Value:     value,
 		Headers:   tracedHeaders(ctx),

@@ -373,6 +373,7 @@ func TestReplyUseCasesAdapterDrivesTheSaga(t *testing.T) {
 		Reject:   usecases.ApplyTransferRejection{Transfers: store, Events: pub, UoW: memory.UnitOfWork{}},
 		Staged:   usecases.ApplyTransferReceiptStaged{Transfers: store, Events: pub, UoW: memory.UnitOfWork{}},
 		Stow:     usecases.ApplyTransferStow{Transfers: store, Events: pub, UoW: memory.UnitOfWork{}},
+		Released: usecases.ApplyTransferAllocationReleased{Transfers: store, Events: pub, UoW: memory.UnitOfWork{}},
 	}
 	ctx := context.Background()
 

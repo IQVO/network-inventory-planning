@@ -139,7 +139,7 @@ func TestStateAdvancedSince(t *testing.T) {
 
 func TestNonTerminalStates(t *testing.T) {
 	for _, s := range []TransferState{StateDraft, StateProposed, StateApproved, StateAllocating,
-		StateAllocated, StatePicked, StateInTransit, StateArrived} {
+		StateAllocated, StateReleasing, StatePicked, StateInTransit, StateArrived} {
 		if !s.NonTerminal() {
 			t.Errorf("%s should be non-terminal", s)
 		}

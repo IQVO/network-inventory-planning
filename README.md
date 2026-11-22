@@ -97,7 +97,7 @@ com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced
 
 - **Published** to `warehouse.network-inventory-planning.events` (through the
   transactional outbox): `TransferPlanApproved`, `TransferAllocationRequested`,
-  `WorkDemandReleased`, `TransferStateAdvanced`, `TransferStuckDetected`,
+  `TransferAllocationReleaseRequested`, `WorkDemandReleased`, `TransferStateAdvanced`, `TransferStuckDetected`,
   `RebalanceRunCompleted` — types
   `com.warehouse.wes.network-inventory-planning.<entity>.<Event>` (`transfer`,
   `workdemand`, `saga`). The same outbox rows additionally feed
@@ -108,7 +108,7 @@ com.warehouse.wes.network-inventory-planning.saga.TransferStateAdvanced
   warehouse-planning `CapacityPlanPublished`
   (`warehouse.warehouse-planning.events`); inventory-storage
   `TransferStockAllocated`, `TransferStockAllocationRejected`,
-  `TransferReceiptStaged`, `TransferStockStowed` (`warehouse.inventory.events`);
+  `TransferStockAllocationReleased`, `TransferReceiptStaged`, `TransferStockStowed` (`warehouse.inventory.events`);
   fulfillment-execution `TransferPicked`, `TransferDispatched`,
   `TransferArrived` (`warehouse.fulfillment.events`); product-master
   `ProductPackLevelDeclared`, `ProductPackLevelRetired`
@@ -176,7 +176,7 @@ rebalance; when it is set, `PACK_LEVEL_CONSUMER_GROUP` is required with it
 | `TRANSFER_DISPATCH_PATH_ID` | *(unset = no dispatch demand)* | Path id of the dispatch-leg demand; a `TransferPicked` fact still moves the transfer to `PICKED` |
 | `TRANSFER_DISPATCH_CPT_OFFSET` | `3h` | CPT horizon of the dispatch demand |
 | `NIP_HEALTH_CHECK_INTERVAL` | `5m` | Saga-health (stuck transfer) check tick (ADR 0007); `0` disables |
-| `NIP_STUCK_THRESHOLDS` | `ALLOCATING=1h,PICKED=24h,IN_TRANSIT=72h` (other non-terminal states 24h) | `STATE=DURATION` overrides merged over the defaults |
+| `NIP_STUCK_THRESHOLDS` | `ALLOCATING=1h,RELEASING=1h,PICKED=24h,IN_TRANSIT=72h` (other non-terminal states 24h) | `STATE=DURATION` overrides merged over the defaults |
 | `NIP_REBALANCE_SCHEDULE` | *(unset = off)* | Interval of the observe-only scheduled rebalance; needs the outbox |
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`, case-insensitive |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | OTLP/gRPC endpoint for traces and metrics (ADR 0012) |
@@ -251,7 +251,11 @@ RFC 9457 `application/problem+json` (`type` is a slug such as `not-found`,
 idempotency-keyed (`Idempotency-Key`, 1-128 printable ASCII, a fresh UUID per
 logical submit): a replay answers the stored response with
 `Idempotency-Replayed: true`, a key reused with a different request is a 409
-`idempotency-key-reused`, a missing key a 400. Collections are keyset-paged:
+`idempotency-key-reused`, a missing key a 400. Refusals follow their problem
+type's replay class ([ADR-0024](docs/docs/adr/0024-every-problem-type-has-a-replay-class.md)):
+a FINAL refusal is stored and replayed, a RETRYABLE one (a cause that can
+change, e.g. `facts-incomplete`) is not stored — the key is released and the
+retry executes. Collections are keyset-paged:
 `limit` (1-500, default 100) and `cursor`, answered as `{items, nextCursor}`
 ([ADR-0021](docs/docs/adr/0021-adopt-the-fleet-rest-api-guideline.md)).
 

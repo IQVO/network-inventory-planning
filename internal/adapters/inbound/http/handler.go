@@ -30,6 +30,10 @@ type Handler struct {
 	// meaning as Simulate: unconfigured means 503, never a fabricated
 	// approval).
 	Approve *usecases.ApproveTransfer
+	// Cancel is the operator cancel path of the saga (ADR 0022): the
+	// pre-release synchronous cancel and the ALLOCATED transfer's
+	// RELEASING compensation. Nil-able with the same meaning.
+	Cancel *usecases.CancelTransfer
 	// ListRebalanceRuns serves GET /v1/rebalance-runs (nil-able: an
 	// instance without persistence answers 503, never an empty 200 that
 	// would look like a real run history).
@@ -84,6 +88,7 @@ func (h Handler) Routes() http.Handler {
 	r.With(keyed).Post("/v1/transfer-proposal-runs", h.generate)
 	r.Get("/v1/transfer-simulations", h.simulate)
 	r.With(keyed).Post("/v1/transfer-approvals", h.approve)
+	r.With(keyed).Post("/v1/transfers/{transferId}/cancellation", h.cancelTransfer)
 	r.Get("/v1/rebalance-runs", h.rebalanceRuns)
 	r.Get("/v1/transfers", h.listTransfers)
 	r.Get("/v1/transfers/{id}", h.getTransfer)
@@ -99,13 +104,6 @@ type generateRequest struct {
 	Positions []transfer.Position `json:"positions"`
 	Policies  []transfer.Policy   `json:"policies"`
 	Lanes     []transfer.Lane     `json:"lanes"`
-}
-
-type problem struct {
-	Type   string `json:"type"`
-	Title  string `json:"title"`
-	Status int    `json:"status"`
-	Detail string `json:"detail"`
 }
 
 func (h Handler) health(w http.ResponseWriter, _ *http.Request) {
@@ -130,13 +128,13 @@ type simulateSiteDTO struct {
 // simulation of nothing.
 func (h Handler) simulate(w http.ResponseWriter, r *http.Request) {
 	if h.Simulate == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "read-models-unavailable",
+		writeProblem(w, r, ptReadModelsUnavailable,
 			"Planning read models are not configured", "this instance runs without the Phase-1 read models; the simulation requires them")
 		return
 	}
 	result, err := h.Simulate.Execute(r.Context())
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "read-models-incomplete",
+		writeProblem(w, r, ptReadModelsIncomplete,
 			"Planning read models are incomplete or stale", err.Error())
 		return
 	}
@@ -162,29 +160,23 @@ func (h Handler) generate(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", err.Error())
+		writeProblem(w, r, ptInvalidRequest, "Invalid request", err.Error())
 		return
 	}
 	proposals, err := h.Generate.Execute(r.Context(), usecases.GenerateInput{
 		AsOf: request.AsOf, Positions: request.Positions, Policies: request.Policies, Lanes: request.Lanes,
 	})
 	if errors.Is(err, usecases.ErrPackLevelsUnavailable) {
-		writeProblem(w, http.StatusServiceUnavailable, "pack-levels-unavailable",
+		writeProblem(w, r, ptPackLevelsUnavailable,
 			"Pack levels are unavailable", err.Error())
 		return
 	}
 	if err != nil {
-		writeProblem(w, http.StatusUnprocessableEntity, "invalid-planning-snapshot", "Invalid planning snapshot", err.Error())
+		writeProblem(w, r, ptInvalidPlanningSnapshot, "Invalid planning snapshot", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
 		Proposals []transfer.Proposal `json:"proposals"`
 	}{Proposals: proposals})
-}
-
-func writeProblem(w http.ResponseWriter, status int, kind, title, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(problem{Type: "https://warehouse.example/problems/" + kind, Title: title, Status: status, Detail: detail})
 }
