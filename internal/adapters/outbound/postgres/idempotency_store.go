@@ -101,8 +101,15 @@ func (s *IdempotencyStore) Do(ctx context.Context, key, fingerprint string, fn f
 			return contract.StoredResponse{}, false, fmt.Errorf("handler answered %d over an aborted transaction: %w", resp.Status, err)
 		}
 	}
+	// A body-less answer (a bare 201 with only a Location header, a 204)
+	// carries a nil Body, and pgx would send SQL NULL for it — the column
+	// is NOT NULL. An empty byte string is what the row already holds.
+	body := resp.Body
+	if body == nil {
+		body = []byte{}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE idempotency_keys SET status = $2, content_type = $3, location = $4, body = $5
-		WHERE idempotency_key = $1`, key, resp.Status, resp.ContentType, resp.Location, resp.Body); err != nil {
+		WHERE idempotency_key = $1`, key, resp.Status, resp.ContentType, resp.Location, body); err != nil {
 		return contract.StoredResponse{}, false, fmt.Errorf("store idempotent answer: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
