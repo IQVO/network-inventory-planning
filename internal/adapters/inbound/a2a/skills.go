@@ -239,7 +239,7 @@ func problemFromUseCase(err error) *problem {
 	case errors.Is(err, transfer.ErrTransferNotFound):
 		return &problem{Type: problemTypeBase + "transfer-not-found", Title: "Transfer not found", Detail: err.Error(), Status: 404}
 	default:
-		slog.Error("a2a skill failed", "error", err)
+		slog.Error("a2a skill failed", "error", logReplacer.Replace(err.Error()))
 		return &problem{Type: problemTypeBase + "read-side-unavailable", Title: "Transfer read side is unavailable", Detail: "the transfer store could not be read", Status: 503}
 	}
 }
