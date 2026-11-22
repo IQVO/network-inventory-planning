@@ -160,3 +160,85 @@ Judgement calls (most consequential first):
 - Companion decisions: ADR-0021 (the fleet REST guideline adoption whose
   stored-4xx sentence this ADR refines), ADR-0003 (the saga whose approval
   and cancellation routes are the keyed writes).
+
+## Amendment (2026-11-22): a 24-hour TTL and an hourly purge — a stored answer stops living forever
+
+This resolves the open point above ("no TTL and no purge ever deletes an
+`idempotency_keys` row") with the fleet pattern already merged in
+order-sourcing (#84), last-mile-delivery (#86) and exception-management
+(#76). **This is a behaviour change: until today a stored answer — success
+or FINAL refusal — replayed FOREVER; from this change a key is remembered
+for 24 hours.** Nothing about the replay classes changes; only the window
+does.
+
+**Decision.**
+
+- **One TTL constant**, `contract.IdempotencyTTL = 24h` (the fleet
+  default), shared by every reader and writer of the window — the claim's
+  refresh predicate, the replay's age guard and the purge's delete
+  predicate — so the read check, the claim and the sweep can never disagree
+  about which rows are live.
+- **The claim frees an expired key.** `INSERT ... ON CONFLICT
+  (idempotency_key) DO UPDATE ... WHERE created_at <= now() - TTL`
+  (fingerprint replaced, answer columns reset, `created_at = now()`): a row
+  past its window is re-claimed and the request EXECUTES. First-writer-wins
+  is unchanged WITHIN the window (a live row is DO NOTHING; the concurrent
+  loser still waits on the unique index and replays the winner). Past the
+  window the same key and body executes a second time — its effects run
+  again — and the same key with a different body becomes a NEW request
+  instead of `409 idempotency-key-reused`.
+- **Age guard on the replay read.** The claim's loser selects
+  `created_at > now() - TTL`, the exact complement of the purge's
+  predicate: a row older than the TTL is invisible, so it can never answer
+  a replay between expiry and the sweep.
+- **Bounded background purge.** `PurgeExpired(ctx, limit)` joins
+  `ports.IdempotencyStore` (the Postgres store and the memory double). The
+  OLTP binary runs it at start and then hourly through the repo's own
+  `PeriodicRunner` (ADR 0007), in batches of 500: `ORDER BY created_at
+  LIMIT n FOR UPDATE SKIP LOCKED`, the age test repeated on the DELETE
+  itself, no advisory lock, and it never waits on a row a request holds —
+  a row whose lock it cannot take is skipped. A purge that deletes an
+  expired row just before a claim only makes the claim a plain INSERT; an
+  expired row is invisible to the replay anyway, so deleting it changes
+  nothing a request can observe. Like the health check, the worker only
+  ever logs: a failed pass is retried by the next tick. Migration 0008's
+  "sweep by age" comment — the index and the promised sweep — is now
+  implemented exactly as promised.
+
+**The replay-class premise, re-examined.** The class table's rationale for
+`idempotency-key-reused` (FINAL) was "a reuse for as long as the first
+answer is stored"; judgement call 1 leaned on "with no TTL a wrongly-FINAL
+404 would pin forever" to keep `transfer-not-found` RETRYABLE. The TTL
+bounds both premises; they are re-stated, not overturned. WITHIN the
+24-hour window the stored answer is still immutable and the conflict still
+cannot clear by retrying — FINAL stands, and the 409 itself is never
+stored (the claim's replay path answers it before any storage). PAST the
+window the row is gone and the key is free: a retry is not a "cleared
+conflict" but a first execution. No class flips: a FINAL answer is stored
+and replayed for 24 hours (previously forever), a RETRYABLE answer is
+still never stored, a 5xx still releases the key. The wrongly-FINAL cost
+of a bad classification is now bounded at 24 hours, but the fleet default
+(unsure ⇒ RETRYABLE) keeps holding for the cases whose state can change
+within the window, so the classes stay as decided.
+
+**Consequences.**
+
+- A caller must treat the key as unique per logical request for 24 hours
+  (a UUID per submit: no practical collision). After 24 h the same key and
+  body executes again — its effects run a second time — and the same key
+  with a different request is no longer a 409.
+- `idempotency_keys` stops growing: the hourly purge deletes every row the
+  claim and the replay already ignore, oldest first, bounded per
+  statement. The runbook's "nothing in the repository prunes it, watch its
+  size" is corrected.
+- `apis/openapi.yaml` descriptions now state the 24-hour window (the
+  Idempotency-Key parameter, the 409, the keyed POST descriptions);
+  `docs/docs/api-reference/rest` regenerated.
+- Tests: the Postgres proofs in
+  `internal/adapters/inbound/http/idempotency_retention_integration_test.go`
+  (pushed red first: an expired answer executes again and a different body
+  is not a 409, the purge deletes expired keeps live in bounded batches, a
+  held row is skipped not waited for, requests racing the purge stay
+  correct), the memory double's TTL and purge unit tests in
+  `internal/adapters/outbound/memory/idempotency_store_test.go`, and the
+  worker pass tests in `cmd/network-inventory-planning/retention_test.go`.

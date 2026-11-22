@@ -23,5 +23,16 @@ type IdempotencyStore interface {
 	// serialised; the loser replays the winner's answer — or, when the
 	// winner's transaction rolled back (a released key), claims the key and
 	// runs fn itself.
+	//
+	// A stored answer lives for contract.IdempotencyTTL (ADR 0024, addendum
+	// 2026-11-22): past the window the key is free again and Do executes fn.
 	Do(ctx context.Context, key, fingerprint string, fn func(ctx context.Context) (contract.StoredResponse, error)) (resp contract.StoredResponse, replayed bool, err error)
+
+	// PurgeExpired deletes at most limit rows older than
+	// contract.IdempotencyTTL, oldest first, and returns how many it deleted
+	// (a result below limit means nothing expired is left). It is the
+	// background retention worker's call, never a request's: it must never
+	// delete a row a request holds nor block on one — a row whose lock it
+	// cannot take is skipped.
+	PurgeExpired(ctx context.Context, limit int) (deleted int, err error)
 }

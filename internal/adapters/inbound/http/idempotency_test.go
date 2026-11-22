@@ -50,6 +50,13 @@ func (s *fakeIdempotency) Do(ctx context.Context, key, fingerprint string, fn fu
 	return resp, false, nil
 }
 
+// PurgeExpired implements ports.IdempotencyStore. The fake keeps no
+// timestamps, so nothing is ever expired here; the TTL semantics are the
+// memory store's and the Postgres proofs' job.
+func (s *fakeIdempotency) PurgeExpired(context.Context, int) (int, error) {
+	return 0, nil
+}
+
 const validRunBody = `{"asOf":"2026-10-05T10:00:00Z","positions":[],"policies":[],"lanes":[]}`
 
 func keyedHandler() (Handler, *int32) {
@@ -173,6 +180,10 @@ func (c countingStore) Do(ctx context.Context, key, fp string, fn func(ctx conte
 		atomic.AddInt32(c.executions, 1)
 		return fn(ctx)
 	})
+}
+
+func (c countingStore) PurgeExpired(ctx context.Context, limit int) (int, error) {
+	return c.inner.PurgeExpired(ctx, limit)
 }
 
 func TestKeyedRoutesFailClosedWithoutAStore(t *testing.T) {

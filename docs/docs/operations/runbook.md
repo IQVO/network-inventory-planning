@@ -59,9 +59,10 @@ The OLTP migrations are `0001` to `0009`: `0001` planning read models (`processe
 `stow_allocations` plus named CHECKs, `0004` `rebalance_runs`, `0005` rebalance catalogue
 (`rebalance_policies`, `transfer_lanes`), `0006` `pack_levels`, `0007` case-rounding columns on the
 transfer, `0008` `idempotency_keys` and `0009` the `RELEASING` state. The analytical database has one
-migration, `0001_saga_facts`. `idempotency_keys` gets one row per `POST` and nothing in the repository
-prunes it (retention is at least 24 hours, the sweep is future work per ADR 0021), so watch its size;
-the `created_at` index exists for that sweep. The columns are in
+migration, `0001_saga_facts`. `idempotency_keys` gets one row per `POST`; a stored answer is
+kept for 24 hours (`contract.IdempotencyTTL`, ADR 0024's addendum) and the always-on hourly
+purge (batches of 500, `FOR UPDATE SKIP LOCKED`) deletes the expired rows through the
+`created_at` index, so the table no longer grows without bound. The columns are in
 [Entity-relationship](../ddd/entity-relationship.md).
 
 `MIGRATIONS_DATABASE_URL` (secret key `database.migrationsExistingSecretKey`,
