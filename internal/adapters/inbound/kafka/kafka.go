@@ -169,7 +169,7 @@ func (l *consumeLoop) retryUntilOK(ctx context.Context, p RetryPolicy, sleep sle
 			return ctx.Err()
 		}
 		l.logger.ErrorContext(ctx, l.name+" "+what+" failed; retrying the same message",
-			"error", err, "partition", msg.Partition, "offset", msg.Offset,
+			"error", sanitizeErr(err), "partition", msg.Partition, "offset", msg.Offset,
 			"attempt", attempt, "retry_in", delay)
 		if err := sleep(ctx, delay); err != nil {
 			return err

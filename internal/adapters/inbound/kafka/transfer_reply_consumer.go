@@ -153,7 +153,7 @@ func (c *TransferReplyConsumer) HandleMessage(ctx context.Context, value []byte)
 func (c *TransferReplyConsumer) HandleKafkaMessage(ctx context.Context, msg kafkago.Message) error {
 	e, err := cloudevents.Decode(msg.Value)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping non-CloudEvents inventory reply", "error", err)
+		c.Logger.WarnContext(ctx, "skipping non-CloudEvents inventory reply", "error", sanitizeErr(err))
 		return nil
 	}
 
@@ -250,19 +250,19 @@ func (c *TransferReplyConsumer) apply(ctx context.Context, msg kafkago.Message, 
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", sanitizeLog(e.ID()))
 			return nil
 		}
 		err = op(ctx)
 		switch {
 		case err == nil:
-			c.Logger.InfoContext(ctx, "transfer reply applied", "reply", what, "event_id", e.ID(), "transfer_id", transferID)
+			c.Logger.InfoContext(ctx, "transfer reply applied", "reply", sanitizeLog(what), "event_id", sanitizeLog(e.ID()), "transfer_id", sanitizeLog(transferID))
 			return nil
 		case usecases.IsRefusedReply(err):
 			//dlq:deterministic only usecases.IsRefusedReply (transfer.ErrReplyRefused/ErrFactRefused, raised solely by the aggregate's payload validation in domain/transfer) reaches this case; the default case returns every other error, cancellation included, as transient
 			return c.dlq().send(ctx, msg, fmt.Errorf("%s %s refused: %w", what, e.ID(), err))
 		case usecases.IsDeterministic(err) || usecases.IsDeterministicFact(err):
-			c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown transfer or replayed/out-of-order reply)", "error", err, "event_id", e.ID(), "transfer_id", transferID)
+			c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown transfer or replayed/out-of-order reply)", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()), "transfer_id", sanitizeLog(transferID))
 			return nil
 		default:
 			return fmt.Errorf("apply %s: %w", what, err)

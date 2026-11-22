@@ -27,7 +27,7 @@ type deadLetterSink struct {
 // unit of work): a poison message is never silently lost.
 func (d deadLetterSink) send(ctx context.Context, msg kafkago.Message, cause error) error {
 	defaultLogger(d.logger).ErrorContext(ctx, d.consumer+": dead-lettering a message that can never be applied",
-		"error", cause, "dlq_topic", d.topic, "source_topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset)
+		"error", sanitizeErr(cause), "dlq_topic", d.topic, "source_topic", sanitizeLog(msg.Topic), "partition", msg.Partition, "offset", msg.Offset)
 	if d.writer == nil {
 		return nil
 	}

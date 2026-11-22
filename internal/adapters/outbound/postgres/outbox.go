@@ -241,12 +241,12 @@ func (r *OutboxRelay) recordFailure(ctx context.Context, tx pgx.Tx, row OutboxMe
 func (r *OutboxRelay) logFailure(row OutboxMessage, attempts int, sendErr error) {
 	if r.maxAttempts > 0 && attempts >= r.maxAttempts {
 		r.logger.Error("outbox relay: row reached the attempt cap and is excluded from future claims; re-arm it with attempts = 0 after fixing the cause",
-			"outbox_id", row.ID, "topic", row.Encoded.Topic, "event_type", row.Encoded.EventType,
-			"key", string(row.Encoded.Key), "attempts", attempts, "max_attempts", r.maxAttempts, "error", sendErr)
+			"outbox_id", row.ID, "topic", row.Encoded.Topic, "event_type", sanitizeLog(row.Encoded.EventType),
+			"key", sanitizeLog(string(row.Encoded.Key)), "attempts", attempts, "max_attempts", r.maxAttempts, "error", sanitizeErr(sendErr))
 		return
 	}
 	r.logger.Warn("outbox relay: send failed, stopping this pass at the failed row",
-		"outbox_id", row.ID, "topic", row.Encoded.Topic, "attempts", attempts, "error", sendErr)
+		"outbox_id", row.ID, "topic", row.Encoded.Topic, "attempts", attempts, "error", sanitizeErr(sendErr))
 }
 
 // claimBatch selects and locks up to batchSize unpublished rows, oldest

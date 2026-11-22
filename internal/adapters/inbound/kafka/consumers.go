@@ -89,7 +89,7 @@ func (c *SiteCapabilityConsumer) Run(ctx context.Context) error {
 func (c *SiteCapabilityConsumer) HandleMessage(ctx context.Context, value []byte) error {
 	e, err := cloudevents.Decode(value)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping non-CloudEvents facility message", "error", err)
+		c.Logger.WarnContext(ctx, "skipping non-CloudEvents facility message", "error", sanitizeErr(err))
 		return nil
 	}
 	if e.Type() != typeSiteCapabilityChanged {
@@ -98,14 +98,14 @@ func (c *SiteCapabilityConsumer) HandleMessage(ctx context.Context, value []byte
 
 	var data siteCapabilityChangedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed SiteCapabilityChanged payload", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping malformed SiteCapabilityChanged payload", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 
 	occurredAt := e.Time().UTC()
 	capability, err := planning.NewSiteCapability(data.SiteCode, data.TransferOriginEnabled, data.TransferDestinationEnabled, data.CapabilityRevision, occurredAt)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping SiteCapabilityChanged that failed domain validation", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping SiteCapabilityChanged that failed domain validation", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 
@@ -117,7 +117,7 @@ func (c *SiteCapabilityConsumer) HandleMessage(ctx context.Context, value []byte
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed SiteCapabilityChanged event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed SiteCapabilityChanged event", "event_id", sanitizeLog(e.ID()))
 			return nil
 		}
 		if _, err := c.Capabilities.Upsert(ctx, capability); err != nil {
@@ -204,7 +204,7 @@ func (c *SiteSkuDemandConsumer) Run(ctx context.Context) error {
 func (c *SiteSkuDemandConsumer) HandleMessage(ctx context.Context, value []byte) error {
 	e, err := cloudevents.Decode(value)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping non-CloudEvents order message", "error", err)
+		c.Logger.WarnContext(ctx, "skipping non-CloudEvents order message", "error", sanitizeErr(err))
 		return nil
 	}
 	if e.Type() != typeSiteSkuDemandChanged {
@@ -213,19 +213,19 @@ func (c *SiteSkuDemandConsumer) HandleMessage(ctx context.Context, value []byte)
 
 	var data siteSkuDemandChangedData
 	if err := e.DataAs(&data); err != nil {
-		c.Logger.WarnContext(ctx, "skipping malformed SiteSkuDemandChanged payload", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping malformed SiteSkuDemandChanged payload", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 	dueAt, err := time.Parse(time.RFC3339, data.DueAt)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping SiteSkuDemandChanged with unparsable due_at", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping SiteSkuDemandChanged with unparsable due_at", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 
 	occurredAt := e.Time().UTC()
 	demand, err := planning.NewSiteSkuDemand(data.SourceOrderID, data.LineNo, data.SiteID, data.SKU, data.DemandedUnits, dueAt, planning.DemandState(data.State), data.AssignmentVersion)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping SiteSkuDemandChanged that failed domain validation", "error", err, "event_id", e.ID())
+		c.Logger.WarnContext(ctx, "skipping SiteSkuDemandChanged that failed domain validation", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()))
 		return nil
 	}
 	demand.AsOf = occurredAt
@@ -236,7 +236,7 @@ func (c *SiteSkuDemandConsumer) HandleMessage(ctx context.Context, value []byte)
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed SiteSkuDemandChanged event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed SiteSkuDemandChanged event", "event_id", sanitizeLog(e.ID()))
 			return nil
 		}
 		applied, err := c.Demands.Upsert(ctx, demand)
@@ -247,7 +247,7 @@ func (c *SiteSkuDemandConsumer) HandleMessage(ctx context.Context, value []byte)
 			// ADR 0014: an event older than the stored row is a stale
 			// redelivery; the claim commits, the newer demand stays.
 			c.Logger.InfoContext(ctx, "skipping SiteSkuDemandChanged older than the stored demand",
-				"event_id", e.ID(), "source_order_id", demand.SourceOrderID, "line_no", demand.LineNo, "occurred_at", occurredAt)
+				"event_id", sanitizeLog(e.ID()), "source_order_id", sanitizeLog(demand.SourceOrderID), "line_no", demand.LineNo, "occurred_at", occurredAt)
 		}
 		return nil
 	})

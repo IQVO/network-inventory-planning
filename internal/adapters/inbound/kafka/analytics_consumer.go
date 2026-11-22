@@ -140,7 +140,7 @@ func (c *AnalyticsConsumer) handle(ctx context.Context, msg kafkago.Message) err
 	kind, known := analyticsKinds[evt.Type()]
 	if !known {
 		defaultLogger(c.Logger).InfoContext(ctx, "analytics: skipping event of an unknown type (additive evolution of the stream)",
-			"type", evt.Type(), "event_id", evt.ID(), "partition", msg.Partition, "offset", msg.Offset)
+			"type", sanitizeLog(evt.Type()), "event_id", sanitizeLog(evt.ID()), "partition", msg.Partition, "offset", msg.Offset)
 		return nil
 	}
 	event, err := toEvent(kind, evt)
@@ -244,7 +244,7 @@ func (c *AnalyticsConsumer) skipped(ctx context.Context, msg kafkago.Message, ca
 	}
 	if emit, suppressed := c.skips.allow(); emit {
 		defaultLogger(c.Logger).WarnContext(ctx, "analytics: skipping message that is not a CloudEvents 1.0 event (further skips are counted, not logged, until the next interval)",
-			"error", cause, "topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset, "suppressed_since_last_warning", suppressed)
+			"error", sanitizeErr(cause), "topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset, "suppressed_since_last_warning", suppressed)
 	}
 }
 
@@ -254,7 +254,7 @@ func (c *AnalyticsConsumer) skipped(ctx context.Context, msg kafkago.Message, ca
 // is never lost.
 func (c *AnalyticsConsumer) deadLetter(ctx context.Context, msg kafkago.Message, cause error) error {
 	defaultLogger(c.Logger).ErrorContext(ctx, "analytics: dead-lettering a message that can never be projected",
-		"error", cause, "dlq_topic", c.DLQTopic, "partition", msg.Partition, "offset", msg.Offset)
+		"error", sanitizeErr(cause), "dlq_topic", c.DLQTopic, "partition", msg.Partition, "offset", msg.Offset)
 	headers := append([]kafkago.Header{}, msg.Headers...)
 	headers = append(headers,
 		kafkago.Header{Key: "x-dlq-source-topic", Value: []byte(msg.Topic)},

@@ -125,7 +125,7 @@ func (c *PackLevelConsumer) HandleMessage(ctx context.Context, value []byte) err
 func (c *PackLevelConsumer) HandleKafkaMessage(ctx context.Context, msg kafkago.Message) error {
 	e, err := cloudevents.Decode(msg.Value)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping non-CloudEvents product-master message", "error", err)
+		c.Logger.WarnContext(ctx, "skipping non-CloudEvents product-master message", "error", sanitizeErr(err))
 		return nil
 	}
 	switch e.Type() {
@@ -188,7 +188,7 @@ func (c *PackLevelConsumer) apply(ctx context.Context, msg kafkago.Message, e ce
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", sanitizeLog(e.ID()))
 			return nil
 		}
 		outcome, err := op(ctx)
@@ -199,7 +199,7 @@ func (c *PackLevelConsumer) apply(ctx context.Context, msg kafkago.Message, e ce
 			}
 			return fmt.Errorf("apply %s: %w", what, err)
 		}
-		c.Logger.InfoContext(ctx, "pack level event applied", "event", what, "event_id", e.ID(), "outcome", string(outcome))
+		c.Logger.InfoContext(ctx, "pack level event applied", "event", sanitizeLog(what), "event_id", sanitizeLog(e.ID()), "outcome", sanitizeLog(string(outcome)))
 		return nil
 	})
 }

@@ -52,7 +52,7 @@ func (r PeriodicRunner) Run(ctx context.Context) error {
 	}
 	for {
 		if err := r.Tick(ctx); err != nil && ctx.Err() == nil {
-			logger.Error(r.Name+" tick failed; retrying next interval", "error", err)
+			logger.Error(r.Name+" tick failed; retrying next interval", "error", sanitizeErr(err))
 		}
 		if err := wait(ctx, r.Interval); err != nil {
 			return nil // cancelled
