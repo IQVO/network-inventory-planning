@@ -157,7 +157,7 @@ func (c *TransferFactConsumer) HandleMessage(ctx context.Context, value []byte) 
 func (c *TransferFactConsumer) HandleKafkaMessage(ctx context.Context, msg kafkago.Message) error {
 	e, err := cloudevents.Decode(msg.Value)
 	if err != nil {
-		c.Logger.WarnContext(ctx, "skipping non-CloudEvents fulfillment fact", "error", err)
+		c.Logger.WarnContext(ctx, "skipping non-CloudEvents fulfillment fact", "error", sanitizeErr(err))
 		return nil
 	}
 
@@ -240,7 +240,7 @@ func (c *TransferFactConsumer) apply(ctx context.Context, msg kafkago.Message, e
 			return fmt.Errorf("claim processed event: %w", err)
 		}
 		if !claimed {
-			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", e.ID())
+			c.Logger.InfoContext(ctx, "skipping already-processed "+what+" event", "event_id", sanitizeLog(e.ID()))
 			return nil
 		}
 		if err := op(ctx); err != nil {
@@ -249,12 +249,12 @@ func (c *TransferFactConsumer) apply(ctx context.Context, msg kafkago.Message, e
 				return c.dlq().send(ctx, msg, fmt.Errorf("%s %s refused: %w", what, e.ID(), err))
 			}
 			if usecases.IsDeterministicFact(err) {
-				c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown or out-of-order transfer_ref)", "error", err, "event_id", e.ID(), "transfer_ref", string(id))
+				c.Logger.WarnContext(ctx, "skipping deterministic "+what+" failure (unknown or out-of-order transfer_ref)", "error", sanitizeErr(err), "event_id", sanitizeLog(e.ID()), "transfer_ref", sanitizeLog(string(id)))
 				return nil
 			}
 			return fmt.Errorf("apply %s: %w", what, err)
 		}
-		c.Logger.InfoContext(ctx, "transfer fact applied", "fact", what, "event_id", e.ID(), "transfer_ref", string(id))
+		c.Logger.InfoContext(ctx, "transfer fact applied", "fact", sanitizeLog(what), "event_id", sanitizeLog(e.ID()), "transfer_ref", sanitizeLog(string(id)))
 		return nil
 	})
 }
