@@ -10,10 +10,10 @@ spec:
   type: {{ .Values.a2a.service.type }}
   ports:
     - port: {{ .Values.a2a.service.port }}
-      targetPort: http
+      targetPort: {{ ternary "a2a" "http" (eq (include "network-inventory-planning.agentsColocated" .) "true") }}
       protocol: TCP
       name: http
   selector:
     {{- include "network-inventory-planning.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: a2a
+    app.kubernetes.io/component: {{ ternary "agents" "a2a" (eq (include "network-inventory-planning.agentsColocated" .) "true") }}
 {{- end }}
