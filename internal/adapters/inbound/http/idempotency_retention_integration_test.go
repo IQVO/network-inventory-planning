@@ -60,14 +60,16 @@ func TestAnExpiredAnswerExecutesAgainOverPostgres(t *testing.T) {
 		t.Fatalf("repeat inside the window = %d replayed=%v calls=%d, want the stored 200 replayed", again.Code, replayed(again), calls.Load())
 	}
 
-	// A microsecond short of the window the answer still replays.
-	ageKeyRow(t, pool, "k-ttl", contract.IdempotencyTTL-time.Microsecond)
+	// A comfortable margin short of the window the answer still replays (a
+	// real margin, not a microsecond: the row keeps ageing while the
+	// request travels).
+	ageKeyRow(t, pool, "k-ttl", contract.IdempotencyTTL-10*time.Minute)
 	if near := post(t, mw, "k-ttl", `{"n":1}`); near.Code != http.StatusOK || !replayed(near) || calls.Load() != 1 {
-		t.Fatalf("a microsecond short of the TTL = %d replayed=%v calls=%d, want the stored 200 replayed", near.Code, replayed(near), calls.Load())
+		t.Fatalf("ten minutes short of the TTL = %d replayed=%v calls=%d, want the stored 200 replayed", near.Code, replayed(near), calls.Load())
 	}
 
 	// Past the window the key is free: the same request EXECUTES again...
-	ageKeyRow(t, pool, "k-ttl", contract.IdempotencyTTL+time.Microsecond)
+	ageKeyRow(t, pool, "k-ttl", contract.IdempotencyTTL+10*time.Minute)
 	if fresh := post(t, mw, "k-ttl", `{"n":1}`); fresh.Code != http.StatusOK || replayed(fresh) || calls.Load() != 2 {
 		t.Fatalf("past the TTL = %d replayed=%v calls=%d, want a FRESH execution", fresh.Code, replayed(fresh), calls.Load())
 	}
@@ -77,7 +79,7 @@ func TestAnExpiredAnswerExecutesAgainOverPostgres(t *testing.T) {
 	}
 	// ...and once IT expires too, a different body under the key is a NEW
 	// request, not a 409 idempotency-key-reused.
-	ageKeyRow(t, pool, "k-ttl", contract.IdempotencyTTL+time.Minute)
+	ageKeyRow(t, pool, "k-ttl", contract.IdempotencyTTL+time.Hour)
 	other := post(t, mw, "k-ttl", `{"n":2}`)
 	if other.Code != http.StatusOK || replayed(other) || calls.Load() != 3 {
 		t.Fatalf("another body after expiry = %d replayed=%v calls=%d, want a fresh execution, not a 409", other.Code, replayed(other), calls.Load())
@@ -213,16 +215,22 @@ func TestThePurgeRacingRequestsOnAnExpiredKeyKeepsThemCorrect(t *testing.T) {
 		seedKeyRow(t, pool, key, contract.IdempotencyTTL+time.Hour)
 		var wg sync.WaitGroup
 		codes := make([]int, 3)
+		bodies := make([]string, 3)
 		for j := range codes {
 			wg.Add(1)
-			go func() { defer wg.Done(); codes[j] = post(t, mw, key, `{"n":1}`).Code }()
+			go func() {
+				defer wg.Done()
+				rec := post(t, mw, key, `{"n":1}`)
+				codes[j] = rec.Code
+				bodies[j] = rec.Body.String()
+			}()
 		}
 		wg.Add(1)
 		go func() { defer wg.Done(); _, _ = store.PurgeExpired(ctx, 100) }()
 		wg.Wait()
-		for _, c := range codes {
+		for j, c := range codes {
 			if c != http.StatusOK {
-				t.Fatalf("round %d: a request racing the purge answered %d, want 200", i, c)
+				t.Fatalf("round %d: a request racing the purge answered %d %s, want 200", i, c, bodies[j])
 			}
 		}
 	}
