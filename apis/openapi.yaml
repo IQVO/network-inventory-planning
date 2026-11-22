@@ -58,7 +58,8 @@ paths:
         idempotency store is not configured (idempotency-unavailable) or the
         pack levels cannot be read (pack-levels-unavailable). A 2xx and a
         FINAL refusal (invalid-request, invalid-planning-snapshot) are
-        stored under the key and replayed (Idempotency-Replayed: true); a
+        stored under the key and replayed (Idempotency-Replayed: true) for
+        24 hours, the window a stored answer is kept for; a
         5xx is never stored, and a RETRYABLE refusal is not stored either:
         the key is released and a retry under it executes again (replay
         classes, ADR 0024). Diagnostic boundary: production
@@ -132,7 +133,10 @@ paths:
         stored answer (header Idempotency-Replayed: true) when that answer
         is final for the request — a success, or a FINAL refusal such as
         invalid-approval or proposal-expired; the same key with a different
-        request is a 409 idempotency-key-reused. A RETRYABLE refusal
+        request is a 409 idempotency-key-reused. A stored answer is kept
+        for 24 hours: past that window the key is free again (the same
+        request executes once more, a different one is a NEW request). A
+        RETRYABLE refusal
         (facts-incomplete, below-one-case: causes that clear when the
         event-fed planning facts change) is NOT stored — the key is
         released and a retry under it executes again (replay classes, ADR
@@ -204,7 +208,10 @@ paths:
         keyed write: same key and same request replays the stored answer
         (Idempotency-Replayed: true) when that answer is final for the
         request, a different request under the same stored key is 409
-        idempotency-key-reused. Replay classes (ADR 0024): a FINAL refusal
+        idempotency-key-reused. A stored answer is kept for 24 hours: past
+        that window the key is free again (the same request executes once
+        more, a different one is a NEW request). Replay classes (ADR 0024):
+        a FINAL refusal
         (invalid-cancel, cancel-refused) is stored and replayed; a
         RETRYABLE refusal (transfer-not-found — the transfer arrives by
         another request) is not stored, the key is released and a retry
@@ -670,9 +677,12 @@ components:
         one. Same key and same request replays the stored answer with
         Idempotency-Replayed: true when that answer is final for the
         request; the same key with a different request is 409
-        idempotency-key-reused. A refusal whose problem type is RETRYABLE
-        (its cause can change) is not stored: the key is released and the
-        retry executes again (replay classes, ADR 0024).
+        idempotency-key-reused. A stored answer is kept for 24 hours: past
+        that window the key is free again (the same request executes once
+        more and a different request under it is a NEW request, not a 409);
+        an hourly purge deletes the expired rows. A refusal whose problem
+        type is RETRYABLE (its cause can change) is not stored: the key is
+        released and the retry executes again (replay classes, ADR 0024).
       schema:
         type: string
         minLength: 1
@@ -743,7 +753,8 @@ components:
       description: |
         RFC 9457 problem+json conflict. Problem type idempotency-key-reused
         means the Idempotency-Key was already used with a different request
-        (method, path or body); any other type is a business conflict.
+        (method, path or body) within the 24-hour window a stored answer is
+        kept for; any other type is a business conflict.
       content:
         application/problem+json:
           schema:

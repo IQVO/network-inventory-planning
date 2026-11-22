@@ -51,6 +51,30 @@ func TestAnExpiredAnswerReleasesTheKey(t *testing.T) {
 	if resp, replayed, err := store.Do(ctx, "k", "fp-1", run(`{"n":2}`)); err != nil || replayed || string(resp.Body) != `{"n":2}` || calls != 2 {
 		t.Fatalf("past the TTL = %+v replayed=%v err=%v calls=%d, want a fresh execution", resp, replayed, err, calls)
 	}
+}
+
+// The answer that replaced an expired one owns a full window of its own: an
+// exact repeat replays it, a different fingerprint inside ITS window is a
+// reuse again, and once it expires too the other fingerprint is a new
+// request.
+func TestTheRefreshedAnswerOwnsANewWindow(t *testing.T) {
+	clock := &movingClock{t: time.Date(2026, 11, 22, 8, 0, 0, 0, time.UTC)}
+	store := NewIdempotencyStoreClock(clock.Now)
+	ctx := context.Background()
+	calls := 0
+	run := func(body string) func(context.Context) (contract.StoredResponse, error) {
+		return func(context.Context) (contract.StoredResponse, error) {
+			calls++
+			return contract.StoredResponse{Status: 200, ContentType: "application/json", Body: []byte(body)}, nil
+		}
+	}
+	if _, _, err := store.Do(ctx, "k", "fp-1", run(`{"n":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(contract.IdempotencyTTL + time.Microsecond)
+	if _, replayed, err := store.Do(ctx, "k", "fp-1", run(`{"n":2}`)); err != nil || replayed || calls != 2 {
+		t.Fatalf("past the TTL: replayed=%v err=%v calls=%d, want a fresh execution", replayed, err, calls)
+	}
 	// The refreshed answer is live: an exact repeat replays it, and a
 	// different fingerprint inside ITS window is a reuse again.
 	if _, replayed, err := store.Do(ctx, "k", "fp-1", run(`{}`)); err != nil || !replayed {
