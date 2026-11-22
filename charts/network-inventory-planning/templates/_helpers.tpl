@@ -84,6 +84,15 @@ Fully qualified name of the A2A agent deployment/service (<release>-a2a, ADR 002
 {{- include "network-inventory-planning.fullname" . }}-a2a
 {{- end }}
 
+{{/* agents.colocate (warehouse-infra ADR 0012): "true" iff colocate, mcp and a2a are all on; else empty. */}}
+{{- define "network-inventory-planning.agentsColocated" -}}
+{{- if and (.Values.agents | default dict).colocate .Values.mcp.enabled .Values.a2a.enabled }}true{{ end -}}
+{{- end }}
+
+{{- define "network-inventory-planning.agentsFullname" -}}
+{{- printf "%s-agents" (include "network-inventory-planning.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{/*
 Fully qualified name of the console-remote frontend deployment/service
 (the nginx pod that serves nip_mfe, ADR 0010).
